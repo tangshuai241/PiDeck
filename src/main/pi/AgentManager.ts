@@ -68,6 +68,10 @@ import { mergeHistoryWithPreservedMessages, stabilizeProjectedIdsFromIdentities,
 import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityDefaults } from "./agentSessionIdentity";
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
+import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
+import { isAlignmentActive, isAlignmentReadOnlyInputAllowed, PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
+import { latestAlignmentStateFromMessages } from "../../shared/alignment";
+import type { AlignmentState } from "../../shared/types/alignment";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
@@ -156,6 +160,7 @@ export class AgentManager {
 	/** pi 后端支持全部可选能力。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "exportHtml"]);
 	private readonly agents = new Map<string, AgentRuntime>();
+	private readonly alignmentProjection = new AlignmentProjection();
 	/** 桥原生服务是否已注入（幂等标记，见 registerBridgeSession）。 */
 	private bridgeServicesInstalled = false;
 	private readonly messages = new Map<string, ChatMessage[]>();
@@ -726,6 +731,7 @@ export class AgentManager {
 
 	/** 注销某 agent 的桥会话（agent 停止 / 会话删除时调用）。 */
 	unregisterBridgeSession(agentId: string): void {
+		this.clearAlignmentState(agentId);
 		try {
 			getBridgeServer().unregisterAgent(agentId);
 		} catch {
@@ -1334,6 +1340,14 @@ export class AgentManager {
 		// PiRpcClient 在 stdout data 回调里同步 JSON.parse，主进程事件循环被堵住，
 		// 窗口关闭/最小化/设置都点不了。earlyPromise / JSONL 尾部读取才是安全路径。
 		const messagesPromise = earlyMessagesPromise ?? (sessionPath ? this.readRecentMessagesFromSessionFile(sessionPath, AgentManager.MAX_HISTORY_LOAD_TURNS) : process.client.request({ type: "get_messages" }, this.rpcTimeoutMs));
+		const alignmentPromise = this.restoreAlignmentState(agentId, runtime, () =>
+			sessionPath
+				? this.sessionHistoryReader.readAlignmentState(sessionPath)
+				: messagesPromise.then((response) => {
+						const messages = asRecord(response.data)?.messages;
+						return latestAlignmentStateFromMessages(Array.isArray(messages) ? messages : []) ?? null;
+					}),
+		);
 
 		// 有会话文件时禁止 get_entries：pi 把整棵 entry 树打成单行 JSON，
 		// PiRpcClient 同步 JSON.parse 会再冻一次窗口。entryId 从 JSONL 索引取，
@@ -1355,7 +1369,7 @@ export class AgentManager {
 				});
 		}
 
-		const [response, entriesResult] = await Promise.all([messagesPromise, entriesPromise ?? Promise.resolve(undefined)]);
+		const [response, entriesResult] = await Promise.all([messagesPromise, entriesPromise ?? Promise.resolve(undefined), alignmentPromise]);
 		assertCurrentRuntime();
 		const t1 = Date.now();
 
@@ -1879,6 +1893,21 @@ export class AgentManager {
 				error: "消息不能为空",
 				i18nKey: "diagnostic.messageRequired",
 			};
+		}
+
+		// Registered commands run before pi input hooks; guard before prompt and user-bash dispatch.
+		const alignmentRequested = input.agentMessage?.startsWith(`${PI_DECK_ALIGNMENT_MODE_MARKER}\n`) === true;
+		const activeAlignment = this.alignmentProjection.read(input.agentId, this.alignmentIdentity(runtime));
+		if ((alignmentRequested || isAlignmentActive(activeAlignment ?? undefined)) && !isAlignmentReadOnlyInputAllowed(input.message)) {
+			return { accepted: false, error: this.translate("mainAgent.alignmentCommandBlocked") };
+		}
+		if (alignmentRequested || /^\/align(?:\s|$)/.test(input.message.trimStart())) {
+			const expectedIdentity = this.alignmentIdentity(runtime);
+			const loaded = await this.promptMatchesRegisteredExtensionCommand(runtime, "/align");
+			if (this.agents.get(input.agentId) !== runtime || runtime.process !== expectedIdentity.process || runtime.tab.deckSessionId !== expectedIdentity.sessionId || runtime.tab.runtimeGeneration !== expectedIdentity.runtimeGeneration || runtime.tab.sessionPath !== expectedIdentity.sessionPath) {
+				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged") };
+			}
+			if (!loaded) return { accepted: false, error: this.translate("mainAgent.alignmentUnavailable") };
 		}
 
 		// 解析 !/!! 前缀：与 pi 终端行为一致
@@ -2767,6 +2796,35 @@ export class AgentManager {
 		return this.cacheHitStatsReader(this.toSessionHostPath(sessionPath));
 	}
 
+	/** Snapshot the binding before asynchronous disk/RPC work. */
+	private alignmentIdentity(runtime: AgentRuntime): AlignmentRuntimeIdentity {
+		return { process: runtime.process, sessionId: runtime.tab.deckSessionId, runtimeGeneration: runtime.tab.runtimeGeneration, sessionPath: runtime.tab.sessionPath };
+	}
+
+	/** Clear on every retirement path and invalidate pending history hydration. */
+	private clearAlignmentState(agentId: string): void {
+		const identity = this.alignmentProjection.clear(agentId);
+		if (identity) this.emit(ipcChannels.agentsRuntimeState, { agentId, sessionId: identity.sessionId, runtimeGeneration: identity.runtimeGeneration, state: { alignment: null } });
+	}
+
+	/** Recover native projection through existing history/activation paths, with no new pi channel. */
+	private async restoreAlignmentState(agentId: string, runtime: AgentRuntime, load: () => Promise<AlignmentState | null>): Promise<void> {
+		const identity = this.alignmentIdentity(runtime);
+		const previous = this.alignmentProjection.read(agentId, identity);
+		const restored = await this.alignmentProjection.hydrate(
+			agentId,
+			identity,
+			() => loadEnabledAlignmentHistory(load, () => this.promptMatchesRegisteredExtensionCommand(runtime, "/align")),
+			() => this.agents.get(agentId) === runtime && runtime.process === identity.process && runtime.tab.deckSessionId === identity.sessionId && runtime.tab.runtimeGeneration === identity.runtimeGeneration && runtime.tab.sessionPath === identity.sessionPath,
+		);
+		if (restored) {
+			const alignment = this.alignmentProjection.read(agentId, identity);
+			// Initial absence is already carried by the full snapshot; do not add a partial push to ordinary polling.
+			// A real previous state must still be explicitly cleared when history is invalid or unavailable.
+			if (alignment || previous) this.emit(ipcChannels.agentsRuntimeState, { agentId, ...this.streamRuntimeTriple(agentId), state: { alignment } });
+		}
+	}
+
 	/** 读取同一运行时的 RPC/文件统计快照；等待期间退役或换绑时拒绝旧结果。 */
 	async getRuntimeState(agentId: string): Promise<AgentRuntimeState> {
 		const runtime = this.requireRuntime(agentId);
@@ -2785,6 +2843,7 @@ export class AgentManager {
 						sampleCount: 0,
 						conversationTokens: undefined as number | undefined,
 					}),
+			sessionPath && !this.alignmentProjection.has(agentId, this.alignmentIdentity(runtime)) ? this.restoreAlignmentState(agentId, runtime, () => this.sessionHistoryReader.readAlignmentState(sessionPath)) : Promise.resolve(),
 		]);
 		// 不能把旧进程的模型/用量与新绑定的本地状态拼成一份有效快照。
 		if (this.agents.get(agentId) !== runtime || runtime.process !== process || runtime.tab.deckSessionId !== deckSessionId || runtime.tab.runtimeGeneration !== runtimeGeneration || runtime.tab.sessionPath !== sessionPath) throw new Error("Runtime state cancelled: runtime changed");
@@ -2811,6 +2870,7 @@ export class AgentManager {
 		const cacheHitAveragePercent = clampPercent(fileHitStats.average);
 		const perf = this.messagePerf.getLast(agentId);
 		return {
+			alignment: this.alignmentProjection.read(agentId, this.alignmentIdentity(runtime)),
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
 			modelId: normalizedRuntimeName(model?.id),
@@ -2887,6 +2947,8 @@ export class AgentManager {
 			state.isExecutingTool = !!this.toolExecutingByAgent.get(agentId);
 			state.executingToolName = this.toolExecutingByAgent.get(agentId) ?? undefined;
 			state.toolStateSequence = latestToolSequence;
+			// A live snapshot/clear may arrive between getRuntimeState and this emission.
+			state.alignment = this.alignmentProjection.read(agentId, this.alignmentIdentity(runtime));
 			this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
 		} catch {
 			// 运行态刷新失败不影响主流程；下一次轮询或事件会继续同步。
@@ -3484,6 +3546,7 @@ export class AgentManager {
 	 * （stop 后由退出处理器消费删除）、pendingTrustRequests（启动流程 await 中，删键会挂死 create）。
 	 */
 	private clearAgentState(agentId: string) {
+		this.clearAlignmentState(agentId);
 		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
 		this.liveStream.clearAll(agentId);
 		this.streamingAgents.delete(agentId);
@@ -4014,7 +4077,7 @@ export class AgentManager {
 	) {
 		piProcess.on("event", (event) => {
 			try {
-				this.handlePiEvent(agentId, event);
+				this.handlePiEvent(agentId, event, piProcess);
 			} catch (error) {
 				// 单条 pi 事件处理失败不能拖垮主进程；记录后继续接收后续事件。
 				void this.appLogger?.error("agent", "handlePiEvent failed", {
@@ -4456,7 +4519,7 @@ export class AgentManager {
 		return `⚠️ Pi RPC 启动失败\n\n${rawMessage}\n\n${lines.join("\n")}`;
 	}
 
-	private handlePiEvent(agentId: string, event: unknown) {
+	private handlePiEvent(agentId: string, event: unknown, sourceProcess?: PiProcess) {
 		// 通知本地监听器（FeishuBridge、WebEventStream SSE 等主进程内部订阅）
 		for (const listener of this.localEventListeners) {
 			try {
@@ -4473,6 +4536,18 @@ export class AgentManager {
 		if (!isRecord(event)) return;
 		const typed = event;
 		const runtime = this.agents.get(agentId);
+		// Hidden custom messages do not pass through the timeline projector. Keep their
+		// native state separately and reject events from a replaced process/binding.
+		if (
+			typed.type === "message_end" &&
+			runtime &&
+			(!sourceProcess || runtime.process === sourceProcess) &&
+			(typed.sessionId === undefined || typed.sessionId === runtime.tab.deckSessionId) &&
+			(typed.runtimeGeneration === undefined || typed.runtimeGeneration === runtime.tab.runtimeGeneration) &&
+			this.alignmentProjection.acceptMessage(agentId, this.alignmentIdentity(runtime), typed.message)
+		) {
+			this.emit(ipcChannels.agentsRuntimeState, { agentId, ...this.streamRuntimeTriple(agentId), state: { alignment: this.alignmentProjection.read(agentId, this.alignmentIdentity(runtime)) } });
+		}
 
 		// pi/TUI /name 会发 session_info_changed，但 PiDeck 不兼容其反向标题同步：
 		// 未验证的事件不能改 catalog 或 runtime 展示标题。自动标题扩展会先发专用

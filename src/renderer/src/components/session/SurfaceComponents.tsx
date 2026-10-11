@@ -8,9 +8,11 @@ import { planRailTicks } from "./timeline/outlineRailTicks";
 import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
 import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
 import { useAtomValue } from "jotai";
+import { MessageSquareText } from "lucide-react";
 import type { TpsDisplayMode } from "../../../../shared/types/settings";
 import { tpsDisplayModeAtom } from "../../atoms/tps-atoms";
 import { buildTpsDisplay } from "../../utils/tpsDisplay";
+import { isAlignmentControlCommand } from "../../../../shared/alignment";
 import "katex/dist/katex.min.css";
 
 /**
@@ -831,6 +833,10 @@ export const UserBubble = memo(function UserBubble(props: {
 	// quoted_context / referenced_session / skill / prompt_template 都在 renderUserBubbleChipText 中
 	// 就地解析为 chip；这里保留完整文本，以便重载后的自包含块不会丢失展示元数据。
 	const cleanText = vision.text;
+	// 内部对齐控制命令（/align approve <id> <rev> 等）不是用户手打的语料：
+	// 整条气泡换成友好标签，不展示裸命令与内部 id（用户反馈“意义不明”）。
+	const trimmedForLabel = cleanText.trim();
+	const alignmentCommandLabel = isAlignmentControlCommand(cleanText) ? t(trimmedForLabel.startsWith("/align approve") ? "alignment.commandLabel.approve" : trimmedForLabel.startsWith("/align revise") ? "alignment.commandLabel.revise" : "alignment.commandLabel.mode") : undefined;
 	// 气泡片段（正文 + 引用/会话/skill chip）严格按原文顺序渲染：
 	// 多个引用各有自己的描述时，顺序就是「引用1 描述1 引用2 描述2」，不能全部提到顶部。
 	const bubbleSegments = buildBubbleRefSegments(cleanText);
@@ -982,7 +988,13 @@ export const UserBubble = memo(function UserBubble(props: {
 					)}
 				</div>
 			)}
-			{cleanText && !editing && (
+			{alignmentCommandLabel && !editing && (
+				<div className="user-turn-bubble flex w-fit items-center gap-1.5 rounded-[14px] border px-3 py-2 text-caption text-muted-foreground">
+					<MessageSquareText size={13} className="shrink-0" aria-hidden="true" />
+					<span>{alignmentCommandLabel}</span>
+				</div>
+			)}
+			{cleanText && !alignmentCommandLabel && !editing && (
 				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
 					<div
 						ref={userTextRef}

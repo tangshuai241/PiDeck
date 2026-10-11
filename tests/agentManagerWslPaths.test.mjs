@@ -118,44 +118,17 @@ function loadAgentManager(existsPredicate = () => false) {
 			calls.writeFile.push(args);
 		},
 	};
-	const historyReaderModule = { exports: {} };
-	vm.runInNewContext(
-		transpile("src/main/pi/SessionHistoryReader.ts"),
-		{
-			Buffer,
-			console: { log() {}, warn() {}, error() {} },
-			exports: historyReaderModule.exports,
-			module: historyReaderModule,
-			Promise,
-			require: (id) =>
-				id === "node:fs/promises"
-					? fsPromises
-					: // 停止身份缓存（72fe93da 起 SessionHistoryReader 依赖）：真实加载保持身份核对行为
-						id === "./stoppedMessageIdentity"
-						? loadTsCommonJs("src/main/pi/stoppedMessageIdentity.ts")
-						: // entryId 槽位判定（isRoleMessageRole）：真实加载，0.86 system 条目对齐依赖它
-							id === "./sessionEntryIds"
-							? loadTsCommonJs("src/main/pi/sessionEntryIds.ts")
-							: id === "../../shared/sessionTodo"
-								? // todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
-									{ parseTodoSnapshotData: () => undefined }
-								: // 工具推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
-									id === "./derivedSubagents"
-									? { deriveToolSubagentEntries: () => [] }
-									: // 会话 JSONL 流式行扫描器：真实加载，但注入被断言的 fs 替身（读到 host 路径）
-										id === "../sessions/jsonlLineStream"
-										? loadTsCommonJs("src/main/sessions/jsonlLineStream.ts", { stubs: { "node:fs/promises": fsPromises } })
-										: // 有界历史分页（宿主插件投影 readBoundedEntryPage）：真实加载，
-											// 注入同一套 fs 替身——open 按 position 读 host 路径，路径断言依赖它
-											id === "../sessions/boundedEntryPage"
-											? loadTsCommonJs("src/main/sessions/boundedEntryPage.ts", { stubs: { "node:fs/promises": fsPromises } })
-											: // 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
-												id === "../../shared/fileChanges"
-												? { collectLatestTurnFileChanges: () => [] }
-												: require(id),
-		},
-		{ filename: "SessionHistoryReader.ts" },
-	);
+	// Resolve the full TS graph from production paths and retain the host-path fs assertions.
+	const historyReaderModule = {
+		exports: loadTsCommonJs("src/main/pi/SessionHistoryReader.ts", {
+			stubs: {
+				"node:fs/promises": fsPromises,
+				"../../shared/sessionTodo": { parseTodoState: () => undefined },
+				"./derivedSubagents": { deriveToolSubagentEntries: () => [] },
+				"../../shared/fileChanges": { collectLatestTurnFileChanges: () => [] },
+			},
+		}),
+	};
 	class SessionFileEditor {
 		async truncateForResend({ file }) {
 			const content = await fsPromises.readFile(file.hostPath, "utf8");

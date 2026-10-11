@@ -29,11 +29,14 @@ import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
 // widgetKey 由扩展定义且跨重启稳定,可按 widgetKey 持久化折叠状态。
+import { MessageSquareText } from "lucide-react";
+
 const EXTENSION_WIDGET_COLLAPSED_KEY_PREFIX = "pid:extension-widget-collapsed:";
 
 /** 模式项标签文案（与旧 ComposerModeSelect 的 MODE_OPTIONS 同源）。 */
 const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 	normal: "app.composerModeNormal",
+	alignment: "app.composerModeAlignment",
 	goal: "app.composerModeGoal",
 	plan: "app.composerModePlan",
 	imagegen: "app.composerModeImagegen",
@@ -41,6 +44,7 @@ const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 
 /** 模式图标：普通=扳手，规划=清单，目标=靶心，生图=图片（与旧 chip 图标一致）。 */
 function modeGlyph(mode: ComposerAgentMode) {
+	if (mode === "alignment") return <MessageSquareText size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "goal") return <Target size={14} strokeWidth={2} aria-hidden="true" />;
@@ -465,7 +469,8 @@ export function ComposerBottomBar(props: {
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";
-	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
+	const isAlignmentMode = props.composerAgentMode === "alignment";
+	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode || isAlignmentMode;
 	// 模式选择器常驻底栏（外移自「+」菜单，2026-10 用户要求直接可见）；可用性（plan/goal 扩展开关、
 	// imagegen 仅 pi、imageGenLocked 锁定）由专用 hook 统一维护（原 ComposerModeSelect 逻辑）。
 	const { visibleModes, refreshAvailability } = useComposerModeAvailability({
@@ -477,6 +482,8 @@ export function ComposerBottomBar(props: {
 	});
 	// 设置 → 外观 → 功能模块可隐藏模式选择器；进行中的特殊模式仍由退出×兜底，不会锁死在 plan/goal。
 	const modesHidden = useAtomValue(composerModesHiddenAtom);
+	const showModeExit = isSpecialMode && !props.imageGenLocked;
+	const showModePicker = visibleModes.length > 1 && !modesHidden;
 	const modelDisplay = computeModelDisplay(liveModel.modelId ? liveModel : undefined, props.modelPending);
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
@@ -524,59 +531,63 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					{/* 特殊模式退出×：模式选择器已常驻底栏，这里是进行中模式的快捷退出
-					    （imagegen 同样可退出；imageGenLocked 时无法切走故不显示；选择器被隐藏时它也是唯一逃生口）。 */}
-					{isSpecialMode && !props.imageGenLocked && (
-						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
-							<button
-								type="button"
-								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-fast hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
-								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
-								disabled={props.disabled}
-								onClick={props.onCancelPlan}
-							>
-								<X size={12} strokeWidth={2} aria-hidden="true" />
-							</button>
-						</div>
-					)}
-					{/* 常驻模式选择器（外移自「+」菜单）：当前模式图标+名称直接可见可切；
+					{/* 退出×与选择器共用28px模式容器，不单独套灰块；Select的sm默认32px，需覆盖条件高度而非只写h-7。
+					    imagegen同样可退出；imageGenLocked时不显示；选择器被隐藏时×仍是特殊模式的逃生口。 */}
+					{(showModeExit || showModePicker) && (
+						<div className={cn("composer-mode-cluster inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md", showModeExit && "bg-muted/50 px-0.5")}>
+							{showModeExit && (
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									type="button"
+									className="composer-mode-exit bg-transparent p-0 text-muted-foreground hover:text-foreground"
+									aria-label={isAlignmentMode ? t("alignment.cancel") : isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
+									title={isAlignmentMode ? t("alignment.cancel") : isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
+									disabled={props.disabled}
+									onClick={props.onCancelPlan}
+								>
+									<X size={12} className="size-3" strokeWidth={2} aria-hidden="true" />
+								</Button>
+							)}
+							{/* 常驻模式选择器（外移自「+」菜单）：当前模式图标+名称直接可见可切；
 					    visibleModes 为空（imagegen 会话/legacy 锁定）不渲染，走专用生图底栏；
 					    hiddenModules 隐藏时收起入口（特殊模式仍可由上方退出×退出）；
 					    打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
-					{/* 只剩 normal 一项（ACP 会话无 pi 扩展 / plan+goal 都被关）不渲染单选项下拉——
+							{/* 只剩 normal 一项（ACP 会话无 pi 扩展 / plan+goal 都被关）不渲染单选项下拉——
 					    没有意义还占位；ACP 的模式等价物是 configOptions 的 mode 类选项（已由 AcpConfigControls 渲染）。打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
-					{visibleModes.length > 1 && !modesHidden ? (
-						<Select
-							value={props.composerAgentMode}
-							disabled={props.disabled}
-							onValueChange={(value) => props.onChangeMode(value as ComposerAgentMode)}
-							onOpenChange={(open) => {
-								// 打开时刷新扩展开关可用性：设置页可能刚改过 plan/goal 扩展（同后端 picker 的即时效）
-								if (open) void refreshAvailability();
-							}}
-						>
-							<SelectTrigger
-								size="sm"
-								className="composer-bar-btn h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:ring-0"
-								/* normal 模式只显图标（默认态不需要读字，用户反馈过）；特殊模式（计划/目标/生图）显文本提醒非默认态。
+							{showModePicker ? (
+								<Select
+									value={props.composerAgentMode}
+									disabled={props.disabled}
+									onValueChange={(value) => props.onChangeMode(value as ComposerAgentMode)}
+									onOpenChange={(open) => {
+										// 打开时刷新扩展开关可用性：设置页可能刚改过 plan/goal 扩展（同后端 picker 的即时效）
+										if (open) void refreshAvailability();
+									}}
+								>
+									<SelectTrigger
+										size="sm"
+										className="composer-bar-btn h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground shadow-none hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent data-[size=sm]:h-7 data-[state=open]:border-transparent data-[state=open]:ring-0"
+										/* normal 模式只显图标（默认态不需要读字，用户反馈过）；特殊模式（计划/目标/生图）显文本提醒非默认态。
 							    可访问性不降级：aria-label/title 始终携带当前模式全名，hover/读屏可读。菜单项保留文字便于扫读。 */
-								aria-label={t(MODE_LABEL[props.composerAgentMode])}
-								title={t(MODE_LABEL[props.composerAgentMode])}
-							>
-								{modeGlyph(props.composerAgentMode)}
-								{props.composerAgentMode !== "normal" ? <span className="max-w-28 truncate">{t(MODE_LABEL[props.composerAgentMode])}</span> : null}
-							</SelectTrigger>
-							<SelectContent align="start">
-								{visibleModes.map((mode) => (
-									<SelectItem key={mode} value={mode}>
-										{modeGlyph(mode)}
-										{t(MODE_LABEL[mode])}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					) : null}
+										aria-label={t(MODE_LABEL[props.composerAgentMode])}
+										title={t(MODE_LABEL[props.composerAgentMode])}
+									>
+										{modeGlyph(props.composerAgentMode)}
+										{props.composerAgentMode !== "normal" ? <span className="max-w-28 truncate">{t(MODE_LABEL[props.composerAgentMode])}</span> : null}
+									</SelectTrigger>
+									<SelectContent align="start">
+										{visibleModes.map((mode) => (
+											<SelectItem key={mode} value={mode}>
+												{modeGlyph(mode)}
+												{t(MODE_LABEL[mode])}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : null}
+						</div>
+					)}
 					{/* 「+」入口：附件/技能/提示词收起为单个菜单（模式已常驻底栏，不再入此菜单）。 */}
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>

@@ -67,6 +67,7 @@ import type { ComposerCaretRequest } from "../components/session/composer/types"
 import { getComposerCaretCoords, getComposerCaretOffset, getComposerCaretBlockEdge, getComposerSelectionRange, isComposerAtVisualEdge } from "../components/session/composer/caretCoords";
 import { desktopApi } from "../desktopApi";
 import { useAskPanel } from "./useAskPanel";
+import { useSessionAlignmentControls } from "./useSessionAlignmentControls";
 import { formatBytes } from "../../../shared/formatBytes";
 import { t } from "../i18n";
 import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
@@ -331,6 +332,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 生图供应商/模型来自独立 imagegen.json，与会话 LLM 模型无关。
 	const activeImageGenProviderId = imageGenConfig.activeProviderId;
 	const activeImageGenModelId = imageGenConfig.activeModel;
+	const alignment = useSessionAlignmentControls(sessionId, record?.backend ?? guideBackendOverride ?? "pi");
 	const mode: ComposerAgentMode =
 		record?.backend === "imagegen" || hasImageGenHistory
 			? "imagegen"
@@ -338,6 +340,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					backend: isDshBackend ? "dsh" : "pi",
 					localMode: localMode,
 					planModeActive: runtime?.state?.planModeActive === true,
+					alignmentPhase: runtime?.state?.alignment?.phase,
 					goalPhase: runtime?.state?.goal?.phase,
 				});
 	// DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
@@ -519,6 +522,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 生图历史是独立消息协议，普通/计划/目标模式的命令语义不适用；
 			// 同一会话一旦产生生图记录（或本身是 imagegen 后端），必须保持生图模式，避免误发普通请求。
 			if ((hasImageGenHistory || record?.backend === "imagegen") && nextMode !== "imagegen") return;
+			if (alignment.changeMode(nextMode, mode)) return;
 			// DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
 			// 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
 			if (isDshBackend) {
@@ -601,7 +605,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			}
 			setModeAtom({ sessionId, mode: nextMode });
 		},
-		[hasImageGenHistory, isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom],
+		[alignment.changeMode, hasImageGenHistory, isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom],
 	);
 
 	const loadTemplates = useCallback(async () => {
@@ -2081,6 +2085,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		draft,
 		attachments,
 		mode,
+		alignment,
 		sendState,
 		templates,
 		picker,

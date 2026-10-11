@@ -2,11 +2,14 @@ export type SendShortcut = "enter-send" | "ctrl-enter-send" | "shift-enter-send"
 
 export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
-import type { AgentBackend, ComposerAgentMode } from "@shared/types";
+import type { AgentBackend, AlignmentPhase, ComposerAgentMode } from "@shared/types";
+import { PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
 import { formatPromptTemplateBlock } from "./components/session/composer/referenceBlocks";
 
 export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
 export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
+
+export { PI_DECK_ALIGNMENT_MODE_MARKER };
 
 export type ComposerPromptSubmission = {
 	/** 用户在 PiDeck 时间线里看到的原始消息，不能包含桌面端内部控制标记。 */
@@ -245,7 +248,7 @@ export type DshGoalModeSnapshot = {
  * 桌面端派生 composer 模式。DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动。
  * 切回普通会把本地 mode 写成 normal，因此 paused 目标不会把选择器锁在目标模式。
  */
-export function deriveComposerAgentMode(input: { backend?: AgentBackend; localMode?: ComposerAgentMode; planModeActive?: boolean; goalPhase?: DshGoalModeSnapshot["phase"] }): ComposerAgentMode {
+export function deriveComposerAgentMode(input: { backend?: AgentBackend; localMode?: ComposerAgentMode; planModeActive?: boolean; goalPhase?: DshGoalModeSnapshot["phase"]; alignmentPhase?: AlignmentPhase }): ComposerAgentMode {
 	const localMode = input.localMode;
 	// imagegen 是独立后端：会话为生图后端时恒为生图模式（无 LLM mode 概念）
 	if (input.backend === "imagegen") return "imagegen";
@@ -254,7 +257,11 @@ export function deriveComposerAgentMode(input: { backend?: AgentBackend; localMo
 	// ACP 无隐藏 agentMessage 通道（plan/goal 的实现载体），恒普通模式；
 	// 不回退 localMode 是防止残留的 pi 会话模式选择误带入发送。
 	if (input.backend === "acp") return "normal";
-	if (input.backend !== "dsh") return localMode ?? "normal";
+	if (input.backend !== "dsh") {
+		if (input.alignmentPhase === "clarifying" || input.alignmentPhase === "ready") return "alignment";
+		return localMode ?? "normal";
+	}
+	if (localMode === "alignment") return "normal";
 	if (input.planModeActive) return "plan";
 	// 用户刚切回普通时 localMode 为 "normal"：即使 pause IPC 尚未落地，也不要把选择器弹回目标。
 	if (localMode === "normal") return "normal";
@@ -310,6 +317,11 @@ export function buildComposerPromptSubmission(message: string, mode: ComposerAge
 	const trimmed = message.trim();
 	// 斜线命令原样发送，让 pi 解析执行——plan/goal 模式下也能用 /plan off、/goal pause。
 	// 否则隐藏标记前缀会把命令变成普通消息发给 LLM。
+	if (mode === "alignment") {
+		// Only our control command may bypass input hooks; other extension commands must not execute first.
+		if (/^\/align(?:\s|$)/.test(trimmed)) return { message };
+		return { message, agentMessage: `${PI_DECK_ALIGNMENT_MODE_MARKER}\n${message}` };
+	}
 	if (trimmed.startsWith("/")) return { message };
 
 	if (mode === "plan") {

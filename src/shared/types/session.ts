@@ -396,6 +396,8 @@ export type SendPromptResult = { accepted: true } | ({ accepted: false; error: s
 export type SendSessionPromptInput = Omit<SendPromptInput, "agentId"> & {
 	sessionId: string;
 	requestId: string;
+	/** Version-bound UI commands must not migrate to a replacement runtime. */
+	expectedRuntime?: SessionRuntimeTarget;
 };
 
 export type SendSessionPromptResult = SendPromptResult & {

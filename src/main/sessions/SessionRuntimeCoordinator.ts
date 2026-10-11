@@ -1232,11 +1232,15 @@ export class SessionRuntimeCoordinator {
 		});
 		let tab: AgentTab;
 		try {
+			// Old approval buttons must fail before ensureRuntime can spawn a replacement.
+			if (input.expectedRuntime) this.requirePromptRuntimeTarget(input.sessionId, input.expectedRuntime);
 			void this.logger?.info("session-perf", "Runtime activation started", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
 			});
 			tab = await this.ensureRuntime(input.sessionId);
+			// Activation/preferences await external work; the original binding may have changed.
+			if (input.expectedRuntime) this.requirePromptRuntimeTarget(input.sessionId, input.expectedRuntime);
 			void this.logger?.info("session-perf", "Runtime activation completed", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
@@ -1255,6 +1259,9 @@ export class SessionRuntimeCoordinator {
 		}
 
 		try {
+			if (input.expectedRuntime && (lease.agentId !== input.expectedRuntime.agentId || lease.runtimeGeneration !== input.expectedRuntime.runtimeGeneration || !this.isCurrentDispatchLease(lease))) {
+				return this.rejected(input, "Session runtime binding changed before prompt dispatch");
+			}
 			if (!this.isCurrentDispatchLease(lease)) {
 				return this.unknownDelivery(input, "Session runtime binding changed before prompt dispatch");
 			}
@@ -1837,6 +1844,14 @@ export class SessionRuntimeCoordinator {
 			throw new SessionRuntimeCommandError("SESSION_NOT_FOUND", `Session not found: ${target.sessionId}`);
 		}
 		return this.requireBoundTarget(target);
+	}
+
+	/** Validate targeted prompt controls without activating or reviving another runtime. */
+	private requirePromptRuntimeTarget(sessionId: string, target: SessionRuntimeTarget): void {
+		if (target.sessionId !== sessionId) throw new SessionRuntimeCommandError("SESSION_RUNTIME_CHANGED", "Session prompt target does not match its session");
+		this.requireTarget(target);
+		const tab = this.agents.list().find((candidate) => candidate.id === target.agentId);
+		if (!tab || isTerminalAgent(tab)) throw new SessionRuntimeCommandError("SESSION_RUNTIME_UNAVAILABLE", "Session runtime is not available");
 	}
 
 	/**

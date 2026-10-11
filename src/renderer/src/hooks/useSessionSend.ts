@@ -1,4 +1,5 @@
 import { useSetAtom, useStore } from "jotai";
+import { beginAlignmentSubmission } from "../atoms/alignment-atoms";
 import { useRef } from "react";
 import type { ComposerAgentMode, ImageContent, SendSessionPromptInput, SendSessionPromptResult, SessionRuntimeTarget } from "../../../shared/types";
 import { classifyComposerSlashCommand } from "../utils/composerSlashCommand";
@@ -243,6 +244,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				backend: record?.backend === "dsh" || liveRuntime?.backend === "dsh" ? "dsh" : "pi",
 				localMode: store.get(sessionComposerModeByIdAtom)[targetSessionId],
 				planModeActive: liveRuntime?.state?.planModeActive === true,
+				alignmentPhase: liveRuntime?.state?.alignment?.phase,
 				goalPhase: liveRuntime?.state?.goal?.phase,
 			});
 		};
@@ -287,6 +289,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		// 让输入反馈与后台准备解耦，避免用户把冷启动时间误判成点击无效。
 		// 队列和 /compact 保留原路径，因为它们分别需要排队快照或运行时命令语义。
 		const publishOptimisticSubmission = (targetSessionId: string) => {
+			if (resolveSendMode(targetSessionId) === "alignment") beginAlignmentSubmission(store, targetSessionId, requestId);
 			setSendState({
 				sessionId: targetSessionId,
 				state: { status: "activating", requestId },
@@ -398,6 +401,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (!publishBeforeActivation) {
+			if (resolveSendMode(sessionId) === "alignment") beginAlignmentSubmission(store, sessionId, requestId);
 			setSendState({
 				sessionId,
 				state: {
@@ -461,6 +465,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			backend: isDshSend ? "dsh" : "pi",
 			localMode: store.get(sessionComposerModeByIdAtom)[sessionId],
 			planModeActive: liveRuntime?.state?.planModeActive === true,
+			alignmentPhase: liveRuntime?.state?.alignment?.phase,
 			goalPhase: liveRuntime?.state?.goal?.phase,
 		});
 		// DSH 拒绝 agentMessage：首次目标改写成 /goal；已有目标则原文推进。

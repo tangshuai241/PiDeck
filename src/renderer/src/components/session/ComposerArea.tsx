@@ -255,11 +255,13 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 															? t("app.composerSilentPlaceholder")
 															: composer.bangMode === "bang"
 																? t("app.composerShellPlaceholder")
-																: composer.mode === "plan"
-																	? t("app.composerPlanPlaceholder")
-																	: composer.mode === "goal"
-																		? t("app.composerGoalPlaceholder")
-																		: t("app.composerEnterPlaceholder")
+																: composer.mode === "alignment"
+																	? t("alignment.placeholder")
+																	: composer.mode === "plan"
+																		? t("app.composerPlanPlaceholder")
+																		: composer.mode === "goal"
+																			? t("app.composerGoalPlaceholder")
+																			: t("app.composerEnterPlaceholder")
 												}
 												onFocus={composer.editor.onFocus}
 												onChange={composer.editor.onChange}

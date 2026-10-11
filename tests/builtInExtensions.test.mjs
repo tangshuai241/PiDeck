@@ -49,8 +49,10 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		const paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, ["pi-deck-todo.ts"]);
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
-		// 内置扩展清单随版本增长：gui-bridge/ext-points/ask/goal/model-trace/nul-redirect/plan-mode/request-size-recovery/retry-no-body/security-gate/session-title/subagents/todo/trash-guard/vision
-		assert.equal(BUILT_IN_EXTENSIONS.length, 15);
+		// Alignment is an entry point; its state parser must be packaged but never injected as an extension.
+		assert.equal(BUILT_IN_EXTENSIONS.length, 16);
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-mode.ts"));
+		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-state.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-gui-bridge.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-ext-points.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-goal-mode.ts"));

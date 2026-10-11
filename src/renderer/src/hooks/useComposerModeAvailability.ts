@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentBackend, ComposerAgentMode } from "../../../shared/types";
 import { desktopApi } from "../desktopApi";
 
-export const MODE_ORDER: ComposerAgentMode[] = ["normal", "goal", "plan"];
+export const MODE_ORDER: ComposerAgentMode[] = ["normal", "alignment", "goal", "plan"];
 
 /**
  * 计算「+」菜单里可显示的模式（纯函数，供 hook 与单测共用，单一来源）：
@@ -11,13 +11,23 @@ export const MODE_ORDER: ComposerAgentMode[] = ["normal", "goal", "plan"];
  *   而 legacy 含生图消息的 pi 会话（imageGenLocked）同样锁定为生图，不展示 LLM 模式；
  * - plan/goal 由对应内置扩展开关决定；
  */
-export function computeVisibleModes(options: { isImageGen: boolean; planModeAvailable: boolean; goalModeAvailable: boolean }): ComposerAgentMode[] {
+export function computeVisibleModes(options: { isImageGen: boolean; planModeAvailable: boolean; goalModeAvailable: boolean; alignmentModeAvailable?: boolean }): ComposerAgentMode[] {
 	if (options.isImageGen) return [];
 	return MODE_ORDER.filter((mode) => {
+		if (mode === "alignment") return options.alignmentModeAvailable === true;
 		if (mode === "plan") return options.planModeAvailable;
 		if (mode === "goal") return options.goalModeAvailable;
 		return true;
 	});
+}
+
+/** Availability is tri-state: not discovered yet must not cancel a restored flow. */
+export function computeUnavailableModeFallback(options: { isImageGen: boolean; current: ComposerAgentMode; planModeAvailable: boolean; goalModeAvailable: boolean; alignmentModeAvailable: boolean; alignmentAvailabilityKnown: boolean }): "normal" | undefined {
+	if (options.isImageGen) return undefined;
+	if (options.current === "alignment" && options.alignmentAvailabilityKnown && !options.alignmentModeAvailable) return "normal";
+	if (options.current === "plan" && !options.planModeAvailable) return "normal";
+	if (options.current === "goal" && !options.goalModeAvailable) return "normal";
+	return undefined;
 }
 
 /**
@@ -36,43 +46,66 @@ export function useComposerModeAvailability(props: { backend?: AgentBackend; ima
 	const isImageGen = props.backend === "imagegen" || props.imageGenLocked === true;
 	const [planModeAvailable, setPlanModeAvailable] = useState(true);
 	const [goalModeAvailable, setGoalModeAvailable] = useState(true);
+	const [alignmentModeAvailable, setAlignmentModeAvailable] = useState(false);
+	const [alignmentAvailabilityKnown, setAlignmentAvailabilityKnown] = useState(false);
+	const refreshSequenceRef = useRef(0);
 
 	const refreshAvailability = useCallback(async () => {
+		const sequence = ++refreshSequenceRef.current;
+		setAlignmentAvailabilityKnown(false);
 		if (isAcp) {
+			setAlignmentAvailabilityKnown(true);
+			setAlignmentModeAvailable(false);
 			setPlanModeAvailable(false);
 			setGoalModeAvailable(false);
 			return;
 		}
 		if (isDsh) {
+			setAlignmentAvailabilityKnown(true);
+			setAlignmentModeAvailable(false);
 			setPlanModeAvailable(true);
 			setGoalModeAvailable(true);
 			return;
 		}
 		try {
 			const result = await desktopApi.extensions.list();
+			if (sequence !== refreshSequenceRef.current) return;
 			const plan = result.extensions.find((extension) => extension.source === "pi-deck-plan-mode.ts");
 			const goal = result.extensions.find((extension) => extension.source === "pi-deck-goal-mode.ts");
+			const alignment = result.extensions.find((extension) => extension.source === "pi-deck-alignment-mode.ts");
+			setAlignmentModeAvailable(alignment?.enabled === true);
 			setPlanModeAvailable(plan?.enabled !== false);
 			setGoalModeAvailable(goal?.enabled !== false);
 		} catch {
-			// 扩展列表读取失败时保守处理：两个模式都按不可用对待，避免用户选了却无扩展响应。
+			if (sequence !== refreshSequenceRef.current) return;
+			// 扩展列表读取失败时保守处理，避免用户选了却无扩展响应。
 			setPlanModeAvailable(false);
 			setGoalModeAvailable(false);
+			setAlignmentModeAvailable(false);
+		} finally {
+			if (sequence === refreshSequenceRef.current) setAlignmentAvailabilityKnown(true);
 		}
 	}, [isAcp, isDsh]);
+
+	useEffect(() => {
+		void refreshAvailability();
+		return () => {
+			refreshSequenceRef.current++;
+		};
+	}, [refreshAvailability]);
 
 	// 打开菜单时刷新（扩展开关可能刚在设置页改过）。不可用且当前正在用则强制回退，
 	// 这属于模式状态流转的边界：不在这里回退，用户会卡在一个扩展已删的模式上。
 	useEffect(() => {
-		if (isImageGen) return;
-		if (!planModeAvailable && props.value === "plan") props.onChange("normal");
-		if (!goalModeAvailable && props.value === "goal") props.onChange("normal");
-	}, [goalModeAvailable, isImageGen, planModeAvailable, props.onChange, props.value]);
+		const fallback = computeUnavailableModeFallback({ isImageGen, current: props.value, planModeAvailable, goalModeAvailable, alignmentModeAvailable, alignmentAvailabilityKnown });
+		if (fallback) props.onChange(fallback);
+	}, [alignmentAvailabilityKnown, alignmentModeAvailable, goalModeAvailable, isImageGen, planModeAvailable, props.onChange, props.value]);
 
 	const visibleModes = computeVisibleModes({
 		isImageGen,
 		planModeAvailable,
 		goalModeAvailable,
+		alignmentModeAvailable,
 	});
 
 	return { visibleModes, refreshAvailability };
