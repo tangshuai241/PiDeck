@@ -29,11 +29,14 @@ import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
 // widgetKey 由扩展定义且跨重启稳定,可按 widgetKey 持久化折叠状态。
+import { MessageSquareText } from "lucide-react";
+
 const EXTENSION_WIDGET_COLLAPSED_KEY_PREFIX = "pid:extension-widget-collapsed:";
 
 /** 模式项标签文案（与旧 ComposerModeSelect 的 MODE_OPTIONS 同源）。 */
 const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 	normal: "app.composerModeNormal",
+	alignment: "app.composerModeAlignment",
 	goal: "app.composerModeGoal",
 	plan: "app.composerModePlan",
 	imagegen: "app.composerModeImagegen",
@@ -41,6 +44,7 @@ const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 
 /** 模式图标：普通=扳手，规划=清单，目标=靶心，生图=图片（与旧 chip 图标一致）。 */
 function modeGlyph(mode: ComposerAgentMode) {
+	if (mode === "alignment") return <MessageSquareText size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "goal") return <Target size={14} strokeWidth={2} aria-hidden="true" />;
@@ -465,7 +469,8 @@ export function ComposerBottomBar(props: {
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";
-	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
+	const isAlignmentMode = props.composerAgentMode === "alignment";
+	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode || isAlignmentMode;
 	// 模式选择器常驻底栏（外移自「+」菜单，2026-10 用户要求直接可见）；可用性（plan/goal 扩展开关、
 	// imagegen 仅 pi、imageGenLocked 锁定）由专用 hook 统一维护（原 ComposerModeSelect 逻辑）。
 	const { visibleModes, refreshAvailability } = useComposerModeAvailability({
@@ -531,8 +536,8 @@ export function ComposerBottomBar(props: {
 							<button
 								type="button"
 								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-fast hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
-								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
+								aria-label={isAlignmentMode ? t("alignment.cancel") : isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
+								title={isAlignmentMode ? t("alignment.cancel") : isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
 								disabled={props.disabled}
 								onClick={props.onCancelPlan}
 							>

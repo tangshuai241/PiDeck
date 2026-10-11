@@ -2,6 +2,8 @@ import { open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionBranchNode, SessionBranchTree, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
+import { ALIGNMENT_MESSAGE_TYPE, latestAlignmentStateFromMessages } from "../../shared/alignment";
+import type { AlignmentState } from "../../shared/types/alignment";
 import { isFileChangeToolName } from "../../shared/fileChanges";
 import { deriveToolSubagentEntries } from "./derivedSubagents";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
@@ -618,6 +620,27 @@ export class SessionHistoryReader {
 
 	constructor(private readonly deps: SessionHistoryReaderDeps) {}
 
+	/** Recover the latest snapshot on the active branch, independently of the visible window. */
+	async readAlignmentState(sessionPath: string): Promise<AlignmentState | null> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		// Filter metadata newest-first, then read just one bounded candidate. A corrupt/future
+		// latest snapshot is a barrier: falling back would resurrect an obsolete approval.
+		for (let position = index.activeBranch.length - 1; position >= 0; position--) {
+			const entry = index.activeBranch[position];
+			if (entry.customType !== ALIGNMENT_MESSAGE_TYPE || entry.role !== "custom") continue;
+			if (entry.oversized || entry.byteLength > 256 * 1024) return null;
+			try {
+				const [raw] = await this.readIndexedRawLines(index.hostPath, [entry]);
+				if (!isRecord(raw)) return null;
+				const message = entry.type === "custom_message" ? { ...raw, role: "custom" } : raw.message;
+				return latestAlignmentStateFromMessages([message]) ?? null;
+			} catch {
+				return null;
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * 不启动 pi 进程，直接从 JSONL 构造与运行态相同的时间线数据。
 	 * Viewer 必须复用 AgentManager 的压缩归档与消息转换规则，避免维护第二套显示模型。
@@ -1184,6 +1207,8 @@ export class SessionHistoryReader {
 				continue;
 			}
 			if (entry.type === "custom_message") {
+				// Alignment snapshots are hidden state, not notification cards or turn boundaries.
+				if (entry.customType === ALIGNMENT_MESSAGE_TYPE) continue;
 				if (!inRange(messageCount)) continue;
 				placements.push({ entry, offset: messageCount });
 				continue;
@@ -1656,10 +1681,14 @@ export class SessionHistoryReader {
 		if (!id) return null;
 		const parentId = /"parentId"\s*:\s*"([^"\\]{1,64})"/.exec(info.prefix)?.[1];
 		const type = /"type"\s*:\s*"([^"\\]{1,32})"/.exec(info.prefix)?.[1] ?? "";
+		const customType = /"customType"\s*:\s*"([^"\\]{1,120})"/.exec(info.prefix)?.[1];
+		const role = type === "custom_message" ? "custom" : /"role"\s*:\s*"([^"\\]{1,32})"/.exec(info.prefix)?.[1];
 		return {
 			id,
 			parentId: parentId ?? null,
 			type,
+			customType,
+			role,
 			offset: info.offset,
 			byteLength: info.byteLength,
 			// body 未解析：不进 activeMessageEntries（不参与分页/展示），
@@ -1704,7 +1733,7 @@ export class SessionHistoryReader {
 			// 一并捕获：正文在条目顶层 content 而不是 message 里，建索引阶段只记类型与
 			// display，正文留给需要展示的那一页懒读（会话文件可能有上千条这类快照）。
 			const isCustomMessage = type === "custom_message";
-			const customType = type === "custom" || isCustomMessage ? readString(parsed, "customType") : undefined;
+			const customType = type === "custom" || isCustomMessage ? readString(parsed, "customType") : message?.role === "custom" ? readString(message, "customType") : undefined;
 			const assistantModel =
 				message?.role === "assistant"
 					? (() => {
@@ -1726,7 +1755,7 @@ export class SessionHistoryReader {
 				modelChangeId,
 				assistantModel,
 				thinkingLevel,
-				role: typeof message?.role === "string" ? message.role : undefined,
+				role: isCustomMessage ? "custom" : typeof message?.role === "string" ? message.role : undefined,
 				// toolName 同样在建索引时顺手捕获：文件汇总只需要 write/edit/create/patch
 				// 的工具结果，有了它就不必把 read/bash 的大体积结果读进内存再丢弃。
 				toolName: readString(message, "toolName"),
@@ -1743,6 +1772,10 @@ export class SessionHistoryReader {
 				...(contextEditText !== undefined ? { contextEditText } : {}),
 			};
 		} catch {
+			// Keep a damaged alignment record in the parent chain as a fail-closed barrier.
+			// Generic malformed lines retain their established skip behavior.
+			const stub = this.parseOversizedIndexLine({ prefix: jsonLine.slice(0, 64 * 1024), offset, byteLength });
+			if (stub?.customType === ALIGNMENT_MESSAGE_TYPE && stub.role === "custom") return stub;
 			return null;
 		}
 	}

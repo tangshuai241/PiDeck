@@ -64,6 +64,15 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 	return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
+/** Control actions are bound to the exact runtime shown by the initiating composer. */
+function isValidExpectedPromptRuntime(input: SendSessionPromptInput): boolean {
+	const target = input.expectedRuntime;
+	if (target === undefined) return true;
+	if (!isRecord(target)) return false;
+	const validIdentity = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 512 && !/[\x00-\x1f\x7f]/.test(value);
+	return validIdentity(target.sessionId) && target.sessionId === input.sessionId && validIdentity(target.agentId) && Number.isSafeInteger(target.runtimeGeneration) && typeof target.runtimeGeneration === "number" && target.runtimeGeneration >= 0;
+}
+
 /** Normalize untrusted model input before it reaches the persisted catalog. */
 function normalizeSessionModelPreference(input: unknown): SessionModelPreference | undefined {
 	if (!isRecord(input) || typeof input.provider !== "string" || typeof input.modelId !== "string" || (input.modelName !== undefined && typeof input.modelName !== "string")) return undefined;
@@ -1461,6 +1470,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		return result;
 	});
 	ipcMain.handle(ipcChannels.sessionsSendPrompt, async (_event, input: SendSessionPromptInput) => {
+		// Validate before logging/dereferencing or passing the untrusted target to the coordinator.
+		if (!isRecord(input) || typeof input.sessionId !== "string" || typeof input.requestId !== "string" || typeof input.message !== "string" || !isValidExpectedPromptRuntime(input)) {
+			return {
+				accepted: false,
+				delivery: "rejected",
+				error: "Invalid session prompt runtime target",
+				i18nKey: "diagnostic.promptRejected",
+				debugDetails: "Invalid session prompt runtime target",
+				sessionId: typeof input?.sessionId === "string" ? input.sessionId : "",
+				requestId: typeof input?.requestId === "string" ? input.requestId : "",
+			};
+		}
 		const startedAt = Date.now();
 		void appLogger.info("session", "Session prompt IPC received", {
 			sessionId: input.sessionId,

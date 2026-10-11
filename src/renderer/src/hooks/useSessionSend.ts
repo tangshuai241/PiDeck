@@ -243,6 +243,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				backend: record?.backend === "dsh" || liveRuntime?.backend === "dsh" ? "dsh" : "pi",
 				localMode: store.get(sessionComposerModeByIdAtom)[targetSessionId],
 				planModeActive: liveRuntime?.state?.planModeActive === true,
+				alignmentPhase: liveRuntime?.state?.alignment?.phase,
 				goalPhase: liveRuntime?.state?.goal?.phase,
 			});
 		};
@@ -461,6 +462,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			backend: isDshSend ? "dsh" : "pi",
 			localMode: store.get(sessionComposerModeByIdAtom)[sessionId],
 			planModeActive: liveRuntime?.state?.planModeActive === true,
+			alignmentPhase: liveRuntime?.state?.alignment?.phase,
 			goalPhase: liveRuntime?.state?.goal?.phase,
 		});
 		// DSH 拒绝 agentMessage：首次目标改写成 /goal；已有目标则原文推进。

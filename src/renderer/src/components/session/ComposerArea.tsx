@@ -28,6 +28,7 @@ import { SessionReplyActions } from "./SessionReplyActions";
 import { BridgeGuiSlot, BridgeWidgetSlot } from "../bridge/BridgeSlot";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { isComposerFeatureHidden, type HideableComposerFeatureId } from "../../../../shared/composerFeatures";
+import { AlignmentCard } from "./AlignmentCard";
 
 /** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
 const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
@@ -75,6 +76,8 @@ type ComposerExtrasProps = {
 	statsLine?: ReactNode;
 	/** GUI 扩展桥：输入框上方挂件（aboveEditor）。 */
 	bridgeWidgetsAbove?: ReactNode;
+	/** Native alignment is deliberately independent of the optional GUI bridge. */
+	alignmentCard?: ReactNode;
 };
 
 /**
@@ -102,6 +105,7 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 					{props.widgets}
 					{/* GUI 扩展桥：输入框上方挂件（aboveEditor）。无内容时该组件返回 null，不占位。 */}
 					{props.bridgeWidgetsAbove}
+					{props.alignmentCard}
 					{props.queuePanel}
 					{props.deliveryNotice}
 				</div>
@@ -197,6 +201,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               输入卡 shrink-0 始终完整可见。 */}
 							<footer ref={footerRef} className="composer flex max-h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-2" style={composerFooterStyle()} data-session-id={props.sessionId}>
 								<ComposerMeasuredExtras
+									alignmentCard={<AlignmentCard controls={composer.alignment} />}
 									widgets={props.widgets ?? null}
 									queuePanel={props.queuePanel}
 									deliveryNotice={<SessionDeliveryNotice status={composer.sendState.status} message={composer.sendState.unknownSnapshot?.message} images={composer.sendState.unknownSnapshot?.images} error={composer.sendState.error} onAcknowledge={composer.delivery.acknowledgeUnknown} />}
@@ -255,11 +260,13 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 															? t("app.composerSilentPlaceholder")
 															: composer.bangMode === "bang"
 																? t("app.composerShellPlaceholder")
-																: composer.mode === "plan"
-																	? t("app.composerPlanPlaceholder")
-																	: composer.mode === "goal"
-																		? t("app.composerGoalPlaceholder")
-																		: t("app.composerEnterPlaceholder")
+																: composer.mode === "alignment"
+																	? t("alignment.placeholder")
+																	: composer.mode === "plan"
+																		? t("app.composerPlanPlaceholder")
+																		: composer.mode === "goal"
+																			? t("app.composerGoalPlaceholder")
+																			: t("app.composerEnterPlaceholder")
 												}
 												onFocus={composer.editor.onFocus}
 												onChange={composer.editor.onChange}

@@ -1,6 +1,7 @@
 import type { ThinkingLevelMap } from "./modelSpecs";
 import type { SessionEnvironment, SessionSource } from "./session";
 import type { TodoItem } from "./todo";
+import type { AlignmentState } from "./alignment";
 
 /**
  * DSH host inbox 排队项（官方 `inbox` projection 的归一化形态；
@@ -116,6 +117,8 @@ export type AgentTab = {
 };
 
 export type AgentRuntimeState = {
+	/** Native pi alignment snapshot; null explicitly clears an older runtime patch. */
+	alignment?: AlignmentState | null;
 	modelName?: string;
 	provider?: string;
 	modelId?: string;
@@ -391,4 +394,4 @@ export type ThinkingUpdate = {
 };
 
 /** 输入框发送模式：普通执行 / 只读计划 / 生图 / 目标自动推进。 */
-export type ComposerAgentMode = "normal" | "plan" | "imagegen" | "goal";
+export type ComposerAgentMode = "normal" | "plan" | "imagegen" | "goal" | "alignment";

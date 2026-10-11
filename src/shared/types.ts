@@ -5,6 +5,7 @@ export * from "./types/project";
 export * from "./sessionTabWidth";
 export * from "./types/focus";
 export * from "./types/agent";
+export * from "./types/alignment";
 export * from "./types/session";
 export * from "./types/terminal";
 export * from "./types/feishu";
