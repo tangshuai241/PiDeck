@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { useStore } from "jotai";
+import { beginAlignmentSubmission } from "../../atoms/alignment-atoms";
 import { t, translateI18nDescriptor } from "../../i18n";
 import { desktopApi as api } from "../../desktopApi";
 import { applyDshGoalSendTransform, buildComposerPromptSubmission } from "../../composerBehavior";
@@ -73,11 +74,13 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 					})
 				: message;
 			const submission = buildComposerPromptSubmission(visibleMessage, isDsh ? "normal" : agentMode);
+			const requestId = crypto.randomUUID();
+			if (!isDsh && agentMode === "alignment") beginAlignmentSubmission(store, sessionId, requestId);
 			let result: Awaited<ReturnType<typeof api.sessions.sendPrompt>>;
 			try {
 				result = await api.sessions.sendPrompt({
 					sessionId,
-					requestId: crypto.randomUUID(),
+					requestId,
 					message: submission.message,
 					images,
 					...(submission.agentMessage ? { agentMessage: submission.agentMessage } : {}),

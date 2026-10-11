@@ -52,7 +52,7 @@ function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference"
 			},
 		},
 	});
-	Object.assign(atoms, load("src/renderer/src/atoms/session-atoms.ts"), load("src/renderer/src/atoms/composer-atoms.ts"));
+	Object.assign(atoms, load("src/renderer/src/atoms/session-atoms.ts"), load("src/renderer/src/atoms/composer-atoms.ts"), load("src/renderer/src/atoms/alignment-atoms.ts"));
 	const { useSessionSend } = load("src/renderer/src/hooks/useSessionSend.ts");
 	store.set(atoms.setSessionDraftAtom, { sessionId, value: draft });
 	store.set(atoms.setSessionAttachmentsAtom, { sessionId, value: attachments });
@@ -88,6 +88,36 @@ function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference"
 function emptyTemplate() {
 	return { name: "empty", path: "/prompts/empty.md", description: "empty template", content: "---\ndescription: empty template\n---\n" };
 }
+
+test("ordinary alignment submission invalidates its old confirmation before preparation or transport, without mutating the authoritative brief", async () => {
+	const preparation = createDeferred();
+	const started = createDeferred();
+	const h = createSendHarness({
+		sessionId: SESSION_ID,
+		draft: "改为 Excel",
+		prepareMessage: () => {
+			started.resolve();
+			return preparation.promise;
+		},
+	});
+	const original = { schemaVersion: 1, briefId: "brief-original", revision: 2, briefRevision: 2, phase: "ready", brief: { goal: "整理术语", scope: [], materials: [], deliverable: "Word", preserve: [], acceptance: ["内容准确"], questions: [] } };
+	h.store.set(h.atoms.sessionRuntimeByIdAtom, { [SESSION_ID]: { agentId: "runtime-1", runtimeGeneration: 1, status: "idle", updatedAt: 0, state: { alignment: original } } });
+	h.store.set(h.atoms.setSessionComposerModeAtom, { sessionId: SESSION_ID, mode: "alignment" });
+	const pending = h.send();
+	await started.promise;
+	const barrier = h.store.get(h.atoms.alignmentSubmissionAtomFamily(SESSION_ID));
+	assert.equal(barrier.briefId, original.briefId);
+	assert.equal(barrier.revision, original.revision);
+	assert.equal(h.submissions.length, 0);
+	assert.equal(h.store.get(h.atoms.alignmentSubmissionAtomFamily("unrelated-session")), undefined);
+	assert.equal(h.store.get(h.atoms.sessionRuntimeByIdAtom)[SESSION_ID].state.alignment, original);
+	preparation.resolve("改为 Excel");
+	await pending;
+	assert.equal(h.submissions.length, 1);
+	assert.equal(h.submissions[0].message, "改为 Excel");
+	assert.equal(h.submissions[0].agentMessage.startsWith("__PI_DECK_ALIGNMENT_MODE__"), true);
+	assert.equal(h.store.get(h.atoms.alignmentSubmissionAtomFamily(SESSION_ID)), barrier, "delivery alone must not retire the local publication barrier");
+});
 
 test("preparation failure after promotion settles the real Session and preserves new input for retry", async () => {
 	const preparation = createDeferred();

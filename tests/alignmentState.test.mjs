@@ -78,3 +78,31 @@ test("terminal states are inactive and cannot be approved", () => {
 	}
 	assert.equal(alignment.isAlignmentActive(alignment.parseAlignmentState(state())), true);
 });
+
+test("host and extension decode optional publication/stop fields identically and reject invalid readiness stamps", () => {
+	const { decodeAlignment } = loadTsCommonJs(resolve("resources/extensions/pi-deck-alignment-state.ts"));
+	const valid = [state(), state({ briefRevision: 2 }), state({ phase: "clarifying", briefRevision: 1 }), state({ phase: "clarifying", lastStopReason: "aborted" }), state({ phase: "clarifying", lastStopReason: "error" })];
+	for (const input of valid) {
+		const host = alignment.parseAlignmentState(input);
+		assert.ok(host);
+		assert.deepEqual(JSON.parse(JSON.stringify(host)), JSON.parse(JSON.stringify(decodeAlignment(input))));
+	}
+	for (const overrides of [{ briefRevision: -1 }, { briefRevision: 3 }, { briefRevision: 1 }, { briefRevision: "2" }, { briefRevision: 1.5 }, { phase: "approved", briefRevision: 1 }, { phase: "clarifying", briefRevision: 0, brief: undefined }, { lastStopReason: "stop" }]) {
+		assert.equal(alignment.parseAlignmentState(state(overrides)), undefined);
+		assert.equal(decodeAlignment(state(overrides)), undefined);
+	}
+	assert.equal(alignment.canApproveAlignment(state({ lastStopReason: "aborted" })), false);
+	assert.equal(alignment.canApproveAlignment(state({ briefRevision: 1 })), false);
+});
+
+test("internal align control commands are recognized exactly, user prose is not", () => {
+	assert.equal(alignment.isAlignmentControlCommand("/align approve brief-123 2"), true);
+	assert.equal(alignment.isAlignmentControlCommand("/align revise brief-123 4"), true);
+	assert.equal(alignment.isAlignmentControlCommand(" /align off"), true);
+	assert.equal(alignment.isAlignmentControlCommand("/align on"), true);
+	assert.equal(alignment.isAlignmentControlCommand("/align approve brief-123 2 extra"), false);
+	assert.equal(alignment.isAlignmentControlCommand("/align approve other-id 2"), true);
+	assert.equal(alignment.isAlignmentControlCommand("/align"), false);
+	assert.equal(alignment.isAlignmentControlCommand("看看 /align approve brief-123 2"), false);
+	assert.equal(alignment.isAlignmentControlCommand("按这个执行"), false);
+});

@@ -40,7 +40,12 @@ export function parseAlignmentState(value: unknown): AlignmentState | undefined 
 	if (phase === "ready" || phase === "approved") {
 		if (!brief?.goal.trim() || !brief.deliverable.trim() || !brief.acceptance.some((item) => item.trim()) || brief.questions.length) return undefined;
 	}
-	return { schemaVersion: 1, briefId: value.briefId, revision: value.revision, phase, ...(brief ? { brief } : {}) };
+	const briefRevision = value.briefRevision;
+	if (briefRevision !== undefined && (!brief || typeof briefRevision !== "number" || !Number.isSafeInteger(briefRevision) || briefRevision < 0 || briefRevision > value.revision)) return undefined;
+	if (briefRevision !== undefined && (phase === "ready" || phase === "approved") && briefRevision !== value.revision) return undefined;
+	const lastStopReason = value.lastStopReason;
+	if (lastStopReason !== undefined && lastStopReason !== "aborted" && lastStopReason !== "error") return undefined;
+	return { schemaVersion: 1, briefId: value.briefId, revision: value.revision, phase, ...(brief ? { brief } : {}), ...(briefRevision !== undefined ? { briefRevision } : {}), ...(lastStopReason ? { lastStopReason } : {}) };
 }
 
 /** Only the runtime's custom state message is authoritative; a tool cannot approve itself. */
@@ -64,7 +69,14 @@ export function isAlignmentActive(state: AlignmentState | undefined): boolean {
 }
 
 export function canApproveAlignment(state: AlignmentState | undefined): boolean {
-	return state?.phase === "ready" && Boolean(state.brief && state.brief.questions.length === 0);
+	return state?.phase === "ready" && !state.lastStopReason && (state.briefRevision === undefined || state.briefRevision === state.revision) && Boolean(state.brief && state.brief.questions.length === 0);
+}
+
+/** Matches /align approve|revise <briefId> <revision> exactly; ids are [a-zA-Z0-9_-]{1,80}. */
+const ALIGNMENT_COMMAND_RE = /^\/align (?:(?:approve|revise) [a-zA-Z0-9_-]{1,80} (?:0|[1-9]\d*)|on|off|clear)$/;
+
+export function isAlignmentControlCommand(message: string): boolean {
+	return ALIGNMENT_COMMAND_RE.test(message.trim());
 }
 
 /** Commands carry the version visible to the user; the extension checks it again. */

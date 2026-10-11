@@ -18,4 +18,8 @@ export type AlignmentState = {
 	revision: number;
 	phase: AlignmentPhase;
 	brief?: AlignmentBrief;
+	/** Revision at which alignment_brief published these fields; input invalidation retains this stamp. */
+	briefRevision?: number;
+	/** A stopped clarification needs continuation, never a false complete/progress signal. */
+	lastStopReason?: "aborted" | "error";
 };

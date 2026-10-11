@@ -1,4 +1,5 @@
 import { useSetAtom, useStore } from "jotai";
+import { beginAlignmentSubmission } from "../atoms/alignment-atoms";
 import { useRef } from "react";
 import type { ComposerAgentMode, ImageContent, SendSessionPromptInput, SendSessionPromptResult, SessionRuntimeTarget } from "../../../shared/types";
 import { classifyComposerSlashCommand } from "../utils/composerSlashCommand";
@@ -288,6 +289,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		// 让输入反馈与后台准备解耦，避免用户把冷启动时间误判成点击无效。
 		// 队列和 /compact 保留原路径，因为它们分别需要排队快照或运行时命令语义。
 		const publishOptimisticSubmission = (targetSessionId: string) => {
+			if (resolveSendMode(targetSessionId) === "alignment") beginAlignmentSubmission(store, targetSessionId, requestId);
 			setSendState({
 				sessionId: targetSessionId,
 				state: { status: "activating", requestId },
@@ -399,6 +401,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (!publishBeforeActivation) {
+			if (resolveSendMode(sessionId) === "alignment") beginAlignmentSubmission(store, sessionId, requestId);
 			setSendState({
 				sessionId,
 				state: {

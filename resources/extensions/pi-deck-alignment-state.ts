@@ -19,6 +19,9 @@ export interface AlignmentState {
 	revision: number;
 	phase: "clarifying" | "ready" | "approved" | "cancelled" | "complete";
 	brief?: AlignmentBrief;
+	/** Revision at which alignment_brief published these fields; input invalidation retains this stamp. */
+	briefRevision?: number;
+	lastStopReason?: "aborted" | "error";
 }
 
 /** External session data is unknown until every field has passed the same bounds as tool input. */
@@ -62,7 +65,12 @@ export function decodeAlignment(value: unknown): AlignmentState | undefined {
 	const brief = value.brief === undefined ? undefined : decodeBrief(value.brief);
 	if (value.brief !== undefined && !brief) return;
 	if ((phase === "ready" || phase === "approved") && (!brief || !briefIsReady(brief))) return;
-	return { schemaVersion: 1, briefId: value.briefId, revision: value.revision, phase, ...(brief ? { brief } : {}) };
+	const briefRevision = value.briefRevision;
+	if (briefRevision !== undefined && (!brief || typeof briefRevision !== "number" || !Number.isSafeInteger(briefRevision) || briefRevision < 0 || briefRevision > value.revision)) return;
+	if (briefRevision !== undefined && (phase === "ready" || phase === "approved") && briefRevision !== value.revision) return;
+	const lastStopReason = value.lastStopReason;
+	if (lastStopReason !== undefined && lastStopReason !== "aborted" && lastStopReason !== "error") return;
+	return { schemaVersion: 1, briefId: value.briefId, revision: value.revision, phase, ...(brief ? { brief } : {}), ...(briefRevision !== undefined ? { briefRevision } : {}), ...(lastStopReason ? { lastStopReason } : {}) };
 }
 
 /** Tool restoration accepts only a bounded list; a corrupt loadout restores no capabilities. */

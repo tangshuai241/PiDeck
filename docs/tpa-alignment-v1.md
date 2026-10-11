@@ -6,21 +6,23 @@
 
 需求对齐是当前对话里的可选步骤，不是另一套任务系统。普通聊天不强制开启对齐，也不改变首页和工作区布局。
 
-开启后，先和 AI 说明目标、材料、范围、需要保留的内容及完成标准。AI 在对话中澄清，并把要求整理到输入框上方的“本次要求”卡片。用户可以继续补充或修改；只有明确确认当前版本后，Pi 才能按要求执行。
+开启后，先和 AI 说明目标、材料、范围、需要保留的内容及完成标准。AI 在同一聊天流中澄清；要求真正可确认时，聊天流末尾显示最终确认单。用户在同一个输入框回答或修改；只有明确确认当前版本后，Pi 才能按要求执行。选模式但未发消息时，不显示处理进度。
 
-卡片沿用现有 Composer 容器、shadcn 控件与主题 token，支持亮暗主题、折叠和长内容滚动。GUI 桥关闭时，卡片仍可通过原生 RPC 状态显示。
+确认单复用现有 shadcn 控件与主题 token，支持亮暗主题、折叠和长内容滚动。输入框不再显示第二份正文或进度；运行反馈沿用聊天动效。GUI 桥关闭时，确认单仍通过原生 RPC 状态显示。
 
 ## 怎么使用
 
 1. 在 Pi 会话的输入框模式菜单中选择“需求对齐”。
 2. 发送本次要求，并提供可读取的材料或直接粘贴材料正文。
-3. 查看“本次要求”卡片，在聊天中补充信息或点击“修改要求”。
-4. 等待待决定事项解决，且当前回复与排队输入结束。
-5. 点击“按这个执行”，确认卡片的当前版本。
+3. 在聊天中回答问题或发送修改说明。发送消息只更新要求，不开始制作。
+4. 等待未决事项解决、当前回复与排队输入结束，并出现“需求整理完成，请确认”。
+5. 核对最终确认单，点击“确认要求，开始执行”。界面收到后台对当前版本的批准状态后，才显示已确认。
 
 如果暂时不做，点击“退出对齐”。运行中的回复需先结束或停止；退出失败时，界面不会把仍在对齐的会话伪装成普通模式。切换到其他模式也会先尝试退出对齐。
 
-执行完成后回到普通对话。会话重开或执行中断不会自动重放已确认的执行，必要时需重新确认要求。
+回复停止、出错或未发布更新要求时，可点击“继续整理要求”；AI 使用会话已有答案继续整理，不自动制作，也不要求重打一遍。消息是否送达尚未确定时，先处理发送提示，不重复发送。
+
+执行后回到普通对话。执行回合结束不等于成果已验收。会话重开或执行中断不会自动重放已确认的执行，必要时需重新确认要求。
 
 ## 边界与保护
 
@@ -53,12 +55,14 @@ Pi 扩展通过标准 `custom_message`/消息事件发布隐藏快照：
 ```text
 customType: pi-deck-alignment-state
 display: false
-details.alignment: { schemaVersion: 1, briefId, revision, phase, brief? }
+details.alignment: { schemaVersion: 1, briefId, revision, phase, brief?, briefRevision?, lastStopReason? }
 ```
 
 `phase` 为 `clarifying`、`ready`、`approved`、`cancelled` 或 `complete`。`AgentRuntimeState.alignment = null` 用于明确清除旧状态。隐藏快照不占可见历史消息序号，普通工具结果不作为确认事实源。
 
-控制命令为 `/align on`、`/align off`、`/align approve <briefId> <revision>` 和 `/align revise <briefId> <revision>`。这些命令由原生控件发送，也可在支持的 Pi 会话中直接使用。
+可选 `briefRevision` 记录字段最后一次由 `alignment_brief` 发布的版本。用户输入会增加状态 `revision`，但保留旧字段和发布版本，防止把旧问题误当成新发布的问询。`lastStopReason` 仅记录已观察到的 `aborted/error`，不推断中断来源。旧会话缺少这些字段时仍可读取。
+
+控制命令为 `/align on`、`/align off`、`/align approve <briefId> <revision>` 和 `/align revise <briefId> <revision>`。模式与确认由桌面控件发送；高级用户也可在支持的 Pi 会话中直接使用这些命令。普通用户不必输入内部命令。
 
 | 职责 | 入口 |
 | --- | --- |
@@ -66,16 +70,18 @@ details.alignment: { schemaVersion: 1, briefId, revision, phase, brief? }
 | 共享状态契约与校验 | `src/shared/types/alignment.ts`、`src/shared/alignment.ts` |
 | 原生投影与有界历史恢复 | `src/main/pi/AlignmentProjection.ts`、`SessionHistoryReader.ts` |
 | 会话身份校验 | `src/main/sessions/SessionRuntimeCoordinator.ts`、`src/main/ipc/sessionIpc.ts` |
-| 原生卡片与会话级控制 | `src/renderer/src/components/session/AlignmentCard.tsx`、`src/renderer/src/hooks/useSessionAlignmentControls.ts` |
+| 聊天确认单与会话级控制 | `src/renderer/src/components/session/SessionAlignmentTimeline.tsx`、`AlignmentCard.tsx`、`src/renderer/src/hooks/useSessionAlignmentControls.ts` |
+| 完成与批准判据 | `src/renderer/src/utils/alignmentPresentation.ts`、`alignmentAcknowledgement.ts` |
+| 本地发送及队列屏障 | `src/renderer/src/atoms/alignment-atoms.ts`、`useSessionSend.ts`、`useQueuedPrompt.ts` |
 | 模式策略与隔离 | `src/renderer/src/composerBehavior.ts`、`src/renderer/src/hooks/useComposerModeAvailability.ts` |
 
 扩展可在原有扩展设置中关闭。运行进程是否已加载扩展，以 `get_commands` 结果为准，而不是只看文件是否存在。
 
 ## 验证范围
 
-自动化验证覆盖状态字段与预算、活动分支恢复、损坏快照、迟到消息、运行时换代、审批版本、取消失败、命令旁路、模式兼容性和会话隔离。真实浏览器验证使用生产卡片与生产样式，覆盖亮暗主题、折叠、长内容滚动、按钮转发和禁用状态。
+自动化验证覆盖状态字段与预算、活动分支恢复、损坏快照、迟到消息、运行时换代、审批版本、取消失败、命令旁路、模式兼容性和会话隔离。浏览器测试使用生产确认单、hooks、Jotai atoms 和样式，仅替换 IPC；覆盖连续发送、旧确认失效、未更新要求、权威批准、队列阻挡、亮暗主题、折叠与长内容滚动。具体交互门禁见 [整体评估与实施记录](tpa-alignment-ux-review.md)。
 
-本轮类型与格式门禁通过，24 个相关测试文件的 288 项测试全绿，Playwright 3 项通过。最终全量测试为 9313 项：9296 项通过、6 项失败、11 项跳过。6 项失败均在改动前的 `67af8bf8` 隔离工作树复现；本轮曾引入的 15 项集成回归已修复，没有修改原断言来掩盖失败。
+首版落地时的历史验证记录：类型与格式门禁通过，24 个相关测试文件的 288 项测试全绿，Playwright 3 项通过。此数字不代表后续交互改造的本轮验证。最终全量测试为 9313 项：9296 项通过、6 项失败、11 项跳过。6 项失败均在改动前的 `67af8bf8` 隔离工作树复现；本轮曾引入的 15 项集成回归已修复，没有修改原断言来掩盖失败。
 
 仍红的基线项分布在 `configTrustWsl.test.mjs`（2 项）、`dshStartup.test.mjs`（1 项）、`packDshRuntimeCross.test.mjs`（2 项）和 `sessionHeaderLayout.test.mjs`（1 项）。本次不改这些无关功能，不宣称全量全绿。
 
@@ -84,7 +90,7 @@ details.alignment: { schemaVersion: 1, briefId, revision, phase, brief? }
 ```bash
 npm run typecheck
 npm run check:format
-node --test tests/alignmentState.test.mjs tests/alignmentComposer.test.mjs tests/alignmentControlsHook.test.mjs tests/alignmentHistory.test.mjs tests/alignmentProjection.test.mjs tests/alignmentPromptTarget.test.mjs tests/piDeckAlignmentModeExtension.test.mjs
+node --test tests/alignmentState.test.mjs tests/alignmentComposer.test.mjs tests/alignmentControlsHook.test.mjs tests/alignmentHistory.test.mjs tests/alignmentProjection.test.mjs tests/alignmentPromptTarget.test.mjs tests/piDeckAlignmentModeExtension.test.mjs tests/alignmentPresentation.test.mjs tests/alignmentAcknowledgement.test.mjs tests/alignmentQueueHook.test.mjs tests/sessionSendPromotionFailures.test.mjs
 npx playwright test e2e/alignment-card.spec.ts --output ../../cache/tpa-alignment/playwright
 ```
 

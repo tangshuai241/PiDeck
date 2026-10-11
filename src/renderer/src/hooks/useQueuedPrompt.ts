@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { alignmentQueuedCountAtomFamily } from "../atoms/alignment-atoms";
 import type { MutableRefObject } from "react";
 import type { createStore } from "jotai";
 import type { AgentTab, ComposerAgentMode, ImageContent } from "../../../shared/types";
@@ -44,13 +45,19 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
 	const mountedRef = useRef(false);
 	useEffect(() => {
 		mountedRef.current = true;
+		for (const [sessionId, queue] of Object.entries(queuedPromptsRef.current)) store.set(alignmentQueuedCountAtomFamily(sessionId), queue.length);
 		return () => {
 			mountedRef.current = false;
+			for (const sessionId of Object.keys(queuedPromptsRef.current)) store.set(alignmentQueuedCountAtomFamily(sessionId), 0);
 		};
-	}, []);
+	}, [store]);
 
 	function updateQueuedPrompts(updater: (current: Record<string, QueuedPrompt[]>) => Record<string, QueuedPrompt[]>) {
 		const next = updater(queuedPromptsRef.current);
+		// Timeline confirmation must retire immediately on enqueue, not only when the queue eventually drains.
+		for (const sessionId of new Set([...Object.keys(queuedPromptsRef.current), ...Object.keys(next)])) {
+			store.set(alignmentQueuedCountAtomFamily(sessionId), next[sessionId]?.length ?? 0);
+		}
 		queuedPromptsRef.current = next;
 		if (mountedRef.current) setQueuedPrompts(next);
 	}

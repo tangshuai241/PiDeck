@@ -95,6 +95,39 @@ function harness({ entries = [], allEntries = [], tools = ORIGINAL, session = "s
 	};
 }
 
+test("interrupted alignment records a resumable state without reviving ready approval", async () => {
+	const h = harness();
+	await h.input("__PI_DECK_ALIGNMENT_MODE__\n整理要求");
+	await h.publishBrief();
+	await h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
+	assert.equal(h.state().phase, "clarifying");
+	assert.equal(h.state().lastStopReason, "aborted");
+	assert.equal((await h.gate("write")).block, true);
+	await h.input("__PI_DECK_ALIGNMENT_MODE__\n继续更新");
+	assert.equal(h.state().lastStopReason, undefined);
+	await h.publishBrief();
+	assert.equal(h.state().phase, "ready");
+});
+
+test("input retires questions without pretending to republish the retained brief, and later publication replaces them", async () => {
+	const h = harness();
+	await h.command("on");
+	await h.publishBrief(brief({ questions: ["需要 Word 还是 Excel？"] }));
+	const published = h.state();
+	assert.equal(published.briefRevision, published.revision);
+	await h.input("改为 Excel，不要 Word。");
+	assert.equal(h.state().briefRevision, published.revision);
+	assert.equal(h.state().revision, published.revision + 1);
+	const restored = harness({ entries: h.history() });
+	await restored.fire("session_start");
+	assert.equal(restored.state().briefRevision < restored.state().revision, true);
+	await h.publishBrief(brief({ deliverable: "Excel", questions: [] }));
+	assert.equal(h.state().brief.deliverable, "Excel");
+	assert.deepEqual(clone(h.state().brief.questions), []);
+	assert.equal(h.state().briefRevision, h.state().revision);
+	assert.equal((await h.gate("write")).block, true);
+});
+
 test("hidden marker enables read-only alignment and preserves visible text and images", async () => {
 	const h = harness();
 	const visible = "  请分析材料\n保留我的格式  ";
@@ -103,8 +136,11 @@ test("hidden marker enables read-only alignment and preserves visible text and i
 	assert.equal(result.text, visible);
 	assert.deepEqual(result.images, images);
 	assert.equal(h.state().phase, "clarifying");
-	assert.equal(await h.input(visible), undefined);
 	assert.equal(h.state().revision, 0);
+	assert.equal(await h.input(visible), undefined);
+	assert.equal(h.state().revision, 1, "every user answer invalidates the previous publication, even without a hidden marker");
+	assert.equal(await h.input(visible, "extension"), undefined);
+	assert.equal(h.state().revision, 1, "internal extension context is not a new user revision");
 	assert.deepEqual(h.active(), ["read", "grep", "find", "ls", "alignment_brief"]);
 });
 
@@ -400,6 +436,10 @@ test("alignment instructions require actual material reads, preserve facts and a
 	assert.match(prompt, /invent nothing/);
 	assert.match(prompt, /only for missing information/);
 	assert.match(prompt, /model prose is never approval/);
+	assert.match(prompt, /explicit new format or scope replaces the superseded one/);
+	assert.match(prompt, /Remove answered questions/);
+	assert.match(prompt, /Do not duplicate the full brief/);
+	assert.match(prompt, /never ask them to type \/align commands/);
 	const current = { role: "custom", customType: "pi-deck-alignment-context", content: prompt };
 	const messages = [{ role: "custom", customType: "pi-deck-alignment-context", content: "old" }, { role: "custom", customType: "pi-deck-alignment-execute" }, { role: "custom", customType: "pi-deck-alignment-state" }, { role: "user", content: "original" }, current];
 	const context = await h.fire("context", { messages });

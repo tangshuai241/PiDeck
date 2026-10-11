@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
+import { atom, createStore } from "jotai/vanilla";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 function snapshot(revision = 2) {
@@ -17,34 +18,54 @@ function deferred() {
 	});
 	return { promise, resolve: resolveValue };
 }
-function harness({ initialRuntime = runtime(), backend = "pi", send = async () => ({ accepted: true }) } = {}) {
-	const values = new Map([
-		["runtime:s1", initialRuntime],
-		["mode:s1", "normal"],
-	]);
+function harness({ initialRuntime = runtime(), backend = "pi", send = async () => ({ accepted: true }), autoAcknowledge = true } = {}) {
+	const store = createStore();
+	const runtimes = atom({ s1: initialRuntime });
+	const keyed = new Map();
+	const keyAtom = (key) => {
+		if (!keyed.has(key)) keyed.set(key, key.startsWith("runtime:") ? atom((get) => get(runtimes)[key.slice(8)]) : atom(key.startsWith("mode:") ? "normal" : undefined));
+		return keyed.get(key);
+	};
+	const values = {
+		get: (key) => store.get(keyAtom(key)),
+		set: (key, value) => (key.startsWith("runtime:") ? store.set(runtimes, { ...store.get(runtimes), [key.slice(8)]: value }) : store.set(keyAtom(key), value)),
+	};
 	const requests = [];
 	const notices = [];
-	const store = {
-		get: (key) => values.get(key),
-		set: (key, value) => {
-			if (key === "set-mode") values.set(`mode:${value.sessionId}`, value.mode);
-			else values.set(key, value);
-		},
-	};
+	const setMode = atom(null, (_get, _set, value) => values.set(`mode:${value.sessionId}`, value.mode));
+	const setSend = atom(null, (_get, _set, value) => values.set(`send:${value.sessionId}`, value.state));
+	const bind = atom(null, (_get, _set, value) => values.set(`runtime:${value.sessionId}`, { ...values.get(`runtime:${value.sessionId}`), ...value }));
+	let familyIndex = 0;
 	const module = loadTsCommonJs(resolve("src/renderer/src/hooks/useSessionAlignmentControls.ts"), {
 		globals: { crypto: { randomUUID: () => "request-123" } },
 		stubs: {
-			jotai: { useStore: () => store, useAtomValue: (key) => store.get(key) },
+			jotai: { atom, useStore: () => store, useAtomValue: (key) => store.get(key) },
+			"jotai/utils": {
+				atomFamily: (initialize) => {
+					const prefix = ["pending", "error", "submission", "queue"][familyIndex++];
+					return (id) => {
+						const key = `${prefix}:${id}`;
+						if (!keyed.has(key)) keyed.set(key, initialize(id));
+						return keyed.get(key);
+					};
+				},
+			},
 			react: { useCallback: (fn) => fn, useEffect: (fn) => fn() },
-			"../atoms/composer-atoms": { sessionComposerModeBySessionIdAtomFamily: (id) => `mode:${id}`, setSessionComposerModeAtom: "set-mode" },
-			"../atoms/alignment-atoms": { alignmentControlPendingAtomFamily: (id) => `pending:${id}` },
-			"../atoms/session-selectors": { sessionRuntimeBySessionIdAtomFamily: (id) => `runtime:${id}` },
+			"../atoms/composer-atoms": { sessionComposerModeBySessionIdAtomFamily: (id) => keyAtom(`mode:${id}`), sessionSendStateBySessionIdAtomFamily: (id) => keyAtom(`send:${id}`), setSessionComposerModeAtom: setMode, setSessionSendStateAtom: setSend },
+			"./session-atoms": { sessionRuntimeByIdAtom: runtimes },
+			"../atoms/session-atoms": { bindSessionRuntimeAtom: bind },
+			"../atoms/session-selectors": { sessionRuntimeBySessionIdAtomFamily: (id) => keyAtom(`runtime:${id}`) },
 			"../desktopApi": {
 				desktopApi: {
 					sessions: {
-						sendPrompt: (input) => {
+						sendPrompt: async (input) => {
 							requests.push(JSON.parse(JSON.stringify(input)));
-							return send(input);
+							const result = await send(input);
+							const current = values.get(`runtime:${input.sessionId}`);
+							if (autoAcknowledge && result.accepted && current?.runtimeGeneration === input.expectedRuntime.runtimeGeneration) {
+								if (input.message.startsWith("/align")) values.set(`runtime:${input.sessionId}`, { ...current, state: { alignment: { ...current.state.alignment, phase: input.message.startsWith("/align approve") ? "approved" : input.message === "/align off" ? "cancelled" : "clarifying" } } });
+							}
+							return result;
 						},
 					},
 				},
@@ -54,7 +75,8 @@ function harness({ initialRuntime = runtime(), backend = "pi", send = async () =
 			"./useSessionTimelineController": { isSessionRuntimeBusy: (status, state) => status === "running" || Boolean(state?.isStreaming) },
 		},
 	});
-	return { values, requests, notices, render: () => module.useSessionAlignmentControls("s1", backend) };
+	// Load the same atom module graph through the hook; its exports are captured via the shared atomFamily implementation.
+	return { values, requests, notices, store, render: (id = "s1") => module.useSessionAlignmentControls(id, backend) };
 }
 
 test("draft selection and cancellation need no runtime or background request", () => {
@@ -117,6 +139,78 @@ test("failed cancellation preserves alignment instead of pretending it was stopp
 	await setImmediate();
 	assert.equal(h.values.get("mode:s1"), "alignment");
 	assert.deepEqual(h.notices, ["alignment.actionFailed"]);
+});
+
+test("delivery acceptance keeps alignment pending until the exact authoritative approval arrives", async () => {
+	const h = harness({ autoAcknowledge: false });
+	h.render().approve();
+	await setImmediate();
+	assert.equal(h.values.get("mode:s1"), "alignment");
+	assert.equal(h.values.get("pending:s1"), true);
+	assert.equal(h.render().presentation.kind, "confirming");
+	h.values.set("runtime:s1", runtime(1, { ...snapshot(), phase: "approved" }));
+	await setImmediate();
+	assert.equal(h.values.get("mode:s1"), "normal");
+	assert.equal(h.values.get("pending:s1"), false);
+});
+
+test("captured confirmation cannot approve while a revision is sending or queued", () => {
+	for (const key of ["send:s1", "queue:s1"]) {
+		const h = harness();
+		const card = h.render();
+		h.values.set(key, key.startsWith("send") ? { status: "sending" } : 1);
+		card.approve();
+		assert.equal(h.requests.length, 0);
+		assert.equal(h.render().presentation.canApprove, false);
+	}
+});
+
+test("an old version failure does not poison a newly published complete brief", async () => {
+	const h = harness({ send: async () => ({ accepted: false, error: "rejected" }) });
+	h.render().approve();
+	await setImmediate();
+	assert.equal(h.render().presentation.kind, "failed");
+	h.values.set("runtime:s1", runtime(1, snapshot(3)));
+	assert.equal(h.render().presentation.kind, "ready");
+	assert.equal(h.render().controlError, undefined);
+});
+
+test("resuming an interrupted round uses the ordinary read-only marker and invalidates its old version", async () => {
+	const h = harness({ initialRuntime: runtime(1, { ...snapshot(), phase: "clarifying", lastStopReason: "aborted" }) });
+	assert.equal(h.render().presentation.kind, "interrupted");
+	h.values.set("send:s1", { status: "error" });
+	h.render().resume();
+	await setImmediate();
+	assert.equal(h.requests.length, 1);
+	assert.equal(h.requests[0].message, "alignment.resumeRequest");
+	assert.equal(h.requests[0].agentMessage, "__PI_DECK_ALIGNMENT_MODE__\nalignment.resumeRequest");
+	assert.equal(h.requests[0].expectedRuntime.runtimeGeneration, 1);
+	assert.equal(h.values.get("mode:s1"), "alignment");
+	assert.equal(h.values.get("submission:s1").revision, 2);
+	assert.equal(h.values.get("send:s1").status, "idle");
+});
+
+test("a late resume response cannot settle a replacement runtime's new send request", async () => {
+	const wait = deferred();
+	const h = harness({ send: () => wait.promise, autoAcknowledge: false, initialRuntime: runtime(1, { ...snapshot(), phase: "clarifying", lastStopReason: "aborted" }) });
+	h.render().resume();
+	h.values.set("runtime:s1", runtime(2));
+	h.values.set("send:s1", { status: "sending", requestId: "replacement-request" });
+	wait.resolve({ accepted: true });
+	await setImmediate();
+	assert.equal(h.values.get("send:s1").requestId, "replacement-request");
+	assert.equal(h.values.get("send:s1").status, "sending");
+	assert.equal(h.values.get("runtime:s1").status, "idle");
+});
+
+test("another session's delivery and pending control do not affect this session's ready sheet", () => {
+	const h = harness();
+	h.values.set("runtime:s2", runtime(2, snapshot(8)));
+	h.render("s2");
+	h.values.set("send:s1", { status: "sending" });
+	h.values.set("pending:s1", true);
+	assert.equal(h.render("s1").presentation.canApprove, false);
+	assert.equal(h.render("s2").presentation.canApprove, true);
 });
 
 test("non-pi sessions reject every alignment action without sending text to another backend", async () => {

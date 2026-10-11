@@ -121,7 +121,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 	function clarify(ctx: ExtensionContext): void {
 		ensureSession(ctx);
 		if (!state || state.phase === "cancelled" || state.phase === "complete") state = freshState(ctx);
-		else state = { ...state, phase: "clarifying", revision: state.revision + 1 };
+		else state = { ...state, phase: "clarifying", briefRevision: state.brief ? (state.briefRevision ?? state.revision) : undefined, revision: state.revision + 1, lastStopReason: undefined };
 		executing = false;
 		executionStarted = false;
 		restrictTools();
@@ -131,7 +131,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 	function cancel(clear = false): void {
 		if (!state) return;
 		// A cancelled state must be durable before the write loadout is restored.
-		transition({ ...state, phase: "cancelled", revision: state.revision + 1, ...(clear ? { brief: undefined } : {}) });
+		transition({ ...state, phase: "cancelled", revision: state.revision + 1, ...(clear ? { brief: undefined, briefRevision: undefined } : {}) });
 		executing = false;
 		executionStarted = false;
 		restoreTools();
@@ -147,7 +147,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 			if (!readOnly() || !state) throw new Error("Alignment mode is not clarifying or ready");
 			const brief = decodeBrief(params);
 			if (!brief) throw new Error("Brief must contain all bounded fields and no extra fields (maximum 48000 text characters)");
-			transition({ ...state, revision: state.revision + 1, brief, phase: briefIsReady(brief) ? "ready" : "clarifying" });
+			transition({ ...state, revision: state.revision + 1, briefRevision: state.revision + 1, brief, lastStopReason: undefined, phase: briefIsReady(brief) ? "ready" : "clarifying" });
 			return { content: [{ type: "text", text: `${state.phase}; briefId=${state.briefId}; revision=${state.revision}. Wait for explicit user approval; do not execute.` }], details: { alignment: decodeAlignment(state) } };
 		},
 	});
@@ -182,7 +182,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 				clarify(ctx);
 				return;
 			}
-			if (busy || !ctx.isIdle() || ctx.hasPendingMessages() || !state.brief || !briefIsReady(state.brief)) {
+			if (busy || !ctx.isIdle() || ctx.hasPendingMessages() || state.lastStopReason || (state.briefRevision !== undefined && state.briefRevision !== state.revision) || !state.brief || !briefIsReady(state.brief)) {
 				ctx.ui.notify("Approval rejected: runtime must be idle with no queued input and no unanswered questions.", "warning");
 				return;
 			}
@@ -198,7 +198,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 	pi.on("input", async (event, ctx) => {
 		ensureSession(ctx);
 		const marked = event.text.startsWith(ALIGNMENT_MARKER);
-		if (marked || ((event.source === "interactive" || event.source === "rpc") && (state?.phase === "ready" || state?.phase === "approved"))) clarify(ctx);
+		if (marked || ((event.source === "interactive" || event.source === "rpc") && (readOnly() || state?.phase === "approved"))) clarify(ctx);
 		// A single line separator belongs to the hidden envelope; preserve all visible whitespace otherwise.
 		if (marked) return { action: "transform", text: event.text.slice(ALIGNMENT_MARKER.length).replace(/^\r?\n/, ""), images: event.images };
 	});
@@ -215,7 +215,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 		ensureSession(ctx);
 		if (!readOnly()) return;
 		restrictTools();
-		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls and reason; no writes, edits, bash, execution, unknown MCP or approval. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; identify unavailable material honestly. Binary documents requiring conversion cannot be converted in this strict read-only mode: report that limitation and ask for readable material when necessary; never pretend conversion succeeded. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Publish every complete bounded field via alignment_brief, with unanswered questions retained. Even ready means wait for the user's exact /align approve command; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
+		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls and reason; no writes, edits, bash, execution, unknown MCP or approval. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; identify unavailable material honestly. Binary documents requiring conversion cannot be converted in this strict read-only mode: report that limitation and ask for readable material when necessary; never pretend conversion succeeded. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Update every brief field with the latest user answers and changes; an explicit new format or scope replaces the superseded one. Remove answered questions and retain only genuinely missing decisions. Ask only material blocking questions; do not re-ask choices the user already made or delegated. Publish the updated complete fields via alignment_brief. The user confirms through the desktop confirmation button; never ask them to type /align commands. Do not duplicate the full brief in conversation: the desktop confirmation sheet displays it. Even ready means wait for the exact approval control; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
 	});
 	pi.on("context", async (event) => {
 		// Keep the current injected instructions through tool follow-ups; remove obsolete modes and executions.
@@ -240,8 +240,14 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 	pi.on("agent_end", async (event, ctx) => {
 		ensureSession(ctx);
 		busy = false;
-		if (!executing || !executionStarted || state?.phase !== "approved") return;
 		const last = [...event.messages].reverse().find((message) => message.role === "assistant");
+		if (!executing || !executionStarted || state?.phase !== "approved") {
+			// A partial model answer must not leave a ready draft presented as successfully completed.
+			if (readOnly() && state && last?.role === "assistant" && (last.stopReason === "aborted" || last.stopReason === "error")) {
+				transition({ ...state, phase: "clarifying", revision: state.revision + 1, lastStopReason: last.stopReason });
+			}
+			return;
+		}
 		// Interrupted or failed executions need fresh user confirmation, and must never auto-run on restore.
 		if (last?.role === "assistant" && (last.stopReason === "aborted" || last.stopReason === "error")) {
 			clarify(ctx);
