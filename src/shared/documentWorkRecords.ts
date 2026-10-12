@@ -14,6 +14,7 @@ import {
 	type DocumentInspection,
 	type DocumentInspectionItem,
 	type DocumentOutputRoot,
+	type DocumentSectionFingerprint,
 	type DocumentWorkBase,
 	type DocumentWorkChangedEvent,
 	type DocumentWorkOperation,
@@ -30,6 +31,17 @@ import { deriveInspectionStatus, isWorkErrorCode, isRetryableWorkError } from ".
 
 const OPERATION_PHASES: readonly OperationPhase[] = ["prepared", "dispatching", "running", "inspecting", "archived", "failed", "interrupted", "unknown"];
 const INSPECTION_STATUSES: readonly InspectionStatus[] = ["passed", "failed", "unverified"];
+
+/** 块大纲：标题 + 64 位 hex 正文指纹；任一条不合格整份作废。 */
+export function parseSectionFingerprints(value: unknown): DocumentSectionFingerprint[] | undefined {
+	if (!Array.isArray(value) || value.length > 4096) return undefined;
+	const sections: DocumentSectionFingerprint[] = [];
+	for (const entry of value) {
+		if (!isRecord(entry) || !isBoundedText(entry.heading, 200) || !isDigest(entry.textDigest)) return undefined;
+		sections.push({ heading: entry.heading, textDigest: entry.textDigest });
+	}
+	return sections;
+}
 
 export function parseWorkError(value: unknown): WorkError | undefined {
 	if (!isRecord(value) || !isWorkErrorCode(value.code)) return undefined;
@@ -86,6 +98,7 @@ export function parseDocumentInspection(value: unknown): DocumentInspection | un
 			...(isDigest(coverage.textDigest) ? { textDigest: coverage.textDigest } : {}),
 			...(isDigest(coverage.formatDigest) ? { formatDigest: coverage.formatDigest } : {}),
 			...(isNonNegativeInteger(coverage.textLength) ? { textLength: coverage.textLength } : {}),
+			...(parseSectionFingerprints(coverage.sections) ? { sections: parseSectionFingerprints(coverage.sections) as DocumentSectionFingerprint[] } : {}),
 			...(isWorkId(coverage.comparedToVersionId) ? { comparedToVersionId: coverage.comparedToVersionId } : {}),
 			truncated: coverage.truncated,
 		},
@@ -197,7 +210,9 @@ export function parseDocumentWorkBase(value: unknown): DocumentWorkBase | undefi
 	if (!isNonNegativeInteger(value.ordinal) || value.ordinal < 1) return undefined;
 	if (!isDigest(value.digest) || !isBoundedText(value.fileName, 200) || !isBoundedText(value.frozenPath, 400)) return undefined;
 	if (value.origin !== "archived" && value.origin !== "external_manual") return undefined;
-	return { versionId: value.versionId, ordinal: value.ordinal, digest: value.digest, fileName: value.fileName, frozenPath: value.frozenPath, origin: value.origin };
+	const sections = parseSectionFingerprints(value.sections);
+	if (!sections) return undefined;
+	return { versionId: value.versionId, ordinal: value.ordinal, digest: value.digest, fileName: value.fileName, frozenPath: value.frozenPath, origin: value.origin, sections };
 }
 
 export function parseDocumentWorkPreparation(value: unknown, expectedWorkId?: string): DocumentWorkPreparation | undefined {
@@ -239,6 +254,7 @@ export function parseDocumentWorkPreparation(value: unknown, expectedWorkId?: st
 		...(base ? { base } : {}),
 		scope,
 		...(runtime ? { runtime } : {}),
+		...(isBoundedText(value.nativeSessionId, 200) ? { nativeSessionId: value.nativeSessionId } : {}),
 		createdAt: value.createdAt,
 	};
 }

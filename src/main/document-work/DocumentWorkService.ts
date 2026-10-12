@@ -152,7 +152,12 @@ export class DocumentWorkService {
 
 	// ------------------------------------------------------------------ create
 
+	/** 去重读→执行→回执必须整体串行，否则同一 requestId 的并发送达会各执行一次。 */
 	async createWork(input: CreateWorkInput): Promise<WorkResult<DocumentWorkView>> {
+		return this.deps.store.runExclusive(`create:${input.requestId}`, () => this.createWorkExclusive(input));
+	}
+
+	private async createWorkExclusive(input: CreateWorkInput): Promise<WorkResult<DocumentWorkView>> {
 		const requestDigest = hashText(stableStringify({ kind: "create", sessionId: input.sessionId, sourceTurnId: input.sourceTurnId, outputRootId: input.outputRootId }));
 		const replay = await this.deps.store.readIdempotent(input.requestId, requestDigest);
 		if (replay.kind === "conflict") return workFailure<DocumentWorkView>("IDEMPOTENCY_CONFLICT");
@@ -259,6 +264,10 @@ export class DocumentWorkService {
 	// ------------------------------------------------------------------ prepare
 
 	async prepare(input: PrepareWorkInput): Promise<WorkResult<PreparedWork>> {
+		return this.deps.store.runExclusive(`prepare:${input.requestId}`, () => this.prepareExclusive(input));
+	}
+
+	private async prepareExclusive(input: PrepareWorkInput): Promise<WorkResult<PreparedWork>> {
 		const requestDigest = hashText(stableStringify(input));
 		const replay = await this.deps.store.readIdempotent(input.requestId, requestDigest);
 		if (replay.kind === "conflict") return workFailure<PreparedWork>("IDEMPOTENCY_CONFLICT");
@@ -297,12 +306,11 @@ export class DocumentWorkService {
 			}
 			base = frozen.base;
 			if (base) {
-				const outline = await this.deps.inspection.outline(base.frozenPath);
-				if (!outline) {
-					await this.deps.store.removeStaging(staging.value);
-					return workFailure<PreparedWork>("BASE_CHANGED", "outline_unavailable");
-				}
-				const scopeCheck = validateScopeAgainstHeadings(input.scope, outline);
+				// 块大纲在 freezeBase 里从冻结副本抽出；这里只做范围冲突判定。
+				const scopeCheck = validateScopeAgainstHeadings(
+					input.scope,
+					base.sections.map((section) => section.heading),
+				);
 				if (!scopeCheck.ok) {
 					await this.deps.store.removeStaging(staging.value);
 					return workFailure<PreparedWork>("BASE_AMBIGUOUS", "scope_conflict");
@@ -324,6 +332,7 @@ export class DocumentWorkService {
 			...(base ? { base } : {}),
 			scope: { summary: input.scope.summary.slice(0, 2000), sections: input.scope.sections.slice(0, 24), preserve: input.scope.preserve.slice(0, 24) },
 			runtime: runtime.target,
+			...(runtime.nativeSessionId ? { nativeSessionId: runtime.nativeSessionId } : {}),
 			createdAt: Date.now(),
 		};
 		const preparation: DocumentWorkPreparation = { ...draft, digest: preparationDigestOf(draft) };
@@ -378,7 +387,20 @@ export class DocumentWorkService {
 		if (!publicFile) return { ok: false, code: "PATH_DENIED", detail: "bad_path" };
 		const frozen = await this.deps.artifacts.freezeBase({ workId: record.workId, attemptId, sourcePath: publicFile, fileName: `${selection.version.directory}-${primary.relativePath.split("/").pop() ?? "base"}` });
 		if (!frozen.ok) return { ok: false, code: frozen.reason === "changed" ? "BASE_CHANGED" : "IO_ERROR", detail: frozen.reason };
-		return { ok: true, base: { versionId: selection.version.versionId, ordinal: selection.version.ordinal, digest: frozen.value.digest, fileName: primary.relativePath.split("/").pop() ?? "base", frozenPath: frozen.value.frozenPath, origin: selection.fileDigest !== primary.digest ? "external_manual" : "archived" } };
+		// 块大纲来自冻结副本（不是公开文件），因此在「冻结后原文件又被改」的情况下结论仍然自洽。
+		const analysis = await this.deps.inspection.analyze(frozen.value.frozenPath);
+		return {
+			ok: true,
+			base: {
+				versionId: selection.version.versionId,
+				ordinal: selection.version.ordinal,
+				digest: frozen.value.digest,
+				fileName: primary.relativePath.split("/").pop() ?? "base",
+				frozenPath: frozen.value.frozenPath,
+				origin: selection.fileDigest !== primary.digest ? "external_manual" : "archived",
+				sections: analysis?.sections ?? [],
+			},
+		};
 	}
 
 	/** 公开成果被手工改过时记录观察值；归属唯一（最新版 + 恰好一个文件变化）才自动接续。 */
@@ -415,8 +437,13 @@ export class DocumentWorkService {
 		if (!runtime) return workFailure<DocumentWorkOperation>("RUNTIME_CHANGED");
 		if (!sameRuntimeTriple(runtime.target, input.expectedRuntime)) return workFailure<DocumentWorkOperation>("RUNTIME_CHANGED");
 		if (!sameRuntimeTriple(preparation.runtime, input.expectedRuntime)) return workFailure<DocumentWorkOperation>("RUNTIME_CHANGED", "prepared_elsewhere");
-		// 运行时忙或有排队输入时不允许开始：避免把本轮执行插到别人前面。
-		if (runtime.state.isStreaming === true || runtime.state.isTurnActive === true || runtime.state.isCompacting === true) return workFailure<DocumentWorkOperation>("RUNTIME_BUSY");
+		// 原生会话身份也复核：进程换绑到别的 pi 会话后旧准备同样失效。
+		if (preparation.nativeSessionId && runtime.nativeSessionId && preparation.nativeSessionId !== runtime.nativeSessionId) return workFailure<DocumentWorkOperation>("RUNTIME_CHANGED", "native_session_changed");
+		// 对齐批准必须从空闲态开始（它自己会触发一个模型回合）；改稿轮允许此时 Pi 正忙，
+		// 结算协程会等本轮稳定结束再绑定并派发正式改稿提示，不需要用户重开对齐。
+		const busy = runtime.state.isStreaming === true || runtime.state.isTurnActive === true || runtime.state.isCompacting === true;
+		if (busy && input.authorization.kind !== "revision_instruction") return workFailure<DocumentWorkOperation>("RUNTIME_BUSY");
+		if (busy && input.authorization.kind === "revision_instruction" && !(await this.latestTurnMatches(record.sessionId, input.authorization))) return workFailure<DocumentWorkOperation>("APPROVAL_REQUIRED", "instruction_mismatch");
 		const authorization = await this.verifyAuthorization(record, preparation, input.authorization);
 		if (!authorization.ok) return authorization;
 		const materials = await this.materialsUnchanged(preparation);
@@ -465,7 +492,17 @@ export class DocumentWorkService {
 		if (!latest || latest.sourceTurnId !== authorization.sourceTurnId || latest.hash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "instruction_mismatch");
 		if (record.consumedRevisionTurns.includes(authorization.sourceTurnHash)) return workFailure("APPROVAL_REQUIRED", "instruction_replayed");
 		if (preparation.requirements.kind !== "user_instruction" || preparation.requirements.sourceTurnHash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "requirements_mismatch");
+		// 授权只对应「用户明确提出的那次改稿要求」：准备里声明的范围必须就是授权的那段文字，
+		// 否则一段普通讨论被模型拿去调用工具时也能成立。
+		if (hashTurnText(preparation.scope.summary) !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "scope_mismatch");
 		return workSuccess({ confirmed: true });
+	}
+
+	/** 本轮用户轮是否就是授权引用的那一轮（改稿排队接续时用来复核）。 */
+	private async latestTurnMatches(sessionId: string, authorization: AuthorizationReference): Promise<boolean> {
+		if (authorization.kind !== "revision_instruction") return false;
+		const latest = await this.latestUserTurn(sessionId);
+		return Boolean(latest && latest.sourceTurnId === authorization.sourceTurnId);
 	}
 
 	private async materialsUnchanged(preparation: DocumentWorkPreparation): Promise<{ ok: true } | { ok: false; detail: string }> {

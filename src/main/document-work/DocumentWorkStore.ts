@@ -11,7 +11,7 @@
  */
 import { join } from "node:path";
 import { readdir, rm } from "node:fs/promises";
-import { hashText, readJsonResilient, writeFileAtomic, ensureDirectory } from "./documentWorkPaths";
+import { hashText, readJsonResilient, readJsonWithHealth, writeFileAtomic, ensureDirectory } from "./documentWorkPaths";
 import { isRequestId, isWorkId, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
 import { parseDocumentOutputRoot, parseDocumentWorkOperation, parseDocumentWorkPreparation, parseArtifactVersion, parseDocumentWorkRecord } from "../../shared/documentWorkRecords";
 import type { DocumentArtifactVersion, DocumentOutputRoot, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord } from "../../shared/types/documentWork";
@@ -105,28 +105,55 @@ export class DocumentWorkStore {
 
 	// ---------------------------------------------------------------- work records
 
-	async getRecord(workId: string): Promise<DocumentWorkRecord | undefined> {
-		if (!isWorkId(workId)) return undefined;
-		const raw = await readJsonResilient(join(this.workDir(workId), "work.json"));
-		const record = parseDocumentWorkRecord(raw);
-		if (!record) {
-			if (raw !== undefined) this.logger?.warn("document-work", "Unreadable work record", { workId });
-			return undefined;
+	/**
+	 * 工作记录读取带健康度：`corrupt` 表示主档存在但读不动。
+	 * 调用方据此只做只读展示，不拿旧备份重新授权或覆写损坏原件。
+	 */
+	async readRecordState(workId: string): Promise<{ kind: "ok"; record: DocumentWorkRecord } | { kind: "missing" } | { kind: "corrupt"; recovered?: DocumentWorkRecord }> {
+		if (!isWorkId(workId)) return { kind: "missing" };
+		const result = await readJsonWithHealth(join(this.workDir(workId), "work.json"));
+		if (result.kind === "ok") {
+			const record = parseDocumentWorkRecord(result.value);
+			// 主档能解析成 JSON 但不符合契约，同样属于「损坏」，不能当成不存在。
+			return record ? { kind: "ok", record } : { kind: "corrupt" };
 		}
-		return record;
+		if (result.kind === "missing") return { kind: "missing" };
+		const recovered = parseDocumentWorkRecord(result.recovered);
+		this.logger?.warn("document-work", "Work record is corrupt", { workId, hasBackup: recovered !== undefined });
+		return { kind: "corrupt", ...(recovered ? { recovered } : {}) };
+	}
+
+	/** 只读路径：允许用备份当作恢复证据展示，但拿不到可写记录。 */
+	async getRecord(workId: string): Promise<DocumentWorkRecord | undefined> {
+		const state = await this.readRecordState(workId);
+		return state.kind === "ok" ? state.record : state.kind === "corrupt" ? state.recovered : undefined;
 	}
 
 	async saveRecord(record: DocumentWorkRecord): Promise<void> {
 		await writeFileAtomic(join(this.workDir(record.workId), "work.json"), JSON.stringify(record, null, 2));
-		await writeFileAtomic(join(this.rootDir, "sessions", `${hashText(record.sessionId)}.json`), JSON.stringify({ sessionId: record.sessionId, workId: record.workId }));
+		await this.writeSessionIndex(record.sessionId, record.workId);
+	}
+
+	/** 会话索引保存全部工作，不只最后一件；旧格式（单 workId）仍然读得懂。 */
+	private async writeSessionIndex(sessionId: string, workId: string): Promise<void> {
+		const file = join(this.rootDir, "sessions", `${hashText(sessionId)}.json`);
+		// 索引是「同一会话多件工作」的恢复入口，读改写必须在自己的锁里，否则并发保存会丢工作。
+		await this.mutex.run(`session-index:${hashText(sessionId)}`, async () => {
+			const existing = await this.listWorkIdsForSession(sessionId);
+			const workIds = existing.includes(workId) ? existing : [...existing, workId];
+			await writeFileAtomic(file, JSON.stringify({ sessionId, workIds }));
+		});
 	}
 
 	async listWorkIdsForSession(sessionId: string): Promise<string[]> {
 		const raw = await readJsonResilient(join(this.rootDir, "sessions", `${hashText(sessionId)}.json`));
 		if (typeof raw !== "object" || raw === null) return [];
-		const workId = Reflect.get(raw, "workId");
-		const stored = Reflect.get(raw, "sessionId");
-		return isWorkId(workId) && stored === sessionId ? [workId] : [];
+		if (Reflect.get(raw, "sessionId") !== sessionId) return [];
+		const workIds = Reflect.get(raw, "workIds");
+		if (Array.isArray(workIds)) return workIds.filter((candidate) => isWorkId(candidate));
+		// 兼容旧格式：只有一个 workId。
+		const single = Reflect.get(raw, "workId");
+		return isWorkId(single) ? [single] : [];
 	}
 
 	/**
@@ -135,8 +162,11 @@ export class DocumentWorkStore {
 	 */
 	async mutateRecord(workId: string, expectedRevision: number | undefined, mutate: (record: DocumentWorkRecord) => DocumentWorkRecord | undefined): Promise<WorkResult<DocumentWorkRecord>> {
 		return this.mutex.run(`work:${workId}`, async () => {
-			const existing = await this.getRecord(workId);
-			if (!existing) return workFailure<DocumentWorkRecord>("WORK_NOT_FOUND");
+			const state = await this.readRecordState(workId);
+			// 损坏的主档不能被旧备份顶替后继续写：那会重新授予已经失效的授权。
+			if (state.kind === "corrupt") return workFailure<DocumentWorkRecord>("IO_ERROR", "record_corrupt");
+			if (state.kind === "missing") return workFailure<DocumentWorkRecord>("WORK_NOT_FOUND");
+			const existing = state.record;
 			if (expectedRevision === undefined) return workFailure<DocumentWorkRecord>("IDEMPOTENCY_CONFLICT");
 			if (existing.revision !== expectedRevision) return workFailure<DocumentWorkRecord>("REVISION_CONFLICT", undefined, existing.revision);
 			const mutated = mutate(existing);
@@ -149,8 +179,10 @@ export class DocumentWorkStore {
 
 	async createRecord(record: DocumentWorkRecord): Promise<WorkResult<DocumentWorkRecord>> {
 		return this.mutex.run(`work:${record.workId}`, async () => {
-			const existing = await this.getRecord(record.workId);
-			if (existing) return workSuccess(existing);
+			const state = await this.readRecordState(record.workId);
+			if (state.kind === "ok") return workSuccess(state.record);
+			// 损坏 ≠ 不存在：重建会覆盖损坏原件并丢掉恢复入口。
+			if (state.kind === "corrupt") return workFailure<DocumentWorkRecord>("IO_ERROR", "record_corrupt");
 			await this.saveRecord(record);
 			return workSuccess(record);
 		});
@@ -165,8 +197,11 @@ export class DocumentWorkStore {
 	/** 同 requestId 不同载荷必须显式失败，不能悄悄按后来的载荷执行。 */
 	async readIdempotent(requestId: string, requestDigest: string): Promise<{ kind: "miss" } | { kind: "hit"; payload: unknown } | { kind: "conflict" }> {
 		if (!isRequestId(requestId)) return { kind: "conflict" };
-		const raw = await readJsonResilient(this.idempotencyFile(requestId));
-		if (raw === undefined) return { kind: "miss" };
+		const read = await readJsonWithHealth(this.idempotencyFile(requestId));
+		// 去重槽损坏时 fail-closed：宁可拒绝重放，也不能把已执行过的请求当成新请求。
+		if (read.kind === "corrupt") return { kind: "conflict" };
+		if (read.kind === "missing") return { kind: "miss" };
+		const raw = read.value;
 		if (typeof raw !== "object" || raw === null) return { kind: "conflict" };
 		const entry = raw as Partial<IdempotencyEntry>;
 		if (typeof entry.requestDigest !== "string") return { kind: "conflict" };
@@ -174,9 +209,21 @@ export class DocumentWorkStore {
 		return { kind: "hit", payload: entry.payload };
 	}
 
-	async writeIdempotent(requestId: string, requestDigest: string, payload: unknown): Promise<void> {
+	/** 去重槽损坏时拒绝写入：不能把损坏原件替换成一份看起来正常的回执。 */
+	async writeIdempotent(requestId: string, requestDigest: string, payload: unknown): Promise<boolean> {
 		const entry: IdempotencyEntry = { requestDigest, payload };
+		const existing = await readJsonWithHealth(this.idempotencyFile(requestId));
+		if (existing.kind === "corrupt") {
+			this.logger?.warn("document-work", "Idempotency record is corrupt; refusing to overwrite", { requestId });
+			return false;
+		}
 		await writeFileAtomic(this.idempotencyFile(requestId), JSON.stringify(entry));
+		return true;
+	}
+
+	/** 跨 store 调用串行化（读取→动作→回执），供服务层包裹去重路径。 */
+	async runExclusive<T>(key: string, action: () => Promise<T>): Promise<T> {
+		return this.mutex.run(`exclusive:${key}`, action);
 	}
 
 	// ---------------------------------------------------------------- operations / preparations / versions

@@ -44,6 +44,16 @@ function safeDetail(detail: string): string {
 	return /^[A-Za-z0-9_.:-]{1,200}$/.test(detail) ? detail : "detail_redacted";
 }
 
+/**
+ * 正式改稿提示：由已核对过的准备记录拼出，模型只按声明范围改，保留块不得动。
+ * 这一段是「本轮实际执行」的入口，不在普通聊天里靠模型自我声明。
+ */
+export function buildRevisionPrompt(preparation: DocumentWorkPreparation): string {
+	const sections = preparation.scope.sections.length ? `\n声明要改的块：${preparation.scope.sections.join("、")}` : "";
+	const preserve = preparation.scope.preserve.length ? `\n必须保留（逐块比较，改动会被判为未授权）：${preparation.scope.preserve.join("、")}` : "";
+	return `改稿要求：${preparation.scope.summary}${sections}${preserve}\n只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
+}
+
 export class DocumentAttemptRunner {
 	private readonly byteBudget: number;
 	private readonly bindTimeoutMs: number;
@@ -81,7 +91,21 @@ export class DocumentAttemptRunner {
 		await Promise.allSettled([...this.watchers]);
 	}
 
+	/**
+	 * 分发本轮尝试。两条路径的区别只在「什么时候可以开始」：
+	 * - 对齐批准：必须从空闲态开始（它自己会触发一个模型回合），先把本轮准备绑定进扩展，
+	 *   确认绑定后才发 `/align approve`，顺序不可被渲染层或模型重排；
+	 * - 用户改稿指令：允许 Pi 正在跑（用户就是在普通聊天里提要求的）。此时先只排一个
+	 *   「等稳定」协程，本轮结束后在同一个 runtime 上绑定并派发一次正式改稿提示；
+	 *   工具执行中收到的意图不会插队，也不会重复产出。
+	 */
 	async dispatch(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): Promise<WorkResult<DocumentWorkOperation>> {
+		if (operation.authorization.kind === "revision_instruction") {
+			this.attempts.set(record.workId, { attemptId: operation.attemptId, cancelled: false });
+			const watcher = this.runRevisionDispatch(record, preparation, operation).finally(() => this.watchers.delete(watcher));
+			this.watchers.add(watcher);
+			return workSuccess(operation);
+		}
 		const encoded = this.buildBindingPayload(record, preparation, operation);
 		if (!encoded) return this.failOperation(operation, "INVALID_INPUT", "payload_too_large");
 		const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
@@ -91,16 +115,62 @@ export class DocumentAttemptRunner {
 		await this.deps.store.saveOperation(running);
 		this.emit(record, "running", running.attemptId);
 		// 确认授权只在扩展确认绑定之后才分发：顺序不可被渲染层或模型重排。
-		if (operation.authorization.kind === "alignment_confirmation") {
-			const approve = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwapprove_${operation.requestId}`, message: `/align approve ${operation.authorization.briefId} ${operation.authorization.revision}`, expectedRuntime: operation.runtime });
-			if (!approve.accepted) return this.failOperation(running, approve.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", approve.error);
-			if (approve.unknown) return this.failOperation(running, "DISPATCH_UNKNOWN");
-		}
-		this.attempts.set(record.workId, { attemptId: running.attemptId, cancelled: false });
-		// 结算协程登记在册：退出时先取消再 drain，禁止在拆除后继续写盘。
-		const watcher = this.watchAttempt(record.workId, running).finally(() => this.watchers.delete(watcher));
-		this.watchers.add(watcher);
+		const approve = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwapprove_${operation.requestId}`, message: `/align approve ${operation.authorization.briefId} ${operation.authorization.revision}`, expectedRuntime: operation.runtime });
+		if (!approve.accepted) return this.failOperation(running, approve.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", approve.error);
+		if (approve.unknown) return this.failOperation(running, "DISPATCH_UNKNOWN");
+		this.trackAttempt(record.workId, running);
 		return workSuccess(running);
+	}
+
+	/** 改稿接续：等本轮稳定 → 绑定 → 确认绑定 → 派发一次正式改稿提示。 */
+	private async runRevisionDispatch(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): Promise<void> {
+		const aborted = () => this.attempts.get(record.workId)?.cancelled === true || this.deps.runtime.isStopped;
+		try {
+			if (!this.deps.runtime.isSettledFor(record.sessionId, operation.runtime)) {
+				const outcome = await this.deps.runtime.waitForSettle({ target: operation.runtime, timeoutMs: this.settleTimeoutMs, isCancelled: aborted });
+				if (aborted()) return;
+				if (outcome !== "settled") {
+					await this.failOperation(operation, outcome === "runtime_changed" ? "RUNTIME_CHANGED" : "IO_ERROR", outcome);
+					return;
+				}
+			}
+			const encoded = this.buildBindingPayload(record, preparation, operation);
+			if (!encoded) {
+				await this.failOperation(operation, "INVALID_INPUT", "payload_too_large");
+				return;
+			}
+			const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
+			if (!bind.accepted) {
+				await this.failOperation(operation, bind.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", bind.error);
+				return;
+			}
+			if (!(await this.waitForExtensionBinding(operation))) {
+				await this.failOperation(operation, "EXTENSION_UNAVAILABLE", "binding_not_confirmed");
+				return;
+			}
+			const bound: DocumentWorkOperation = { ...operation, phase: "running", extensionBound: true, updatedAt: Date.now() };
+			await this.deps.store.saveOperation(bound);
+			this.emit(record, "running", bound.attemptId);
+			// 绑定之后才派发实际改稿要求：这一次提示就是产出新版本的那一轮。
+			const revisionPrompt = buildRevisionPrompt(preparation);
+			const dispatched = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrevise_${operation.requestId}`, message: revisionPrompt, expectedRuntime: operation.runtime });
+			if (!dispatched.accepted) {
+				await this.failOperation(bound, dispatched.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", dispatched.error);
+				return;
+			}
+			const running: DocumentWorkOperation = { ...bound, dispatchAccepted: true, dispatchUnknown: dispatched.unknown, updatedAt: Date.now() };
+			await this.deps.store.saveOperation(running);
+			this.trackAttempt(record.workId, running);
+		} catch (error) {
+			this.deps.logger?.warn("document-work", "Revision dispatch failed", { workId: record.workId, attemptId: operation.attemptId, error: error instanceof Error ? error.message : "unknown" });
+			if (!aborted()) await this.failOperation(operation, "IO_ERROR", "revision_dispatch_failed").catch(() => undefined);
+		}
+	}
+
+	private trackAttempt(workId: string, operation: DocumentWorkOperation): void {
+		this.attempts.set(workId, { attemptId: operation.attemptId, cancelled: false });
+		const watcher = this.watchAttempt(workId, operation).finally(() => this.watchers.delete(watcher));
+		this.watchers.add(watcher);
 	}
 
 	/** 扩展必须在超时内确认绑定；RPC 接受不等于绑定成功。 */
@@ -189,7 +259,13 @@ export class DocumentAttemptRunner {
 		const inspection = await this.deps.inspection.inspect({
 			versionId,
 			filePath: join(record.workDirectory, "versions", archived.value.directory, ...primary.relativePath.split("/")),
-			...(preparation.base ? { comparedTo: { versionId: preparation.base.versionId, ...(comparedTextDigest ? { textDigest: comparedTextDigest } : {}) } } : {}),
+			// 逐块保留校验同时需要基稿块大纲（冻结时抽出）和本轮声明的保留范围。
+			...(preparation.base
+				? {
+						comparedTo: { versionId: preparation.base.versionId, ...(comparedTextDigest ? { textDigest: comparedTextDigest } : {}), sections: preparation.base.sections },
+						preserve: preparation.scope.preserve,
+					}
+				: {}),
 		});
 		const version: DocumentArtifactVersion = { ...archived.value, inspection, modelSummary: candidate?.report?.summary ?? "", modelRisks: candidate?.report?.risks ?? [] };
 		await this.deps.store.saveVersion(version);

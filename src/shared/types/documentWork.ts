@@ -95,6 +95,8 @@ export type DocumentWorkPreparation = {
 	scope: DocumentWorkScope;
 	/** 准备时实际使用的运行时三元组；运行时替换后旧准备立即失效。 */
 	runtime?: SessionRuntimeTriple;
+	/** 准备时的 pi 原生会话 id；扩展用它校验绑定，运行进程换代后同样失效。 */
+	nativeSessionId?: string;
 	createdAt: number;
 };
 
@@ -123,7 +125,12 @@ export type DocumentWorkBase = {
 	frozenPath: string;
 	/** 该版本是否来自用户手工修改后的自动接续。 */
 	origin: "archived" | "external_manual";
+	/** 冻结时抽出的块大纲：下一轮逐块校验「保留内容是否被改」的依据。 */
+	sections: DocumentSectionFingerprint[];
 };
+
+/** 可定位块：标题 + 该块正文指纹。 */
+export type DocumentSectionFingerprint = { heading: string; textDigest: string };
 
 export type DocumentWorkScope = {
 	summary: string;
@@ -210,6 +217,8 @@ export type DocumentInspection = {
 		textDigest?: string;
 		formatDigest?: string;
 		textLength?: number;
+		/** 本体的块大纲：下一轮改稿逐块校验保留内容。 */
+		sections?: DocumentSectionFingerprint[];
 		comparedToVersionId?: string;
 		truncated: boolean;
 	};

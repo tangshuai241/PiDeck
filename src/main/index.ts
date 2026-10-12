@@ -2611,6 +2611,25 @@ function registerIpc() {
 			if (!resolved) return undefined;
 			return documentWorkDomain?.store.registerOutputRoot(resolved, directoryLabel(resolved));
 		},
+		registerChatMaterials: async (sessionId, paths) => {
+			// 授权判据：路径必须逐字出现在本会话的用户消息里（用户自己贴的或拖入的），
+			// 且真实路径落在项目目录内。模型或渲染层凭空给出的路径拿不到授权。
+			const target = sessionRuntimeCoordinator?.getTarget(sessionId);
+			if (!target) return [];
+			const messages = agentManager.getMessages(target.agentId);
+			const userText = messages.filter((message) => message.role === "user").map((message) => message.text);
+			const record = sessionCatalog.getRecord(sessionId);
+			const projectPath = record ? projectStore.get(record.projectId)?.path : undefined;
+			const accepted: string[] = [];
+			for (const candidate of paths) {
+				if (!userText.some((text) => text.includes(candidate))) continue;
+				const resolved = await resolveRealPath(candidate);
+				if (!resolved) continue;
+				if (projectPath && (await isPathInsideAnyRoot([projectPath], resolved))) accepted.push(resolved);
+			}
+			if (accepted.length) documentWorkDomain?.service.allowMaterials(sessionId, accepted);
+			return accepted;
+		},
 	});
 
 	// 通知历史落盘：showNotice 单点记录后推送主进程，重启可回灌（渲染层环形缓冲只服务当次会话）
@@ -4880,6 +4899,9 @@ app
 		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
 		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
 
+		// 检查 worker 走 electron-vite 的 ?nodeWorker 产物：可 terminate，不做进程内回退。
+		const { installInspectionWorkerFactory } = await import("./document-work/inspectionWorkerBootstrap");
+		installInspectionWorkerFactory();
 		documentWorkDomain = createDocumentWorkDomain({
 			userDataPath: app.getPath("userData"),
 			runtimePort: {
@@ -4894,6 +4916,8 @@ app
 						status: tab?.status ?? "idle",
 						state: result.value.value,
 						messages: agentManager.getMessages(target.agentId),
+						// 稳定 SessionRecord.id 与 pi 原生会话 id 不同：绑定载荷必须同时带两者。
+						...(tab?.sessionId ? { nativeSessionId: tab.sessionId } : {}),
 					};
 				},
 				dispatch: async (input) => {

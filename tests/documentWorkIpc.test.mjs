@@ -31,6 +31,7 @@ const { registerDocumentWorkIpc, isDeliverableDocumentWorkView } = load("src/mai
 const { ipcChannels } = load("src/shared/ipc.ts");
 
 const calls = [];
+const chatMaterialCandidates = new Set(["C:\work\report.docx"]);
 const registeredRoots = [];
 const service = {
 	allowMaterials: (sessionId, paths) => calls.push({ kind: "allowMaterials", sessionId, paths }),
@@ -67,6 +68,12 @@ const service = {
 registerDocumentWorkIpc({
 	service,
 	getWindow: () => null,
+	// 聊天材料登记：主进程只接受「用户消息里逐字出现 + 项目目录内」的路径，这里用固定白名单模拟。
+	registerChatMaterials: async (_sessionId, paths) => {
+		const accepted = paths.filter((path) => chatMaterialCandidates.has(path));
+		if (accepted.length) service.allowMaterials(_sessionId, accepted);
+		return accepted;
+	},
 	registerOutputRoot: async (realPath) => {
 		registeredRoots.push(realPath);
 		return { outputRootId: "or_1", label: "文稿", path: realPath, addedAt: 1 };
@@ -169,6 +176,19 @@ test("输出根与材料只能来自系统选择器，取消时不产生记录",
 	assert.equal(selected.value.count, 2);
 	assert.deepEqual(calls.at(-1).paths, ["C:\\in\\a.docx", "C:\\in\\b.pdf"]);
 	assert.equal((await invoke("documentWorkChooseMaterials", "")).error.code, "INVALID_INPUT");
+});
+
+test("聊天材料登记：只接受已复核的路径，未引用的路径被拒", async () => {
+	calls.length = 0;
+	const accepted = await invoke("documentWorkRegisterMaterials", { sessionId: "session-a", paths: ["C:\work\report.docx"] });
+	assert.equal(accepted.ok, true);
+	assert.equal(accepted.value.count, 1);
+	assert.equal(calls.at(-1).kind, "allowMaterials");
+	const denied = await invoke("documentWorkRegisterMaterials", { sessionId: "session-a", paths: ["C:\work\phantom.docx"] });
+	assert.equal(denied.ok, false);
+	assert.equal(denied.error.code, "PATH_DENIED");
+	assert.equal((await invoke("documentWorkRegisterMaterials", { sessionId: "session-a", paths: [] })).error.code, "INVALID_INPUT");
+	assert.equal((await invoke("documentWorkRegisterMaterials", { sessionId: "session-a" })).error.code, "INVALID_INPUT");
 });
 
 test("渲染快照投递判定复用同一套有界解析", () => {

@@ -1679,6 +1679,8 @@ const api = {
 		chooseOutputRoot: () => ipcRenderer.invoke(ipcChannels.documentWorkChooseOutputRoot) as Promise<DocumentWorkResult<{ outputRootId: string; label: string; path: string }>>,
 		/** 本轮材料授权：打开系统文件选择器（多选）。 */
 		chooseMaterials: (sessionId: string) => ipcRenderer.invoke(ipcChannels.documentWorkChooseMaterials, sessionId) as Promise<DocumentWorkResult<{ paths: string[]; count: number }>>,
+		/** 登记聊天里已经引用/拖入的材料路径：不必再选一次，但主进程会独立复核。 */
+		registerMaterials: (input: { sessionId: string; paths: string[] }) => ipcRenderer.invoke(ipcChannels.documentWorkRegisterMaterials, input) as Promise<DocumentWorkResult<{ paths: string[]; count: number }>>,
 		/** 工作变化推送；preload 返回退订函数。 */
 		onChanged: (callback: (event: DocumentWorkChangedEvent) => void) => subscribe<DocumentWorkChangedEvent>(ipcChannels.documentWorkChanged, callback),
 	},

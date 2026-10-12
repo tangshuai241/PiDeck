@@ -67,8 +67,8 @@ export function validateScopeAgainstHeadings(scope: DocumentWorkScope, headings:
 	return missing.length === 0 ? { ok: true } : { ok: false, missing };
 }
 
-export function toWorkBase(version: DocumentArtifactVersion, fileDigest: string, frozenPath: string, fileName: string, origin: "archived" | "external_manual"): DocumentWorkBase {
-	return { versionId: version.versionId, ordinal: version.ordinal, digest: fileDigest, fileName, frozenPath, origin };
+export function toWorkBase(version: DocumentArtifactVersion, fileDigest: string, frozenPath: string, fileName: string, origin: "archived" | "external_manual", sections: DocumentWorkBase["sections"]): DocumentWorkBase {
+	return { versionId: version.versionId, ordinal: version.ordinal, digest: fileDigest, fileName, frozenPath, origin, sections };
 }
 
 /** 改稿只能挂在已有成果上；新建只在没有可用成果时成立。 */

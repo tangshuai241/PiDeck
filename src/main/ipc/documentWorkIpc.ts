@@ -18,6 +18,8 @@ export type DocumentWorkIpcDeps = {
 	getWindow: () => BrowserWindow | null;
 	/** 输出根授权：用户选定后登记为允许目录，渲染层只拿得到 ID。 */
 	registerOutputRoot: (realPath: string) => Promise<DocumentOutputRoot | undefined>;
+	/** 会话用户消息里已经出现过的材料路径：由主进程独立复核，不信任渲染层传入的授权。 */
+	registerChatMaterials: (sessionId: string, paths: readonly string[]) => Promise<string[]>;
 };
 
 const MATERIAL_PICK_FILTERS = [
@@ -39,7 +41,7 @@ function parseMutation(value: unknown): { requestId: string; workId: string; exp
 	return { requestId, workId, expectedRevision };
 }
 
-export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot }: DocumentWorkIpcDeps): void {
+export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot, registerChatMaterials }: DocumentWorkIpcDeps): void {
 	ipcMain.handle(ipcChannels.documentWorkChooseOutputRoot, async (): Promise<WorkResult<DocumentOutputRoot>> => {
 		const window = getWindow();
 		const options: Electron.OpenDialogOptions = { title: "选择文稿保存目录", properties: ["openDirectory", "createDirectory"] };
@@ -59,6 +61,19 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 		if (paths.length === 0) return workSuccess({ paths: [], count: 0 });
 		service.allowMaterials(sessionId, paths);
 		return workSuccess({ paths, count: paths.length });
+	});
+
+	ipcMain.handle(ipcChannels.documentWorkRegisterMaterials, async (_event, raw: unknown): Promise<WorkResult<{ paths: string[]; count: number }>> => {
+		if (typeof raw !== "object" || raw === null) return workFailure("INVALID_INPUT", "payload_required");
+		const sessionId = Reflect.get(raw, "sessionId");
+		const paths = Reflect.get(raw, "paths");
+		if (!isBoundedString(sessionId, 96)) return workFailure("INVALID_INPUT", "session_required");
+		if (!Array.isArray(paths) || paths.length === 0 || paths.length > 24) return workFailure("INVALID_INPUT", "materials");
+		if (!paths.every((path) => isBoundedString(path, 1024))) return workFailure("INVALID_INPUT", "materials");
+		// 只在「这段路径确实出现在本会话的用户消息里」时登记：用户已经在聊天里引用/拖入的文件
+		// 不需要再选一次，但模型或渲染层凭空写出的路径不能借这条通道获得授权。
+		const accepted = await registerChatMaterials(sessionId, paths as string[]);
+		return accepted.length ? workSuccess({ paths: accepted, count: accepted.length }) : workFailure("PATH_DENIED", "material_not_referenced");
 	});
 
 	ipcMain.handle(ipcChannels.documentWorkCreate, async (_event, raw: unknown): Promise<WorkResult<DocumentWorkView>> => {

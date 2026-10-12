@@ -16,8 +16,9 @@ export function SessionAlignmentTimeline(props: { sessionId: string }) {
 	const backend = record?.backend ?? "pi";
 	const controls = useSessionAlignmentControls(props.sessionId, backend);
 	const documentWork = useSessionDocumentWork(props.sessionId, backend);
+	// 单个点击只允许一次批准：文稿路径由主进程发 `/align approve`，这里就不再发第二次。
 	const approve = useCallback(async () => {
-		if (!(await documentWork.prepareAndStartForApproval())) return;
+		if ((await documentWork.prepareAndStartForApproval()) !== "proceedWithAlignment") return;
 		controls.approve();
 	}, [documentWork, controls]);
 	return <AlignmentCard controls={useMemo(() => ({ ...controls, approve }), [controls, approve])} />;

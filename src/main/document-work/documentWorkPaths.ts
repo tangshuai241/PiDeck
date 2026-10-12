@@ -82,16 +82,36 @@ export async function writeFileAtomic(path: string, data: string): Promise<void>
 }
 
 /** 读取 JSON 时把损坏的主文件降级到 `.bak`；两者都坏则返回 undefined（调用方 fail-closed）。 */
-export async function readJsonResilient(path: string): Promise<unknown> {
-	for (const candidate of [path, `${path}.bak`]) {
-		const raw = await readFile(candidate, "utf8").catch(() => undefined);
-		if (raw === undefined) continue;
+/**
+ * 带健康度的 JSON 读取：主文件损坏与「文件不存在」是两回事。
+ *
+ * 为什么必须区分（评审要求）：`.bak` 只能当只读恢复证据。把损坏的主档当不存在，
+ * 会让 `create` 重建一件工作、让 CAS 从旧版本继续、让已被拒绝的 `start` 重新获权。
+ */
+export type JsonReadResult = { kind: "ok"; value: unknown } | { kind: "missing" } | { kind: "corrupt"; recovered?: unknown };
+
+export async function readJsonWithHealth(path: string): Promise<JsonReadResult> {
+	const primary = await readFile(path, "utf8").catch(() => undefined);
+	if (primary === undefined) return { kind: "missing" };
+	try {
+		return { kind: "ok", value: JSON.parse(primary) as unknown };
+	} catch {
+		// 主档存在但读不动：旧备份只作证据交给调用方，绝不在这里替它做主。
+		const backup = await readFile(`${path}.bak`, "utf8").catch(() => undefined);
+		if (backup === undefined) return { kind: "corrupt" };
 		try {
-			return JSON.parse(raw) as unknown;
+			return { kind: "corrupt", recovered: JSON.parse(backup) as unknown };
 		} catch {
-			continue;
+			return { kind: "corrupt" };
 		}
 	}
+}
+
+/** 只读恢复证据：主档正常用主档，损坏时用备份，缺失时 undefined。 */
+export async function readJsonResilient(path: string): Promise<unknown> {
+	const result = await readJsonWithHealth(path);
+	if (result.kind === "ok") return result.value;
+	if (result.kind === "corrupt") return result.recovered;
 	return undefined;
 }
 

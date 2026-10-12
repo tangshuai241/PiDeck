@@ -3,7 +3,8 @@
  *
  * 这里只做装配与事件适配，不做业务判断：
  * - 对齐快照与扩展状态都从既有主进程 pi 事件流读取，不开第二条通道；
- * - 改稿意图由扩展声明、由主进程用「最新用户轮正文指纹」复核后才 prepare/start；
+ * - 改稿意图只记录不执行：正式改稿轮由用户在普通聊天里显式发起，主进程核对那一轮
+ *   用户轮正文指纹后才准备、绑定并派发一次改稿提示；
  * - 所有订阅在 dispose 里成对解除。
  */
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import type { AlignmentState } from "../../shared/types/alignment";
 import type { AgentRuntimeState, AgentStatus } from "../../shared/types/agent";
 import type { DocumentWorkExtensionState, PreparedWork, SessionRuntimeTriple, StartWorkInput } from "../../shared/types/documentWork";
 import { DocumentArtifactStore } from "./DocumentArtifactStore";
-import { DocumentInspectionService } from "./DocumentInspectionService";
+import { DocumentInspectionService, type InspectionWorkerFactory } from "./DocumentInspectionService";
 import { DocumentWorkRuntimeAdapter, runtimeTripleOf, type DocumentWorkRuntimePort } from "./DocumentWorkRuntimeAdapter";
 import { DocumentWorkService, hashTurnText, type DocumentWorkLogger, type MaterialResolver } from "./DocumentWorkService";
 import { DocumentWorkStore } from "./DocumentWorkStore";
@@ -52,6 +53,8 @@ export type DocumentWorkDomainDeps = {
 	bindTimeoutMs?: number;
 	settleTimeoutMs?: number;
 	startTimeoutMs?: number;
+	/** 检查 worker 工厂：生产由 main/index 安装，测试注入桩。 */
+	inspectionWorkerFactory?: InspectionWorkerFactory;
 };
 
 export type DocumentWorkDomain = {
@@ -72,7 +75,7 @@ export type DocumentWorkDomain = {
 export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): DocumentWorkDomain {
 	const store = new DocumentWorkStore(join(deps.userDataPath, "document-work"), deps.logger);
 	const artifacts = new DocumentArtifactStore(join(deps.userDataPath, "document-work"));
-	const inspection = new DocumentInspectionService();
+	const inspection = new DocumentInspectionService({ ...(deps.inspectionWorkerFactory ? { workerFactory: deps.inspectionWorkerFactory } : {}) });
 	const runtime = new DocumentWorkRuntimeAdapter(deps.runtimePort);
 	const service = new DocumentWorkService({
 		store,
@@ -116,7 +119,7 @@ export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): Document
 		}
 		if (customType === DOCUMENT_WORK_REVISION_INTENT_TYPE) {
 			const intent = parseRevisionIntent(Reflect.get(details, "documentWorkIntent"));
-			if (intent) void handleRevisionIntent(sessionId, intent);
+			if (intent) recordRevisionIntent(sessionId, intent);
 		}
 	}
 
@@ -137,44 +140,17 @@ export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): Document
 	}
 
 	/**
-	 * 改稿意图 → 准备 → 开始。授权来源是该轮真实用户指令：
-	 * 主进程重新读取最新用户轮并核对正文指纹，扩展文本本身不构成授权。
+	 * 扩展声明的改稿意图：只记录，不据此启动任何执行。
+	 *
+	 * 为什么不做自动启动：模型自我声明不能替代用户的明确要求（普通讨论、否定请求或
+	 * 旧轮都可能让模型误调用工具）。正式改稿轮由渲染层在「用户开启改稿并发送要求」时
+	 * 经 IPC 发起：主进程核对那一轮用户轮正文指纹后才准备、绑定并派发一次改稿提示。
 	 */
-	async function handleRevisionIntent(sessionId: string, intent: RevisionIntent): Promise<void> {
-		const dedupeKey = `${intent.workId}:${intent.sourceTurnHash}`;
-		if (intentsBySession.get(dedupeKey)) return;
-		intentsBySession.set(dedupeKey, intent.sourceTurnHash);
-		const views = await service.listForSession(sessionId);
-		const work = views.find((view) => view.workId === intent.workId);
-		if (!work) return;
-		const snapshot = await runtime.snapshot(sessionId);
-		if (!snapshot) return;
-		const latest = [...snapshot.messages].reverse().find((message) => message.role === "user");
-		if (!latest || hashTurnText(latest.text) !== intent.sourceTurnHash) return;
-		const prepared = await service.prepare({
-			requestId: `ri_${intent.sourceTurnHash.slice(0, 24)}`,
-			workId: work.workId,
-			expectedRevision: work.revision,
-			kind: "revise_document",
-			requirementsRef: { kind: "user_instruction", sourceTurnId: intent.sourceTurnId, sourceTurnHash: intent.sourceTurnHash },
-			scope: { summary: intent.instruction, sections: intent.sections, preserve: intent.preserve },
-			materialPaths: [],
-		});
-		if (!prepared.ok) return void logIntentFailure(work.workId, prepared.error.code);
-		const request: StartWorkInput = {
-			requestId: `rs_${intent.sourceTurnHash.slice(0, 24)}`,
-			workId: work.workId,
-			expectedRevision: prepared.value.workRevision,
-			preparation: prepared.value.preparation,
-			expectedRuntime: snapshot.target,
-			authorization: { kind: "revision_instruction", sourceTurnId: intent.sourceTurnId, sourceTurnHash: intent.sourceTurnHash },
-		};
-		const started = await service.start(request);
-		if (!started.ok) void logIntentFailure(work.workId, started.error.code);
-	}
-
-	async function logIntentFailure(workId: string, code: string): Promise<void> {
-		deps.logger?.warn("document-work", "Revision intent not dispatched", { workId, code });
+	function recordRevisionIntent(sessionId: string, intent: RevisionIntent): void {
+		const key = `${intent.workId}:${intent.sourceTurnHash}`;
+		if (intentsBySession.has(key)) return;
+		intentsBySession.set(key, intent.sourceTurnHash);
+		deps.logger?.info("document-work", "Revision intent received; execution still requires an explicit user request", { workId: intent.workId, sessionId });
 	}
 
 	return {

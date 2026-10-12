@@ -86,9 +86,9 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 
 	/** 绑定必须落盘：主进程只有看到自己的身份四元组被确认后才会分发批准。 */
 	function persistBinding(ctx: ExtensionContext, next: DocumentWorkBinding): void {
-		pi.appendEntry(DOCUMENT_WORK_BINDING_ENTRY_TYPE, { sessionId: next.sessionId, binding: next, boundAt: Date.now() });
+		pi.appendEntry(DOCUMENT_WORK_BINDING_ENTRY_TYPE, { sessionId: next.nativeSessionId, binding: next, boundAt: Date.now() });
 		binding = next;
-		sessionId = next.sessionId;
+		sessionId = next.nativeSessionId;
 		materialStatus.clear();
 		// 旧尝试的候选不继承：新绑定只用新汇报。
 		reportCache = undefined;
@@ -162,7 +162,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 			if (!candidate) return { content: [{ type: "text", text: "The artifact report was rejected: use bounded relative staging paths only." }], details: { documentWork: { ok: false, reason: "invalid" } } };
 			if (!(await verifyStagedArtifacts(candidate))) return { content: [{ type: "text", text: "The artifact report was rejected: every path must be a non-empty regular file inside this attempt's staging directory." }], details: { documentWork: { ok: false, reason: "missing_file" } } };
 			try {
-				pi.appendEntry(DOCUMENT_WORK_REPORT_ENTRY_TYPE, { sessionId: binding.sessionId, attemptId: binding.attemptId, preparationId: binding.preparationId, report: candidate });
+				pi.appendEntry(DOCUMENT_WORK_REPORT_ENTRY_TYPE, { sessionId: binding.nativeSessionId, attemptId: binding.attemptId, preparationId: binding.preparationId, report: candidate });
 				reportCache = candidate;
 				publish("reported", { report: candidate });
 			} catch (error) {
@@ -219,7 +219,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify("TPA binding rejected: the payload is not a valid bounded binding.", "warning");
 					return;
 				}
-				if (parsed.sessionId !== ctx.sessionManager.getSessionId()) {
+				// 绑定身份用 pi 原生会话 id：稳定 SessionRecord.id 与它不同（新建草稿必然不同）。
+				if (parsed.nativeSessionId !== ctx.sessionManager.getSessionId()) {
 					ctx.ui.notify("TPA binding rejected: the payload belongs to another session.", "warning");
 					return;
 				}

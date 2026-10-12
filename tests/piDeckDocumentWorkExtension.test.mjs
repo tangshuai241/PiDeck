@@ -28,7 +28,9 @@ function binding(overrides = {}) {
 		attemptId: "at_abc",
 		preparationId: "pr_abc",
 		digest: "a".repeat(64),
-		sessionId: SESSION,
+		// 稳定 SessionRecord.id 与 pi 原生会话 id 不同：绑定校验必须用后者。
+		sessionId: "catalog_stable_session",
+		nativeSessionId: SESSION,
 		kind: "create_document",
 		workDirectory: "C:\\out\\dw_abc",
 		stagingDirectory: "C:\\out\\dw_abc\\staging\\at_abc",
@@ -95,29 +97,31 @@ function harness({ entries = [], session = SESSION, stagingDirectory } = {}) {
 	};
 }
 
+test("绑定按 pi 原生会话 id 校验：稳定 SessionRecord.id 不同不影响，原生不一致才拒绝", () => {
+	const encode = (payload) => Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+	const sameNative = harness();
+	// sessionId（稳定目录 id）与原生 id 不同：这是新建草稿的正常形态，必须绑定成功。
+	sameNative.command(`bind ${encode(binding({ sessionId: "catalog_stable_session" }))}`);
+	assert.equal(sameNative.state().phase, "bound");
+	assert.equal(sameNative.state().sessionId, "catalog_stable_session");
+	assert.equal(sameNative.notifications.length, 0, "稳定 id 与原生 id 不同不应被当成跨会话");
+
+	const foreignNative = harness({ session: "session-b" });
+	foreignNative.command(`bind ${encode(binding())}`);
+	assert.equal(foreignNative.state(), undefined);
+	assert.equal(foreignNative.notifications.length, 1, "原生会话 id 不一致必须拒绝");
+});
+
 test("bind 命令接受主进程构造的载荷并发布绑定状态；越界或跨会话载荷被拒", () => {
 	const h = harness();
 	const encoded = types.encodeForTest ? undefined : undefined;
 	void encoded;
-	const command = (payload) => {
-		const text = JSON.stringify(payload);
-		const bytes = Buffer.from(text, "utf8");
-		const b64 = bytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-		return h.command(`bind ${b64}`);
-	};
+	const command = (payload) => h.command(`bind ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`);
 	const valid = binding();
 	command(valid);
 	assert.equal(h.state().phase, "bound");
 	assert.equal(h.state().workId, "dw_abc");
 	assert.equal(h.entriesOut.filter((entry) => entry.customType === "tpa-document-work-binding").length, 1);
-
-	// 跨会话载荷不得绑定：否则 fork/导入的会话会继承别的工作身份。
-	const foreign = harness({ session: "session-b" });
-	const text = JSON.stringify(binding());
-	const b64 = Buffer.from(text, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-	foreign.command(`bind ${b64}`);
-	assert.equal(foreign.state(), undefined);
-	assert.equal(foreign.notifications.length, 1);
 
 	const broken = harness();
 	broken.command(`bind ${Buffer.from(JSON.stringify(binding({ stagingDirectory: "relative" })), "utf8").toString("base64url")}`);
@@ -131,9 +135,7 @@ test("tpa_artifact_report 只接受本轮 staging 内的非空文件，且每次
 		mkdirSync(staging, { recursive: true });
 		writeFileSync(join(staging, "out.md"), "# 成果\n", "utf8");
 		const h = harness({ stagingDirectory: staging });
-		const command = h.command;
-		const text = JSON.stringify(binding({ stagingDirectory: staging }));
-		command(`bind ${Buffer.from(text, "utf8").toString("base64url")}`);
+		h.command(`bind ${Buffer.from(JSON.stringify(binding({ stagingDirectory: staging })), "utf8").toString("base64url")}`);
 
 		const missing = await h.fire("tpa_artifact_report", { summary: "s", artifacts: [{ relativePath: "nope.md", role: "primary" }], risks: [] });
 		assert.equal(missing.details.documentWork.ok, false);
@@ -165,11 +167,11 @@ test("未绑定时汇报工具如实返回失败，不伪造成功", async () =>
 
 test("tpa_work_revise 用最新用户轮正文指纹声明意图，并在无用户轮时不动作", async () => {
 	const h = harness();
-	const text = JSON.stringify(binding());
-	h.command(`bind ${Buffer.from(text, "utf8").toString("base64url")}`);
+	const encodedBind = Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url");
+	h.command(`bind ${encodedBind}`);
 	h.switch(SESSION, [...h.ctx.sessionManager.getBranch(), { type: "message", id: "turn-7", message: { role: "user", content: [{ type: "text", text: "把第二节改短一点" }] } }]);
 	// 会话被 switch 置换了分支，重新绑定以恢复内存状态。
-	h.command(`bind ${Buffer.from(text, "utf8").toString("base64url")}`);
+	h.command(`bind ${encodedBind}`);
 	const result = await h.fire("tpa_work_revise", { instruction: "把第二节改短一点", sections: ["第二节"], preserve: ["保留结论"] });
 	assert.equal(result.details.documentWork.ok, true);
 	const intent = h.messages.filter((item) => item.customType === "pi-deck-document-revision-intent").at(-1);
@@ -178,7 +180,7 @@ test("tpa_work_revise 用最新用户轮正文指纹声明意图，并在无用�
 	assert.equal(intent.display, false, "意图消息不得出现在可见历史里");
 
 	const noTurn = harness();
-	noTurn.command(`bind ${Buffer.from(text, "utf8").toString("base64url")}`);
+	noTurn.command(`bind ${encodedBind}`);
 	const blocked = await noTurn.fire("tpa_work_revise", { instruction: "改标题", sections: [], preserve: [] });
 	assert.equal(blocked.details.documentWork.ok, false);
 	assert.equal(blocked.details.documentWork.reason, "no_turn");
@@ -186,13 +188,11 @@ test("tpa_work_revise 用最新用户轮正文指纹声明意图，并在无用�
 
 test("绑定与汇报记录可从活动分支恢复，并且恢复后重新发布状态", () => {
 	const h = harness();
-	const text = JSON.stringify(binding());
-	h.command(`bind ${Buffer.from(text, "utf8").toString("base64url")}`);
+	h.command(`bind ${Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url")}`);
 	const history = h.ctx.sessionManager.getBranch();
 	const reopened = harness({ entries: history });
 	// 重新创建扩展后走 session 恢复路径：这里直接以同一分支构造新实例并重新绑定。
-	const payload = binding();
-	reopened.command(`bind ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`);
+	reopened.command(`bind ${Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url")}`);
 	assert.equal(reopened.state().phase, "bound");
 	assert.equal(reopened.state().attemptId, "at_abc");
 	assert.match(reopened.messages.at(-1).customType, /pi-deck-document-work-state/);

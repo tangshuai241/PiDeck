@@ -26,6 +26,8 @@ function binding(overrides = {}) {
 		preparationId: "pr_abc",
 		digest: digest("p"),
 		sessionId: "session-a",
+		// 稳定 SessionRecord.id 与 pi 原生会话 id 是两个身份，载荷必须同时携带。
+		nativeSessionId: "pi-native-session-1",
 		kind: "create_document",
 		workDirectory: "C:\\out\\dw_abc",
 		stagingDirectory: "C:\\out\\dw_abc\\staging\\at_abc",

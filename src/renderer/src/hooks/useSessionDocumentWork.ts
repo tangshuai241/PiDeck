@@ -3,12 +3,27 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AgentBackend } from "../../../shared/types";
 import type { DocumentWorkView, PreparedWork, SessionRuntimeTriple } from "../../../shared/types/documentWork";
 import { isAlignmentActive } from "../../../shared/alignment";
+import { sameRuntimeTriple } from "../../../shared/documentWork";
+import { sessionComposerModeBySessionIdAtomFamily, setSessionComposerModeAtom } from "../atoms/composer-atoms";
+import { waitForAlignmentAcknowledgement } from "../utils/alignmentAcknowledgement";
 import { sessionMessageCacheBySessionIdAtomFamily } from "../atoms/session-atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../atoms/session-selectors";
-import { activePreparationAtomFamily, documentWorkChangeAtomFamily, documentWorkErrorAtomFamily, documentWorkMaterialsAtomFamily, documentWorkPhaseAtomFamily, documentWorkViewAtomFamily, pendingWorkCreationAtomFamily, type DocumentWorkFailure, type DocumentWorkPhase } from "../atoms/document-work-atoms";
+import {
+	activePreparationAtomFamily,
+	documentWorkChangeAtomFamily,
+	documentWorkErrorAtomFamily,
+	documentWorkMaterialsAtomFamily,
+	documentWorkPhaseAtomFamily,
+	documentWorkRevisionModeAtomFamily,
+	documentWorkViewAtomFamily,
+	pendingWorkCreationAtomFamily,
+	type DocumentWorkFailure,
+	type DocumentWorkPhase,
+} from "../atoms/document-work-atoms";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
+import { hashUserTurnText } from "../utils/documentWorkHash";
 import { deriveDocumentWorkCardPresentation, type DocumentWorkCardPresentation } from "../utils/documentWorkPresentation";
 
 function failureOf(result: { ok: false; error: { code: string; retryable: boolean; currentRevision?: number } }): DocumentWorkFailure {
@@ -74,6 +89,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	const pendingAtom = pendingWorkCreationAtomFamily(sessionId);
 	const preparationAtom = activePreparationAtomFamily(sessionId);
 	const changeAtom = documentWorkChangeAtomFamily(sessionId);
+	const revisionModeAtom = documentWorkRevisionModeAtomFamily(sessionId);
 
 	const view = useAtomValue(viewAtom);
 	const phase = useAtomValue(phaseAtom);
@@ -82,6 +98,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	const pendingCreation = useAtomValue(pendingAtom);
 	const preparation = useAtomValue(preparationAtom);
 	const change = useAtomValue(changeAtom);
+	const revisionMode = useAtomValue(revisionModeAtom);
 	const runtime = useAtomValue(runtimeAtom);
 	const messages = useAtomValue(messagesAtom)?.messages;
 	/** 材料绝对路径只在本 hook 内短暂保留，不进全局状态。 */
@@ -121,6 +138,29 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		if (!sourceTurnId) return;
 		store.set(pendingAtom, { sourceTurnId, ...(alignment?.brief?.goal ? { title: alignment.brief.goal } : {}) });
 	}, [enabled, view, pendingCreation, phase, store, runtimeAtom, messagesAtom, pendingAtom]);
+
+	/**
+	 * 登记聊天里已经引用/拖入的材料：用户不必再选一次。
+	 * 只把「看起来像绝对路径」的候选交给主进程，授权判定仍在主进程（消息逐字包含 + 项目目录）。
+	 */
+	const registerChatMaterials = useCallback(async (): Promise<number> => {
+		if (!enabled) return 0;
+		const texts = (store.get(messagesAtom)?.messages ?? []).filter((message) => message.role === "user").map((message) => message.text);
+		const candidates = new Set<string>();
+		for (const text of texts) {
+			for (const match of text.matchAll(/(?:[A-Za-z]:[\/]|\/)[^\s"'<>|]{2,400}/g)) candidates.add(match[0]);
+		}
+		const paths = [...candidates].filter((path) => /\.(?:docx?|pdf|pptx?|xlsx?|odt|rtf|epub|csv|md|markdown|txt)$/i.test(path)).slice(0, 24);
+		if (!paths.length) return 0;
+		const registered = await desktopApi.documentWork.registerMaterials({ sessionId, paths });
+		if (!registered.ok || registered.value.count === 0) return 0;
+		materialPathsRef.current = [...new Set([...materialPathsRef.current, ...registered.value.paths])];
+		store.set(
+			materialsAtom,
+			materialPathsRef.current.map((path) => path.split(/[\/]/).pop() ?? path),
+		);
+		return registered.value.count;
+	}, [enabled, sessionId, store, messagesAtom, materialsAtom]);
 
 	/**
 	 * 首次提交后的唯一入口：先让用户经系统选择器授权输出根，再建立记录。
@@ -171,22 +211,26 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	}, [enabled, sessionId, store, errorAtom, materialsAtom]);
 
 	/**
-	 * 确认单点击前的一体化准备：冻结准备 → 绑定扩展 → 交给既有对齐批准分发。
-	 * 未建立文稿工作时不改变原对齐行为（旧入口兼容）。
+	 * 确认单点击的唯一批准入口。
+	 *
+	 * 返回值决定「谁来发批准」：
+	 * - `documentWorkDispatched`：文稿路径已由主进程发出 `/align approve`，调用方不得再发一次；
+	 * - `proceedWithAlignment`：没有文稿工作（旧入口），由原对齐控件照常发批准；
+	 * - `aborted`：准备/开始失败或运行时不适，本轮不批准。
 	 */
-	const prepareAndStartForApproval = useCallback(async (): Promise<boolean> => {
-		if (!enabled) return true;
+	const prepareAndStartForApproval = useCallback(async (): Promise<"documentWorkDispatched" | "proceedWithAlignment" | "aborted"> => {
+		if (!enabled) return "proceedWithAlignment";
 		const currentView = store.get(viewAtom);
-		if (!currentView) return true;
+		if (!currentView) return "proceedWithAlignment";
 		const alignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
 		const triple = targetNow();
 		if (!alignment?.brief || !isAlignmentActive(alignment) || !triple) {
 			showNotice(t("documentWork.unavailable"));
-			return false;
+			return "aborted";
 		}
 		if (store.get(phaseAtom) !== "idle") {
 			showNotice(t("documentWork.busy"));
-			return false;
+			return "aborted";
 		}
 		const kind = currentView.versions.length > 0 ? "revise_document" : "create_document";
 		store.set(phaseAtom, "preparing");
@@ -205,7 +249,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 			if (!prepared.ok) {
 				store.set(errorAtom, failureOf(prepared));
 				showNotice(noticeForFailure(failureOf(prepared)));
-				return false;
+				return "aborted";
 			}
 			store.set(phaseAtom, "starting");
 			const started = await desktopApi.documentWork.start({
@@ -219,15 +263,98 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 			if (!started.ok) {
 				store.set(errorAtom, failureOf(started));
 				showNotice(noticeForFailure(failureOf(started)));
-				return false;
+				return "aborted";
 			}
 			store.set(preparationAtom, { preparation: prepared.value, runtime: triple, authorizationKind: "alignment_confirmation" });
-			return true;
+			// 权威确认到达后回到普通模式：批准已由主进程发出，渲染层不再发第二次。
+			await waitForAlignmentAcknowledgement({
+				read: () => store.get(runtimeAtom)?.state?.alignment ?? undefined,
+				isCurrent: () => sameRuntimeTriple(triple, targetNow() ?? triple),
+				subscribe: (changed) => store.sub(runtimeAtom, changed),
+				matches: (latest) => latest.phase === "approved" || latest.phase === "complete",
+			}).catch(() => undefined);
+			if (store.get(sessionComposerModeBySessionIdAtomFamily(sessionId)) === "alignment") store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
+			return "documentWorkDispatched";
 		} finally {
 			store.set(phaseAtom, "idle");
 			void refresh();
 		}
-	}, [enabled, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, refresh, targetNow]);
+	}, [enabled, sessionId, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, refresh, targetNow]);
+
+	/**
+	 * 普通聊天里的改稿轮（不需要重开对齐）。
+	 *
+	 * 用户在卡片上开启改稿后发送要求；主进程核对「那一轮用户轮正文指纹」才准备，
+	 * 随后等 Pi 本轮稳定、绑定扩展、再派发一次正式改稿提示。模型自己声明意图不会启动。
+	 */
+	const prepareAndStartRevision = useCallback(
+		async (instruction: string): Promise<boolean> => {
+			const currentView = store.get(viewAtom);
+			const triple = targetNow();
+			if (!enabled || !currentView || !triple) return false;
+			const latest = latestUserMessageId(store.get(messagesAtom)?.messages);
+			if (!latest) {
+				showNotice(t("documentWork.unavailable"));
+				return false;
+			}
+			const turn = store.get(messagesAtom)?.messages.find((message) => message.id === latest);
+			const text = instruction.trim() || turn?.text || "";
+			const hash = await hashUserTurnText(text);
+			store.set(phaseAtom, "preparing");
+			store.set(errorAtom, undefined);
+			try {
+				const prepared = await desktopApi.documentWork.prepare({
+					requestId: crypto.randomUUID(),
+					workId: currentView.workId,
+					expectedRevision: currentView.revision,
+					kind: "revise_document",
+					requirementsRef: { kind: "user_instruction", sourceTurnId: latest, sourceTurnHash: hash },
+					scope: { summary: text, sections: [], preserve: [] },
+					materialPaths: materialPathsRef.current,
+				});
+				if (!prepared.ok) {
+					store.set(errorAtom, failureOf(prepared));
+					showNotice(noticeForFailure(failureOf(prepared)));
+					return false;
+				}
+				const started = await desktopApi.documentWork.start({
+					requestId: crypto.randomUUID(),
+					workId: currentView.workId,
+					expectedRevision: prepared.value.workRevision,
+					preparation: prepared.value.preparation,
+					expectedRuntime: triple,
+					authorization: { kind: "revision_instruction", sourceTurnId: latest, sourceTurnHash: hash },
+				});
+				if (!started.ok) {
+					store.set(errorAtom, failureOf(started));
+					showNotice(noticeForFailure(failureOf(started)));
+					return false;
+				}
+				store.set(preparationAtom, { preparation: prepared.value, runtime: triple, authorizationKind: "revision_instruction" });
+				store.set(revisionModeAtom, false);
+				return true;
+			} finally {
+				store.set(phaseAtom, "idle");
+				void refresh();
+			}
+		},
+		[enabled, store, viewAtom, phaseAtom, errorAtom, preparationAtom, revisionModeAtom, refresh, targetNow, messagesAtom],
+	);
+
+	/**
+	 * 改稿轮触发点：用户开启改稿后发送的下一条消息就是本轮改稿要求。
+	 * 用「最新用户消息 id 变化」判定，不解析文字内容，也不依赖模型自我声明。
+	 */
+	const lastRevisionTurnRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		if (!enabled || !revisionMode) return;
+		const latest = latestUserMessageId(messages);
+		if (!latest || latest === lastRevisionTurnRef.current) return;
+		lastRevisionTurnRef.current = latest;
+		const turn = messages?.find((message) => message.id === latest);
+		if (!turn?.text.trim()) return;
+		void prepareAndStartRevision(turn.text);
+	}, [enabled, revisionMode, messages, prepareAndStartRevision]);
 
 	/** 取消只针对本轮：attemptId 与 runtime 三元组都必须匹配。 */
 	const cancelActive = useCallback(async (): Promise<void> => {
@@ -268,7 +395,11 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		needsOutputRoot: Boolean(pendingCreation && !view),
 		createForSession,
 		chooseMaterials,
+		registerChatMaterials,
 		prepareAndStartForApproval,
+		prepareAndStartRevision,
+		revisionMode,
+		setRevisionMode: (value: boolean) => store.set(revisionModeAtom, value),
 		cancelActive,
 		refresh,
 	};

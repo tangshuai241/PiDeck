@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createInlineInspectionWorkerFactory } from "./helpers/inspectionWorkerStub.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const ROOT = process.cwd();
@@ -77,7 +78,7 @@ function createDomain(input) {
 	};
 }
 
-test("改稿意图只在最新用户轮指纹匹配时准备并绑定；指纹不符或重放都不启动", async () => {
+test("扩展声明的改稿意图不会自行启动任何执行", async () => {
 	const rootDir = mkdtempSync(join(tmpdir(), "pideck-docwork-intent-"));
 	const outputRoot = join(rootDir, "out");
 	mkdirSync(outputRoot, { recursive: true });
@@ -88,11 +89,11 @@ test("改稿意图只在最新用户轮指纹匹配时准备并绑定；指纹�
 		assert.equal(created.ok, true);
 		const workId = created.value.workId;
 
-		// 造一个「已归档且检查通过」的版本：直接写版本记录 + 公开文件，避免重复驱动完整归档。
+		// 造一个「已归档且检查通过」的版本，让改稿有可用基稿。
 		const workFolder = readdirSync(outputRoot).find((name) => name.startsWith("dw_"));
 		const versionDirectory = join(outputRoot, workFolder, "versions", "v0001");
 		mkdirSync(versionDirectory, { recursive: true });
-		const body = "# 季度报告\n\n正文\n";
+		const body = ["# 季度报告", "", "正文", ""].join("\n");
 		writeFileSync(join(versionDirectory, "out.md"), body, "utf8");
 		await domain.store.saveVersion({
 			schemaVersion: 1,
@@ -120,38 +121,14 @@ test("改稿意图只在最新用户轮指纹匹配时准备并绑定；指纹�
 			},
 			createdAt: 1,
 		});
-		const withVersion = await domain.store.mutateRecord(workId, created.value.revision, (current) => ({ ...current, versionIds: ["v_seed"] }));
-		assert.equal(withVersion.ok, true);
-		const view = plain((await domain.service.getView(workId, SESSION_ID)).value);
-		assert.equal(view.revisionReady, true);
+		assert.equal((await domain.store.mutateRecord(workId, created.value.revision, (current) => ({ ...current, versionIds: ["v_seed"] }))).ok, true);
+		assert.equal(plain((await domain.service.getView(workId, SESSION_ID)).value).revisionReady, true);
 
-		const intent = { workId, instruction: "把标题改短", sections: [], preserve: [], sourceTurnId: "turn-1", sourceTurnHash: sha256(runtime.messages[0].text) };
-
-		// 指纹不符：不准备，也不分发。
-		emitIntent({ ...intent, sourceTurnHash: "b".repeat(64) });
-		await new Promise((resolve) => setTimeout(resolve, 120));
-		assert.equal(runtime.dispatched.length, 0, "指纹不符的意图不得启动制作");
-
-		// 匹配：绑定载荷必须带本轮准备身份，且不重复分发对齐批准。
-		emitIntent(intent);
-		const bound = await waitFor(() => runtime.dispatched.some((message) => message.startsWith("/tpa-work bind ")));
-		assert.equal(bound, true, "匹配的意图必须绑定本轮准备");
-		const bind = runtime.dispatched.find((message) => message.startsWith("/tpa-work bind "));
-		const payload = decodeBindingPayload(bind.slice("/tpa-work bind ".length));
-		assert.equal(payload.kind, "revise_document");
-		assert.equal(payload.base.versionId, "v_seed", "改稿必须冻结实际基稿");
-		assert.match(payload.base.path, /v0001/, "冻结副本来自公开版本目录");
-		assert.equal(
-			runtime.dispatched.some((message) => message.startsWith("/align approve")),
-			false,
-			"改稿轮不得分发对齐批准",
-		);
-
-		// 同一轮指令重放不产生第二轮。
-		const before = runtime.dispatched.length;
-		emitIntent(intent);
+		// 模型在普通讨论里调用工具：不得准备、不得绑定、不得派发。
+		emitIntent({ workId, instruction: "把标题改短", sections: [], preserve: [], sourceTurnId: "turn-1", sourceTurnHash: sha256(runtime.messages[0].text) });
 		await new Promise((resolve) => setTimeout(resolve, 150));
-		assert.equal(runtime.dispatched.length, before, "同一轮指令不得重复授权");
+		assert.equal(runtime.dispatched.length, 0, "扩展自我声明不能替代用户的明确改稿要求");
+		assert.equal(plain((await domain.service.getView(workId, SESSION_ID)).value).active, null);
 	} finally {
 		await domain.dispose();
 		rmSync(rootDir, { recursive: true, force: true });

@@ -29,7 +29,10 @@ export type DocumentWorkBinding = {
 	attemptId: string;
 	preparationId: string;
 	digest: string;
+	/** 稳定的 SessionRecord.id：工作记录主键，扩展不用它校验会话。 */
 	sessionId: string;
+	/** pi 进程自身的会话 id：扩展用它与 ctx.sessionManager.getSessionId() 对照。 */
+	nativeSessionId: string;
 	kind: DocumentWorkKind;
 	workDirectory: string;
 	stagingDirectory: string;
@@ -115,6 +118,7 @@ export function decodeBinding(payload: unknown): DocumentWorkBinding | undefined
 	if (!isRecord(payload) || payload.schemaVersion !== DOCUMENT_WORK_SCHEMA_VERSION) return undefined;
 	if (!isId(payload.workId) || !isId(payload.attemptId) || !isId(payload.preparationId) || !isDigest(payload.digest)) return undefined;
 	if (!boundedText(payload.sessionId, DOCUMENT_WORK_ID_MAX_LENGTH)) return undefined;
+	if (!boundedText(payload.nativeSessionId, 200)) return undefined;
 	if (payload.kind !== "create_document" && payload.kind !== "revise_document") return undefined;
 	if (!isAbsoluteHostPath(payload.workDirectory) || !isAbsoluteHostPath(payload.stagingDirectory) || !isAbsoluteHostPath(payload.materialCacheDirectory)) return undefined;
 	if (!Array.isArray(payload.materials) || payload.materials.length > 24) return undefined;
@@ -129,7 +133,7 @@ export function decodeBinding(payload: unknown): DocumentWorkBinding | undefined
 	if (!scope?.sections || !scope.preserve || scope.summary === undefined) return undefined;
 	const requirements = isRecord(payload.requirements) && typeof payload.requirements.summary === "string" && payload.requirements.summary.length <= 4000 ? { summary: payload.requirements.summary } : undefined;
 	if (!requirements) return undefined;
-	const binding: DocumentWorkBinding = { schemaVersion: 1, workId: payload.workId, attemptId: payload.attemptId, preparationId: payload.preparationId, digest: payload.digest, sessionId: payload.sessionId, kind: payload.kind, workDirectory: payload.workDirectory, stagingDirectory: payload.stagingDirectory, materialCacheDirectory: payload.materialCacheDirectory, materials, ...(base ? { base } : {}), scope: { summary: scope.summary, sections: scope.sections, preserve: scope.preserve }, requirements };
+	const binding: DocumentWorkBinding = { schemaVersion: 1, workId: payload.workId, attemptId: payload.attemptId, preparationId: payload.preparationId, digest: payload.digest, sessionId: payload.sessionId, nativeSessionId: payload.nativeSessionId, kind: payload.kind, workDirectory: payload.workDirectory, stagingDirectory: payload.stagingDirectory, materialCacheDirectory: payload.materialCacheDirectory, materials, ...(base ? { base } : {}), scope: { summary: scope.summary, sections: scope.sections, preserve: scope.preserve }, requirements };
 	return JSON.stringify(binding).length > DOCUMENT_WORK_BIND_PAYLOAD_MAX_BYTES ? undefined : binding;
 }
 

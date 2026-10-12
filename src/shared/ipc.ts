@@ -1155,6 +1155,8 @@ export const ipcChannels = {
 	documentWorkChooseOutputRoot: "document-work:choose-output-root",
 	/** 用户经系统选择器授权本轮材料。 */
 	documentWorkChooseMaterials: "document-work:choose-materials",
+	/** 登记聊天里已经引用/拖入的材料路径（主进程独立复核，不信任渲染层授权）。 */
+	documentWorkRegisterMaterials: "document-work:register-materials",
 	/** 主→渲染：工作记录变化（按 sessionId 过滤）。 */
 	documentWorkChanged: "document-work:changed",
 } as const;

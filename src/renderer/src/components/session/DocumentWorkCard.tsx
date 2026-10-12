@@ -1,9 +1,10 @@
-import { FileText, FolderOpen, Loader2, Paperclip, ShieldAlert, Square } from "lucide-react";
+import { FileText, FolderOpen, Loader2, Paperclip, PenLine, ShieldAlert, Square } from "lucide-react";
 import type { TranslationKey } from "../../i18n";
 import { t } from "../../i18n";
 import type { SessionDocumentWorkControls } from "../../hooks/useSessionDocumentWork";
 import type { DocumentWorkCardKind } from "../../utils/documentWorkPresentation";
 import { formatVersionLabel } from "../../utils/documentWorkPresentation";
+import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import { Badge } from "../ui-shadcn/badge";
 
@@ -70,6 +71,18 @@ export function DocumentWorkCard(props: { controls: SessionDocumentWorkControls 
 							<Paperclip size={14} aria-hidden="true" />
 							{t("documentWork.addMaterials")}
 						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={busy}
+							onClick={() => {
+								void controls.registerChatMaterials().then((count) => {
+									if (count === 0) showNotice(t("documentWork.registerMaterialsEmpty"));
+								});
+							}}
+						>
+							{t("documentWork.registerMaterials")}
+						</Button>
 					</div>
 					{!versions.length && !busy && <p className="text-caption text-muted-foreground">{t("documentWork.newDocumentHint")}</p>}
 				</div>
@@ -93,7 +106,15 @@ export function DocumentWorkCard(props: { controls: SessionDocumentWorkControls 
 				</section>
 			)}
 
-			{presentation.canRevise && <p className="text-caption text-muted-foreground">{t("documentWork.revisionReadyHint")}</p>}
+			{presentation.canRevise && (
+				<div className="flex flex-wrap items-center gap-2">
+					<p className="text-caption text-muted-foreground">{t("documentWork.revisionReadyHint")}</p>
+					<Button variant={controls.revisionMode ? "default" : "ghost"} size="sm" onClick={() => controls.setRevisionMode(!controls.revisionMode)}>
+						<PenLine size={14} aria-hidden="true" />
+						{controls.revisionMode ? t("documentWork.revisionModeOn") : t("documentWork.revisionModeOff")}
+					</Button>
+				</div>
+			)}
 			{newest && view?.outputRootLabel && <p className="text-caption text-muted-foreground">{t("documentWork.currentBase", { version: formatVersionLabel(newest.ordinal) })}</p>}
 			{errorMessage && presentation.kind !== "failed" && presentation.kind !== "unknown" && (
 				<p className="flex items-center gap-1 text-caption text-danger">

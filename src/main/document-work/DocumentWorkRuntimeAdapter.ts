@@ -15,6 +15,12 @@ export type DocumentWorkRuntimeSnapshot = {
 	status: AgentStatus;
 	state: AgentRuntimeState;
 	messages: ChatMessage[];
+	/**
+	 * pi 进程自身的会话 id（AgentTab.sessionId / piSessionId）。
+	 * 与 `target.sessionId`（稳定的 SessionRecord.id）语义不同：新建草稿时两者必然不同，
+	 * 因此绑定载荷必须同时携带两个身份，扩展用原生 id 校验，工作记录用稳定 id 做主键。
+	 */
+	nativeSessionId?: string;
 };
 
 export type DocumentWorkDispatchOutcome = { accepted: boolean; unknown: boolean; error?: string };
@@ -75,7 +81,12 @@ export class DocumentWorkRuntimeAdapter {
 			const state = Reflect.get(payload, "state");
 			if (typeof agentId !== "string" || typeof state !== "object" || state === null) return;
 			const triple = runtimeTripleOf(payload);
-			if (triple) this.note(triple, undefined, state as AgentRuntimeState);
+			if (triple) {
+				// status 是「本轮是否还在跑」的一半证据；补丁不带 status 时沿用上一次，
+				// 带 status 时必须采纳，否则完成边沿永远到不了。
+				const status = Reflect.get(payload, "status");
+				this.note(triple, typeof status === "string" ? (status as AgentStatus) : undefined, state as AgentRuntimeState);
+			}
 			this.wake();
 		});
 	}
