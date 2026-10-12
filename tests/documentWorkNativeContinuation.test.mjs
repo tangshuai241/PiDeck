@@ -17,6 +17,9 @@
  * 断言续跑请求确实拿到「本轮唯一、且是当前轮」的 staging/base/scope。
  */
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -66,6 +69,8 @@ function createHost(options = {}) {
 	const branch = clone(options.entries ?? []);
 	const messages = [];
 	const notifications = [];
+	/** 真的触发过模型回合的 sendMessage（triggerTurn）。 */
+	const turns = [];
 	let active = [];
 	let session = options.session ?? SESSION;
 	const counters = { beforeAgentStart: 0, requests: 0 };
@@ -92,7 +97,11 @@ function createHost(options = {}) {
 		sendMessage: (message, sendOptions) => {
 			messages.push(clone(message));
 			branch.push({ type: "custom_message", ...clone(message) });
-			if (sendOptions?.triggerTurn) return host.request();
+			if (sendOptions?.triggerTurn) {
+				// 真实 pi 会为这条消息开一个模型回合一—这里只记账并跑一次请求。
+				turns.push({ customType: message.customType, at: Date.now() });
+				return host.request();
+			}
 			return undefined;
 		},
 	};
@@ -141,11 +150,14 @@ function createHost(options = {}) {
 		branch,
 		messages,
 		notifications,
+		turns,
 		counters,
 		request,
 		prompt,
 		fire,
 		tools,
+		/** 调用扩展注册的工具（与 pi 的 execute 调用同形）。 */
+		tool: (name, params) => tools.get(name).execute("call", params, undefined, undefined, ctx),
 		/** pi 在 prompt 阶段执行扩展命令：处理器收到的是命令名之后的参数（真实契约）。 */
 		command: async (message) => {
 			const text = message.trim();
@@ -263,6 +275,7 @@ test("会话恢复按 pi 原生会话 id 认领绑定，稳定目录 id 不同�
 });
 
 const EXECUTION_TYPE = "pi-deck-document-work-execution";
+const EXECUTION_ENTRY_TYPE = "tpa-document-work-execution";
 const executionMessages = (list) => list.filter((text) => text.includes("改稿要求"));
 /** 改稿轮的绑定：execute 只允许 revise_document 且必须与当前活动绑定逐项一致。 */
 const revisionBinding = (overrides = {}) => binding({ kind: "revise_document", ...overrides });
@@ -275,17 +288,15 @@ function executeCommand(overrides = {}) {
 /** 期望指令：与扩展内派生规则同形；契约测试再与主进程 buildRevisionPrompt 逐字比对。 */
 function expectedInstruction(overrides = {}) {
 	const scope = revisionBinding(overrides).scope;
-	const sections = scope.sections.length
-		? `
-声明要改的块：${scope.sections.join("、")}`
-		: "";
-	const preserve = scope.preserve.length
-		? `
-必须保留（逐块比较，改动会被判为未授权）：${scope.preserve.join("、")}`
-		: "";
-	return `改稿要求：${scope.summary}${sections}${preserve}
-只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
+	const sections = scope.sections.length ? `\n声明要改的块：${scope.sections.join("、")}` : "";
+	const preserve = scope.preserve.length ? `\n必须保留（逐块比较，改动会被判为未授权）：${scope.preserve.join("、")}` : "";
+	return `改稿要求：${scope.summary}${sections}${preserve}\n只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
 }
+
+/** 执行轮次计数：只有 triggerTurn 的自定义消息才算真的开了模型回合。 */
+const executionTurns = (host) => host.turns.length;
+const executionEntries = (host) => host.branch.filter((entry) => entry.type === "custom" && entry.customType === EXECUTION_ENTRY_TYPE);
+const bindingEntries = (host) => host.branch.filter((entry) => entry.type === "custom" && entry.customType === "tpa-document-work-binding");
 
 test("宿主授权的执行由扩展触发：指令从冻结 scope 派生，以自定义消息出发，不落成 role:user 轮", async () => {
 	const host = createHost();
@@ -340,27 +351,102 @@ test("execute 的入口校验：未绑定、四元组/会话/类型不匹配、�
 	assert.equal(broken.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 0, "非法载荷不得执行");
 });
 
-test("同一绑定只执行一次：重复请求、release 之后、重启恢复都不能再开一轮", async () => {
+test("真机反例：bind→execute→同一 bind→同一 execute 只能有一个执行回合", async () => {
 	const host = createHost();
 	await host.command(bindCommand(revisionBinding()));
 	await host.command(executeCommand());
+	assert.equal(executionTurns(host), 1, "第一次 execute 触发一轮");
+	// 同一载荷重复 bind + 重复 execute（真机反例的确切序列）。
+	await host.command(bindCommand(revisionBinding()));
 	await host.command(executeCommand());
-	assert.equal(host.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 1, "重复 execute 不得再开一轮");
-
-	await host.command("release");
+	assert.equal(executionTurns(host), 1, "重复 bind 不得重新武装同一尝试");
+	// 再来一轮重复也不许累加。
+	await host.command(bindCommand(revisionBinding()));
 	await host.command(executeCommand());
-	assert.equal(host.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 1, "release 之后执行权必须收回");
-	assert.equal(host.notifications.length >= 1, true, "被拒的执行要如实告知");
+	assert.equal(executionTurns(host), 1, "任意次重复都不得再开一轮");
+	assert.equal(executionEntries(host).length, 1, "投递去重标记只允许一条");
+	assert.equal(bindingEntries(host).length, 1, "重复 bind 不得新增绑定条目");
+});
 
-	// 重启恢复：同一分支重建扩展后，旧绑定只是后台归属，不得凭它再执行。
-	const entries = clone(host.branch);
-	const reopened = createHost({ entries });
+test("重复 bind 是幂等的：不复位候选状态，也不新增绑定/执行条目", async () => {
+	// 汇报一个候选（真实 staging 文件：绑定指向临时目录，工具会按 staging 相对路径校验）。
+	const staging = mkdtempSync(join(tmpdir(), "pideck-dedup-"));
+	writeFileSync(join(staging, "桥梁监测安排.docx"), "synthetic docx bytes");
+	const withStaging = revisionBinding({ stagingDirectory: staging });
+	const host = createHost();
+	await host.command(bindCommand(withStaging));
+	await host.command(executeCommand(withStaging));
+	const reported = await host.tool("tpa_artifact_report", { reportId: "rp_1", artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "初稿", risks: [] });
+	assert.equal(reported.details.documentWork.ok, true, JSON.stringify(reported.details.documentWork));
+	assert.equal(host.state()?.phase, "reported");
+	const bindingsBefore = bindingEntries(host).length;
+	const executionsBefore = executionEntries(host).length;
+	await host.command(bindCommand(withStaging));
+	assert.equal(host.state()?.phase, "reported", "重复 bind 不得把候选状态复位成 bound");
+	// 状态回执（custom_message）是必要的；绑定/执行条目一律不得新增。
+	assert.equal(bindingEntries(host).length, bindingsBefore, "重复 bind 不得新增绑定条目");
+	assert.equal(executionEntries(host).length, executionsBefore, "重复 bind 不得新增执行条目");
+	assert.equal(executionTurns(host), 1);
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("release/unbind 之后同一尝试不得重新获得执行权", async () => {
+	for (const [label, teardown] of [
+		["release 之后", "release"],
+		["unbind 之后", "unbind"],
+	]) {
+		const host = createHost();
+		await host.command(bindCommand(revisionBinding()));
+		await host.command(executeCommand());
+		await host.command(teardown);
+		await host.command(bindCommand(revisionBinding()));
+		await host.command(executeCommand());
+		assert.equal(executionTurns(host), 1, `${label}：重绑同一尝试不得再开一轮`);
+		assert.equal(contextMessages(await host.request()).length, 0, `${label}：重绑也不得重新注入制作上下文`);
+	}
+});
+
+test("重启恢复：投递去重条目随分支恢复，重绑同一尝试不得再开一轮", async () => {
+	const host = createHost();
+	await host.command(bindCommand(revisionBinding()));
+	await host.command(executeCommand());
+	assert.equal(executionEntries(host).length, 1, "投递标记必须落盘");
+	const reopened = createHost({ entries: clone(host.branch) });
 	await reopened.fire("session_start", { type: "session_start" });
 	assert.equal(reopened.state()?.phase, "bound", "恢复仍能看到绑定");
-	assert.equal(contextMessages(await reopened.request()).length, 0, "恢复的绑定不注入执行上下文");
+	assert.equal(contextMessages(await reopened.request()).length, 0, "恢复后 fail-closed：不注入执行上下文");
+	await reopened.command(bindCommand(revisionBinding()));
 	await reopened.command(executeCommand());
-	// 恢复出来的分支里本来就带着上一轮的执行消息：只断言「没有新增」。
-	assert.equal(reopened.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, entries.filter((entry) => entry.customType === EXECUTION_TYPE).length, "恢复后不得凭旧绑定执行");
+	assert.equal(executionTurns(reopened), 0, "恢复 + 重绑同一尝试不得再开一轮");
+});
+
+test("篡改 kind：同一四元组的 revise 载荷不得顶替 create 绑定去执行", async () => {
+	const host = createHost();
+	const createBinding = binding({ kind: "create_document" });
+	await host.command(bindCommand(createBinding));
+	// 同一 work/attempt/preparation/digest，但载荷伪造 kind=revise_document。
+	await host.command(executeCommand({ kind: "revise_document" }));
+	assert.equal(executionTurns(host), 0, "绑定是 create 轮时不得借伪造 kind 执行");
+	assert.equal(host.notifications.length >= 1, true, "必须如实告知被拒");
+	// 反向：同一尝试里再 bind 一个身份不同（digest 变了）的载荷不得顶替有效绑定。
+	await host.command(bindCommand({ ...createBinding, digest: "c".repeat(64), kind: "revise_document" }));
+	assert.equal(host.state()?.digest, createBinding.digest, "有效绑定不得被同尝试的不同身份顶替");
+	assert.equal(host.notifications.length >= 1, true);
+});
+
+test("真正的新一轮（新 attemptId）照常执行一次，且它自己的重复请求同样被拒", async () => {
+	const host = createHost();
+	await host.command(bindCommand(revisionBinding()));
+	await host.command(executeCommand());
+	assert.equal(executionTurns(host), 1);
+	const nextAttempt = { attemptId: "at_second", preparationId: "pr_second", digest: "d".repeat(64) };
+	await host.command(bindCommand(revisionBinding(nextAttempt)));
+	await host.command(executeCommand(nextAttempt));
+	assert.equal(executionTurns(host), 2, "新一轮必须能执行");
+	assert.equal(contextMessages(await host.request()).length, 1, "新一轮重新注入本轮上下文");
+	await host.command(executeCommand(nextAttempt));
+	assert.equal(executionTurns(host), 2, "新一轮自己也只执行一次");
+	assert.equal(executionEntries(host).length, 2, "两轮各一条投递标记");
 });
 
 test("契约一致：扩展现场派生的指令与主进程 buildRevisionPrompt 逐字相同", async () => {

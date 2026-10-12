@@ -13,6 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import {
 	DOCUMENT_WORK_BINDING_ENTRY_TYPE,
+	DOCUMENT_WORK_EXECUTION_ENTRY_TYPE,
 	DOCUMENT_WORK_EXECUTION_TYPE,
 	DOCUMENT_WORK_REPORT_ENTRY_TYPE,
 	DOCUMENT_WORK_REPORT_MAX_FILES,
@@ -67,8 +68,42 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	const materialStatus = new Map<string, DocumentWorkExtensionState["materials"][number]>();
 	/** 本轮是否还在制作：结算完成后只保留后台身份，不再注入制作上下文。 */
 	let attemptLive = false;
-	/** 已经触发过执行的那一次尝试：同一绑定只允许执行一次（重复/释放/重启都不再开一轮）。 */
-	let executedAttemptId: string | undefined;
+	/**
+	 * 已经投递过执行的尝试（有界，最新的排在后）。
+	 *
+	 * 关键不变式：**执行权按尝试一次性**——同一 attemptId 的 bind/execute 无论重复多少次、
+	 * 中间经历 release/unbind/重启，都不得再触发第二个模型回合。真机反例正是
+	 * 「bind→execute→同一 bind→同一 execute」触发了两个回合：原来 persistBinding 无条件
+	 * 复位 executedAttemptId，等于把已经用掉的授权重新武装。
+	 */
+	const executedAttempts = new Map<string, number>();
+	/** 已经绑定过的尝试：只有**第一次**绑定能让这一轮进入「制作中」状态。 */
+	const boundAttempts = new Map<string, number>();
+	const ATTEMPT_MEMORY_LIMIT = 16;
+
+	/** 有界记账：重复条目只刷新时间，超出上限丢最旧的。 */
+	function rememberAttempt(memory: Map<string, number>, attemptId: string): void {
+		memory.delete(attemptId);
+		memory.set(attemptId, Date.now());
+		while (memory.size > ATTEMPT_MEMORY_LIMIT) {
+			const oldest = memory.keys().next().value;
+			if (oldest === undefined) break;
+			memory.delete(oldest);
+		}
+	}
+
+	/** 同一尝试的身份是否逐项一致（kind 也参与）：用来把重复 bind 判成幂等而不是新绑定。 */
+	function sameBindingIdentity(left: DocumentWorkBinding, right: DocumentWorkBinding): boolean {
+		return (
+			left.workId === right.workId &&
+			left.attemptId === right.attemptId &&
+			left.preparationId === right.preparationId &&
+			left.digest === right.digest &&
+			left.sessionId === right.sessionId &&
+			left.nativeSessionId === right.nativeSessionId &&
+			left.kind === right.kind
+		);
+	}
 
 	function publish(phase: DocumentWorkExtensionState["phase"], extra?: { report?: DocumentWorkExtensionState["report"]; reason?: DocumentWorkExtensionState["reason"] }): void {
 		if (!binding) return;
@@ -89,16 +124,33 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		pi.sendMessage({ customType: DOCUMENT_WORK_STATE_TYPE, content: "", display: false, details: { documentWork: parsed } }, { triggerTurn: false });
 	}
 
-	/** 绑定必须落盘：主进程只有看到自己的身份四元组被确认后才会分发批准。 */
-	function persistBinding(ctx: ExtensionContext, next: DocumentWorkBinding): void {
+	/**
+	 * 绑定必须落盘：主进程只有看到自己的身份四元组被确认后才会分发批准。
+	 *
+	 * 三种结果：
+	 * - `duplicate`：同一尝试、身份逐项一致 → **幂等**，不覆盖绑定、不复位执行记账/候选/授权状态；
+	 * - `conflict`：同一 attemptId 但身份/digest/kind 不同 → 拒绝，保留有效绑定（不允许顶替）；
+	 * - `bound`：真正的新一轮（新的 attemptId）→ 落盘并复位每轮状态。
+	 */
+	function persistBinding(ctx: ExtensionContext, next: DocumentWorkBinding): "bound" | "duplicate" | "conflict" {
+		if (binding) {
+			if (sameBindingIdentity(binding, next)) {
+				// 幂等重复：会话指针对齐即可，attemptLive/reportCache/已执行记账一律保持原样。
+				sessionId = binding.nativeSessionId;
+				return "duplicate";
+			}
+			if (binding.attemptId === next.attemptId) return "conflict";
+		}
 		pi.appendEntry(DOCUMENT_WORK_BINDING_ENTRY_TYPE, { sessionId: next.nativeSessionId, binding: next, boundAt: Date.now() });
 		binding = next;
 		sessionId = next.nativeSessionId;
-		attemptLive = true;
-		executedAttemptId = undefined;
+		// 只有**第一次**绑定这个尝试才进入「制作中」；重绑已释放/已执行的尝试不得重新获得授权。
+		attemptLive = !boundAttempts.has(next.attemptId) && !executedAttempts.has(next.attemptId);
+		rememberAttempt(boundAttempts, next.attemptId);
 		materialStatus.clear();
 		// 旧尝试的候选不继承：新绑定只用新汇报。
 		reportCache = undefined;
+		return "bound";
 	}
 
 	/**
@@ -153,9 +205,15 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		let restoredReport: DocumentWorkExtensionState["report"] | undefined;
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (!isRecord(entry)) continue;
+			if (entry.type === "custom" && entry.customType === DOCUMENT_WORK_EXECUTION_ENTRY_TYPE && isRecord(entry.data) && entry.data.sessionId === current && typeof entry.data.attemptId === "string") {
+				// 执行投递去重标记：恢复后同一尝试不得再被重新武装。
+				rememberAttempt(executedAttempts, entry.data.attemptId);
+				continue;
+			}
 			if (entry.type === "custom" && entry.customType === DOCUMENT_WORK_BINDING_ENTRY_TYPE && isRecord(entry.data) && entry.data.sessionId === current) {
 				const candidate = decodeBinding(entry.data.binding);
 				if (candidate && candidate.nativeSessionId === current) {
+					rememberAttempt(boundAttempts, candidate.attemptId);
 					restored = candidate;
 					restoredReport = undefined;
 				}
@@ -275,8 +333,14 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				try {
-					persistBinding(ctx, parsed);
-					publish("bound");
+					const outcome = persistBinding(ctx, parsed);
+					if (outcome === "conflict") {
+						// 同一尝试的不同身份不得顶替有效绑定，也不得借此开执行。
+						ctx.ui.notify("TPA binding rejected: this attempt already has a different identity; the live binding is kept.", "warning");
+						return;
+					}
+					// 幂等重复也要回执当前状态：主进程才知道绑定仍然成立（执行权另由尝试记账把关）。
+					publish(reportCache ? "reported" : "bound", reportCache ? { report: reportCache } : undefined);
 				} catch (error) {
 					ctx.ui.notify(`TPA binding failed: ${error instanceof Error ? error.message : "unknown error"}`, "warning");
 				}
@@ -297,24 +361,28 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify("TPA execution rejected: the payload belongs to another session.", "warning");
 					return;
 				}
-				if (raw.kind !== "revise_document") {
+				// kind 两边都要是改稿轮：只信载荷可被「同一四元组 + 伪造 kind」顶替成 create 绑定。
+				if (raw.kind !== "revise_document" || (binding && binding.kind !== "revise_document")) {
 					ctx.ui.notify("TPA execution rejected: only a revision round can be executed this way.", "warning");
 					return;
 				}
 				if (
 					!binding ||
 					!attemptLive ||
+					executedAttempts.has(raw.attemptId) ||
 					binding.workId !== raw.workId ||
 					binding.attemptId !== raw.attemptId ||
 					binding.preparationId !== raw.preparationId ||
 					binding.digest !== raw.digest ||
-					binding.sessionId !== raw.sessionId ||
-					executedAttemptId === raw.attemptId
+					binding.sessionId !== raw.sessionId
 				) {
 					ctx.ui.notify("TPA execution rejected: no matching live binding for this attempt.", "warning");
 					return;
 				}
-				executedAttemptId = raw.attemptId;
+				// 先记去重（内存 + 原生 custom entry）：即使进程随后重启，这一尝试也不会再被
+				// 重新武装；标记只是传输层去重，不是任务授权。
+				rememberAttempt(executedAttempts, raw.attemptId);
+				pi.appendEntry(DOCUMENT_WORK_EXECUTION_ENTRY_TYPE, { sessionId: raw.nativeSessionId, workId: binding.workId, attemptId: binding.attemptId, preparationId: binding.preparationId, digest: binding.digest, deliveredAt: Date.now() });
 				pi.sendMessage(
 					{
 						customType: DOCUMENT_WORK_EXECUTION_TYPE,
@@ -330,7 +398,6 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 				// 结算已完成：绑定身份留着做后台归属，但不再注入「本轮要制作」的上下文，
 				// 否则下一轮普通聊天还会被上一轮的执行要求污染；执行权同时收回。
 				attemptLive = false;
-				executedAttemptId = undefined;
 				return;
 			}
 			if (action === "unbind") {
