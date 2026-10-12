@@ -12,11 +12,10 @@ import { parseAlignmentState, ALIGNMENT_MESSAGE_TYPE } from "../../shared/alignm
 import { extensionStateMatchesBinding, parseDocumentWorkExtensionState, parseSessionRuntimeTriple, sameRuntimeTriple, workFailure, stableStringify, type WorkResult } from "../../shared/documentWork";
 import { hashText } from "./documentWorkPaths";
 import type { AlignmentState } from "../../shared/types/alignment";
-import type { AgentRuntimeState, AgentStatus } from "../../shared/types/agent";
 import type { DocumentWorkExtensionState, PreparedWork, SessionRuntimeTriple, StartWorkInput } from "../../shared/types/documentWork";
 import { DocumentArtifactStore } from "./DocumentArtifactStore";
 import { DocumentInspectionService, type InspectionWorkerFactory } from "./DocumentInspectionService";
-import { DocumentWorkRuntimeAdapter, runtimeTripleOf, type DocumentWorkRuntimePort } from "./DocumentWorkRuntimeAdapter";
+import { decodeAgentStatus, decodeRuntimeFlags, DocumentWorkRuntimeAdapter, runtimeTripleOf, type DocumentWorkRuntimePort } from "./DocumentWorkRuntimeAdapter";
 import { DocumentWorkService, hashTurnText, type DocumentWorkLogger, type MaterialResolver } from "./DocumentWorkService";
 import { DocumentWorkStore } from "./DocumentWorkStore";
 
@@ -37,7 +36,11 @@ export function parseRevisionIntent(value: unknown): RevisionIntent | undefined 
 	if (typeof sourceTurnHash !== "string" || !/^[0-9a-f]{64}$/.test(sourceTurnHash)) return undefined;
 	const sections = Array.isArray(Reflect.get(value, "sections")) ? Reflect.get(value, "sections") : [];
 	const preserve = Array.isArray(Reflect.get(value, "preserve")) ? Reflect.get(value, "preserve") : [];
-	const bounded = (list: unknown): string[] | undefined => (Array.isArray(list) && list.length <= 24 && list.every((item) => typeof item === "string" && item.length <= 200) ? [...(list as string[])] : undefined);
+	const bounded = (list: unknown): string[] | undefined => {
+		if (!Array.isArray(list) || list.length > 24) return undefined;
+		const boundedItems = list.filter((item): item is string => typeof item === "string" && item.length <= 200);
+		return boundedItems.length === list.length ? boundedItems : undefined;
+	};
 	const boundedSections = bounded(sections);
 	const boundedPreserve = bounded(preserve);
 	if (!boundedSections || !boundedPreserve) return undefined;
@@ -53,6 +56,8 @@ export type DocumentWorkDomainDeps = {
 	bindTimeoutMs?: number;
 	settleTimeoutMs?: number;
 	startTimeoutMs?: number;
+	/** 并发回归测试注入点，见 DocumentWorkServiceDeps。 */
+	leaseAcquireBarrier?: () => Promise<void> | void;
 	/** 检查 worker 工厂：生产由 main/index 安装，测试注入桩。 */
 	inspectionWorkerFactory?: InspectionWorkerFactory;
 };
@@ -88,6 +93,7 @@ export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): Document
 		...(deps.bindTimeoutMs !== undefined ? { bindTimeoutMs: deps.bindTimeoutMs } : {}),
 		...(deps.settleTimeoutMs !== undefined ? { settleTimeoutMs: deps.settleTimeoutMs } : {}),
 		...(deps.startTimeoutMs !== undefined ? { startTimeoutMs: deps.startTimeoutMs } : {}),
+		...(deps.leaseAcquireBarrier ? { leaseAcquireBarrier: deps.leaseAcquireBarrier } : {}),
 	});
 	const agentSessions = new Map<string, string>();
 	const intentsBySession = new Map<string, string>();
@@ -99,7 +105,8 @@ export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): Document
 		if (typeof event !== "object" || event === null) return;
 		const type = Reflect.get(event, "type");
 		if (type !== "message_end") return;
-		const sessionId = typeof Reflect.get(event, "sessionId") === "string" ? (Reflect.get(event, "sessionId") as string) : agentSessions.get(agentId);
+		const eventSessionId = Reflect.get(event, "sessionId");
+		const sessionId = typeof eventSessionId === "string" ? eventSessionId : agentSessions.get(agentId);
 		const message = Reflect.get(event, "message");
 		if (!sessionId || typeof message !== "object" || message === null) return;
 		const customType = Reflect.get(message, "customType");
@@ -129,8 +136,7 @@ export function createDocumentWorkDomain(deps: DocumentWorkDomainDeps): Document
 		const state = Reflect.get(payload, "state");
 		if (typeof state !== "object" || state === null) return;
 		agentSessions.set(triple.agentId, triple.sessionId);
-		const status = Reflect.get(payload, "status");
-		runtime.note(triple, typeof status === "string" ? (status as AgentStatus) : undefined, state as AgentRuntimeState);
+		runtime.note(triple, decodeAgentStatus(Reflect.get(payload, "status")), decodeRuntimeFlags(state));
 		const alignment = Reflect.get(state, "alignment");
 		if (alignment === null) service.observeAlignmentState(triple.sessionId, null);
 		else if (alignment !== undefined) {

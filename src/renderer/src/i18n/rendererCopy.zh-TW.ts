@@ -580,6 +580,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"alignment.preserve": "必須保留",
 	"alignment.acceptance": "完成標準",
 	"documentWork.title": "本次文稿",
+	"documentWork.noUsableBase": "這件文稿還沒有通過檢查的版本，暫時不能繼續改稿。請先重新制作一版並通過檢查。",
+	"documentWork.needsOutputRoot": "這輪是正式文稿任務，但還沒有儲存目錄。請先在上方文稿卡片裡選擇儲存目錄，然後重新點選確認。",
 	"documentWork.registerMaterials": "登記聊天裡的材料",
 	"documentWork.registerMaterialsEmpty": "沒有在聊天裡找到可登記的材料路徑；可以點「新增材料」手動選擇。",
 	"documentWork.revisionModeOn": "改稿模式已開啟",

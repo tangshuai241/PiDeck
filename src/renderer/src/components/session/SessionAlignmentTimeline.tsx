@@ -17,6 +17,8 @@ export function SessionAlignmentTimeline(props: { sessionId: string }) {
 	const controls = useSessionAlignmentControls(props.sessionId, backend);
 	const documentWork = useSessionDocumentWork(props.sessionId, backend);
 	// 单个点击只允许一次批准：文稿路径由主进程发 `/align approve`，这里就不再发第二次。
+	// 单个点击只允许一次批准：文稿路径由主进程发 `/align approve`，这里就不再发第二次；
+	// `blocked` 表示明确文稿但还缺工作记录/成果目录，同样不发批准（保留输入并提示原因）。
 	const approve = useCallback(async () => {
 		if ((await documentWork.prepareAndStartForApproval()) !== "proceedWithAlignment") return;
 		controls.approve();

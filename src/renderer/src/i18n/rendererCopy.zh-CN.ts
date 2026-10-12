@@ -574,6 +574,8 @@ export const zhCN = {
 	"alignment.preserve": "必须保留",
 	"alignment.acceptance": "完成标准",
 	"documentWork.title": "本次文稿",
+	"documentWork.noUsableBase": "这件文稿还没有通过检查的版本，暂时不能继续改稿。请先重新制作一版并通过检查。",
+	"documentWork.needsOutputRoot": "这轮是正式文稿任务，但还没有保存目录。请先在上方文稿卡片里选择保存目录，然后重新点击确认。",
 	"documentWork.registerMaterials": "登记聊天里的材料",
 	"documentWork.registerMaterialsEmpty": "没有在聊天里找到可登记的材料路径；可以点「添加材料」手动选择。",
 	"documentWork.revisionModeOn": "改稿模式已开启",

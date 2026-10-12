@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { readdir, rm } from "node:fs/promises";
 import { hashText, readJsonResilient, readJsonWithHealth, writeFileAtomic, ensureDirectory } from "./documentWorkPaths";
 import { isRequestId, isWorkId, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
-import { parseDocumentOutputRoot, parseDocumentWorkOperation, parseDocumentWorkPreparation, parseArtifactVersion, parseDocumentWorkRecord } from "../../shared/documentWorkRecords";
-import type { DocumentArtifactVersion, DocumentOutputRoot, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord } from "../../shared/types/documentWork";
+import { parseDocumentOutputRoot, parseDocumentRuntimeLease, parseDocumentWorkOperation, parseDocumentWorkPreparation, parseArtifactVersion, parseDocumentWorkRecord } from "../../shared/documentWorkRecords";
+import type { DocumentArtifactVersion, DocumentOutputRoot, DocumentRuntimeLease, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord } from "../../shared/types/documentWork";
 
 /** 无重叠的键控串行锁：同一工作的读改写不会互相覆盖。 */
 class KeyedMutex {
@@ -67,6 +67,7 @@ export class DocumentWorkStore {
 		await ensureDirectory(join(this.rootDir, "frozen"));
 		await ensureDirectory(join(this.rootDir, "snapshots"));
 		await ensureDirectory(join(this.rootDir, "materials"));
+		await ensureDirectory(join(this.rootDir, "leases"));
 		await ensureDirectory(this.materialCacheDirectory);
 	}
 
@@ -203,10 +204,10 @@ export class DocumentWorkStore {
 		if (read.kind === "missing") return { kind: "miss" };
 		const raw = read.value;
 		if (typeof raw !== "object" || raw === null) return { kind: "conflict" };
-		const entry = raw as Partial<IdempotencyEntry>;
-		if (typeof entry.requestDigest !== "string") return { kind: "conflict" };
-		if (entry.requestDigest !== requestDigest) return { kind: "conflict" };
-		return { kind: "hit", payload: entry.payload };
+		// 逐字段读取：台账是不可信输入，缺 requestDigest 的一律 fail-closed。
+		const storedDigest = Reflect.get(raw, "requestDigest");
+		if (typeof storedDigest !== "string" || storedDigest !== requestDigest) return { kind: "conflict" };
+		return { kind: "hit", payload: Reflect.get(raw, "payload") };
 	}
 
 	/** 去重槽损坏时拒绝写入：不能把损坏原件替换成一份看起来正常的回执。 */
@@ -219,6 +220,62 @@ export class DocumentWorkStore {
 		}
 		await writeFileAtomic(this.idempotencyFile(requestId), JSON.stringify(entry));
 		return true;
+	}
+
+	// ---------------------------------------------------------------- runtime leases
+
+	private runtimeLeaseFile(sessionId: string): string {
+		return join(this.rootDir, "leases", `${hashText(sessionId)}.json`);
+	}
+
+	/** 租约持久化：`unknown` 分发与崩溃重启后仍要挡住同一 runtime 的新请求。 */
+	async saveRuntimeLease(lease: DocumentRuntimeLease): Promise<void> {
+		await writeFileAtomic(this.runtimeLeaseFile(lease.sessionId), JSON.stringify(lease, null, 2));
+	}
+
+	/**
+	 * 租约读取带健康度：`corrupt` 不能当成 `missing`，否则损坏一次就能重新开放同一 runtime。
+	 */
+	async readRuntimeLeaseState(sessionId: string): Promise<{ kind: "missing" } | { kind: "ok"; lease: DocumentRuntimeLease } | { kind: "corrupt" }> {
+		const read = await readJsonWithHealth(this.runtimeLeaseFile(sessionId));
+		if (read.kind === "missing") return { kind: "missing" };
+		if (read.kind !== "ok") return { kind: "corrupt" };
+		const lease = parseDocumentRuntimeLease(read.value);
+		return lease ? { kind: "ok", lease } : { kind: "corrupt" };
+	}
+
+	/** 宽松读取：只用于展示/诊断，写路径必须用 readRuntimeLeaseState。 */
+	async readRuntimeLease(sessionId: string): Promise<DocumentRuntimeLease | undefined> {
+		const state = await this.readRuntimeLeaseState(sessionId);
+		return state.kind === "ok" ? state.lease : undefined;
+	}
+
+	/**
+	 * 清除租约。损坏时**拒绝**清除（fail-closed）：无法核对归属就不能释放排他。
+	 * 返回 false 表示没有清除（损坏或不属于本次请求）。
+	 */
+	async clearRuntimeLease(sessionId: string, requestId?: string): Promise<boolean> {
+		const state = await this.readRuntimeLeaseState(sessionId);
+		if (state.kind === "corrupt") return false;
+		if (state.kind === "missing") return true;
+		// 只清自己持有的租约：别人的 attempt 不能被误放。
+		if (requestId !== undefined && state.lease.requestId !== requestId) return false;
+		await rm(this.runtimeLeaseFile(sessionId), { force: true }).catch(() => undefined);
+		return true;
+	}
+
+	/** 启动恢复：连损坏的租约一起报出来（调用方保守阻塞，不当作没有）。 */
+	async listRuntimeLeaseStates(): Promise<Array<{ kind: "ok"; lease: DocumentRuntimeLease } | { kind: "corrupt" }>> {
+		const directory = join(this.rootDir, "leases");
+		const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+		const states: Array<{ kind: "ok"; lease: DocumentRuntimeLease } | { kind: "corrupt" }> = [];
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+			const read = await readJsonWithHealth(join(directory, entry.name));
+			const lease = read.kind === "ok" ? parseDocumentRuntimeLease(read.value) : undefined;
+			states.push(lease ? { kind: "ok", lease } : { kind: "corrupt" });
+		}
+		return states;
 	}
 
 	/** 跨 store 调用串行化（读取→动作→回执），供服务层包裹去重路径。 */

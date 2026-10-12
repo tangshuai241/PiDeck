@@ -13,6 +13,11 @@ export const FILE_DIGEST_ALGORITHM = "sha256";
 
 export type FileFingerprint = { digest: string; bytes: number };
 
+/** 程序生成的记录 id：前缀 + 24 位随机十六进制，便于日志里识别类型。 */
+export function insertId(prefix: string): string {
+	return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+}
+
 export function hashText(text: string): string {
 	return createHash(FILE_DIGEST_ALGORITHM).update(text, "utf8").digest("hex");
 }
@@ -172,6 +177,15 @@ export function resolveInsideDirectory(directory: string, relativePath: string):
 	const segments = normalized.split("/");
 	if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) return undefined;
 	return join(directory, ...segments);
+}
+
+/** 材料根检查：只接受用户授权目录或项目目录内的路径，其余一律拒绝。 */
+export async function isPathInsideAnyRoot(roots: readonly string[], candidate: string): Promise<boolean> {
+	for (const root of roots) {
+		const containment = await containPath(root, candidate);
+		if (containment.ok) return true;
+	}
+	return false;
 }
 
 export function directoryLabel(path: string): string {

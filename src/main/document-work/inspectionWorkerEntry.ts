@@ -7,12 +7,10 @@
  * 该文件只做「收任务 → 跑纯逻辑 → 回结果」；不读配置、不发 IPC、不碰 Electron。
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { runInspectionTask, type InspectionTaskInput } from "./inspectionTask";
+import { decodeInspectionTaskInput, runInspectionTask } from "./inspectionTask";
 
 const port = parentPort;
 if (port) {
-	const input = workerData as InspectionTaskInput;
-	void runInspectionTask(input)
-		.then((result) => port.postMessage(result))
-		.catch(() => port.postMessage({ ok: false, reason: "inspector_failed" }));
+	const input = decodeInspectionTaskInput(workerData);
+	void (input ? runInspectionTask(input) : Promise.resolve({ ok: false, reason: "inspector_failed" })).then((result) => port.postMessage(result)).catch(() => port.postMessage({ ok: false, reason: "inspector_failed" }));
 }

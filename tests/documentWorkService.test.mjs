@@ -1,268 +1,14 @@
 /**
  * 文稿服务编排：授权、准备失效、运行时绑定、分发顺序、取消、归档与防覆盖。
  *
- * 用假运行时端口 + 临时目录 + 合成文稿驱动真实主进程模块（store/artifacts/inspection/
- * service/attempt runner/runtime adapter），不启动 pi 进程、不联网、不调模型。
+ * 测试台（真实主进程模块 + 假运行时端口）见 `helpers/documentWorkServiceHarness.mjs`。
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { createInlineInspectionWorkerFactory } from "./helpers/inspectionWorkerStub.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
-
-const ROOT = process.cwd();
-const { createDocumentWorkDomain } = loadTsCommonJs(`${ROOT}/src/main/document-work/index.ts`);
-const shared = loadTsCommonJs(`${ROOT}/src/shared/documentWork.ts`);
-const serviceModule = loadTsCommonJs(`${ROOT}/src/main/document-work/DocumentWorkService.ts`);
-
-const plain = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
-
-function waitFor(predicate, timeoutMs = 2_000) {
-	const deadline = Date.now() + timeoutMs;
-	return new Promise((resolve) => {
-		const tick = () => {
-			if (predicate()) return resolve(true);
-			if (Date.now() > deadline) return resolve(false);
-			setTimeout(tick, 10);
-		};
-		tick();
-	});
-}
-const AGENT_ID = "agent-a";
-const SESSION_ID = "session-a";
-const NATIVE_SESSION_ID = "pi-native-session-9";
-const CREATE_TURN_TEXT = "请写一份季度报告";
-const TURN_TEXT = "把第二节改短一点，标题也换一下";
-const CREATE_TURN_HASH = serviceModule.hashTurnText(CREATE_TURN_TEXT);
-const TURN_HASH = serviceModule.hashTurnText(TURN_TEXT);
-
-/** 集成式测试台：真实主进程模块 + 假运行时端口。 */
-function createHarness(options = {}) {
-	const root = mkdtempSync(join(tmpdir(), "pideck-docwork-"));
-	const userData = join(root, "userData");
-	const outputRoot = join(root, "out");
-	const workspace = join(root, "workspace");
-	mkdirSync(outputRoot, { recursive: true });
-	mkdirSync(workspace, { recursive: true });
-	const outputs = new Set();
-	const piEvents = new Set();
-	const state = {
-		status: "idle",
-		flags: {},
-		generation: 1,
-		messages: [{ id: "turn-1", role: "user", text: CREATE_TURN_TEXT, agentId: AGENT_ID, timestamp: 1 }],
-		dispatched: [],
-		aborted: [],
-		allowedMaterials: new Set(),
-		bindingAck: true,
-		approveAccepted: true,
-		approveUnknown: false,
-	};
-	const port = {
-		readRuntime: async (sessionId) =>
-			sessionId === SESSION_ID
-				? {
-						target: { sessionId: SESSION_ID, agentId: AGENT_ID, runtimeGeneration: state.generation },
-						status: state.status,
-						state: { ...state.flags },
-						messages: state.messages,
-						// 稳定 SessionRecord.id 与 pi 原生会话 id 刻意取不同值：绑定必须用后者。
-						nativeSessionId: NATIVE_SESSION_ID,
-					}
-				: undefined,
-		dispatch: async (input) => {
-			state.dispatched.push(input.message);
-			if (input.message.startsWith("/tpa-work bind ")) {
-				if (!state.bindingAck) return { accepted: true, unknown: false };
-				const payload = shared.decodeBindingPayload(input.message.slice("/tpa-work bind ".length));
-				for (const listener of piEvents) {
-					listener(AGENT_ID, {
-						type: "message_end",
-						sessionId: SESSION_ID,
-						message: { role: "custom", customType: "pi-deck-document-work-state", details: { documentWork: { schemaVersion: 1, workId: payload.workId, attemptId: payload.attemptId, preparationId: payload.preparationId, digest: payload.digest, sessionId: SESSION_ID, phase: "bound", materials: [] } } },
-					});
-				}
-				return { accepted: true, unknown: false };
-			}
-			if (input.message.startsWith("/align approve") && !state.approveAccepted) return { accepted: false, unknown: state.approveUnknown, error: "runtime_changed" };
-			return { accepted: true, unknown: false };
-		},
-		abort: async (input) => {
-			state.aborted.push(input.requestId);
-			return { accepted: true, unknown: false };
-		},
-		hasDispatchInFlight: () => false,
-		subscribeOutputs: (listener) => {
-			outputs.add(listener);
-			return () => outputs.delete(listener);
-		},
-		subscribePiEvents: (listener) => {
-			piEvents.add(listener);
-			return () => piEvents.delete(listener);
-		},
-	};
-	const changes = [];
-	const domain = createDocumentWorkDomain({
-		userDataPath: userData,
-		runtimePort: port,
-		materials: { isAllowed: async (_sessionId, hostPath) => state.allowedMaterials.has(hostPath) },
-		onChanged: (event) => changes.push({ ...event }),
-		logger: { info: () => {}, warn: () => {} },
-		inspectionWorkerFactory: createInlineInspectionWorkerFactory(),
-		bindTimeoutMs: options.bindTimeoutMs ?? 400,
-		settleTimeoutMs: options.settleTimeoutMs ?? 3_000,
-		startTimeoutMs: options.startTimeoutMs ?? 400,
-	});
-	const emitRuntime = () => {
-		for (const listener of outputs) listener("agents:runtime-state", { agentId: AGENT_ID, sessionId: SESSION_ID, runtimeGeneration: state.generation, status: state.status, state: { ...state.flags } });
-	};
-	const harness = {
-		root,
-		outputRoot,
-		workspace,
-		domain,
-		port,
-		state,
-		changes,
-		emitRuntime,
-		/** 扩展看到的绑定载荷：attemptId 与 staging 路径都以此为准，与真实扩展一致。 */
-		bindingPayload() {
-			const bind = [...state.dispatched].reverse().find((message) => message.startsWith("/tpa-work bind "));
-			return bind ? shared.decodeBindingPayload(bind.slice("/tpa-work bind ".length)) : undefined;
-		},
-		/** 写出本轮成果到 staging：真实流程里由模型完成。 */
-		async writeStaged(content) {
-			const payload = harness.bindingPayload();
-			const target = join(payload.stagingDirectory, "report.md");
-			mkdirSync(join(target, ".."), { recursive: true });
-			writeFileSync(target, content, "utf8");
-			return { attemptId: payload.attemptId, stagingDirectory: payload.stagingDirectory };
-		},
-		/** 模拟扩展汇报候选：身份四元组完全取自绑定载荷。 */
-		reportCandidate(attemptId) {
-			const payload = harness.bindingPayload();
-			for (const listener of piEvents) {
-				listener(AGENT_ID, {
-					type: "message_end",
-					sessionId: SESSION_ID,
-					message: {
-						role: "custom",
-						customType: "pi-deck-document-work-state",
-						details: {
-							documentWork: {
-								schemaVersion: 1,
-								workId: payload.workId,
-								attemptId,
-								preparationId: payload.preparationId,
-								digest: payload.digest,
-								sessionId: SESSION_ID,
-								phase: "reported",
-								materials: [],
-								report: { reportId: "rp_1", artifacts: [{ relativePath: "report.md", role: "primary" }], summary: "初稿完成", risks: ["未核对数据"] },
-							},
-						},
-					},
-				});
-			}
-		},
-		/** 模型把成果写好并汇报，然后本轮稳定完成。 */
-		async finishRound(content) {
-			harness.runtime.busy();
-			const staged = await harness.writeStaged(content);
-			harness.reportCandidate(staged.attemptId);
-			harness.runtime.settle();
-		},
-		async terminal(workId, requestId, timeoutMs = 4_000) {
-			const deadline = Date.now() + timeoutMs;
-			while (Date.now() < deadline) {
-				const result = await domain.service.getOperation(workId, requestId, SESSION_ID);
-				const operation = result.ok ? result.value : undefined;
-				if (operation && ["archived", "failed", "interrupted", "unknown"].includes(operation.phase)) return plain(operation);
-				await new Promise((resolve) => setTimeout(resolve, 25));
-			}
-			throw new Error("operation did not settle");
-		},
-		runtime: {
-			target: () => ({ sessionId: SESSION_ID, agentId: AGENT_ID, runtimeGeneration: state.generation }),
-			// 真实运行时状态补丁是「显式带字段」的：完成边沿必须显式把标志置回 false。
-			settle: () => {
-				state.status = "idle";
-				state.flags = { isTurnActive: false, isStreaming: false, isCompacting: false, isExecutingTool: false };
-				emitRuntime();
-			},
-			busy: () => {
-				state.status = "running";
-				state.flags = { isTurnActive: true, isStreaming: true };
-				emitRuntime();
-			},
-		},
-		alignment(overrides = {}) {
-			const value = { schemaVersion: 1, briefId: "brief-1", revision: 2, phase: "ready", briefRevision: 2, brief: { goal: "写季度报告", scope: ["第二章"], materials: [], deliverable: "一份 Markdown 报告", preserve: ["保留原始数据"], acceptance: ["结构完整"], questions: [] }, ...overrides };
-			domain.service.observeAlignmentState(SESSION_ID, value);
-			return value;
-		},
-		async cleanup() {
-			// 先取消在途结算并 drain，再删目录：否则后台协程会在测试结束后继续写盘。
-			await domain.dispose();
-			rmSync(root, { recursive: true, force: true });
-		},
-	};
-	return harness;
-}
-
-async function createWork(harness) {
-	const root = await harness.domain.store.registerOutputRoot(harness.outputRoot, "文稿");
-	const created = await harness.domain.service.createWork({ requestId: "req-create", sessionId: SESSION_ID, sourceTurnId: "turn-1", outputRootId: root.outputRootId, title: "季度报告" });
-	assert.equal(created.ok, true);
-	return plain(created.value);
-}
-
-function prepareCreate(harness, view, overrides = {}) {
-	return harness.domain.service.prepare({
-		requestId: overrides.requestId ?? "req-prepare",
-		workId: view.workId,
-		expectedRevision: view.revision,
-		kind: "create_document",
-		requirementsRef: { kind: "alignment", briefId: "brief-1", revision: 2 },
-		scope: { summary: "写季度报告", sections: [], preserve: [] },
-		materialPaths: [],
-	});
-}
-
-/** 改稿准备/开始：授权来源是那一轮真实用户指令的正文指纹。 */
-/** 保证「真实用户当前轮」就是明确改稿要求：主进程只认这一轮，测试不能凭空造授权。 */
-function ensureRevisionTurn(harness) {
-	const lastUser = [...harness.state.messages].reverse().find((message) => message.role === "user");
-	if (lastUser?.text === TURN_TEXT) return;
-	harness.state.messages.push({ id: `turn-${harness.state.messages.length + 1}`, role: "user", text: TURN_TEXT, agentId: AGENT_ID, timestamp: Date.now() });
-}
-
-async function prepareRevision(harness, view, preserve, requestId, allow = []) {
-	ensureRevisionTurn(harness);
-	const prepared = await harness.domain.service.prepare({
-		requestId,
-		workId: view.workId,
-		expectedRevision: view.revision,
-		kind: "revise_document",
-		requirementsRef: { kind: "user_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH },
-		// 范围就是用户那一轮的原话：主进程会校验它的指纹与授权引用一致。
-		// allow 声明本轮允许改动的块；基稿里其余块默认必须保留。
-		scope: { summary: TURN_TEXT, sections: [], preserve, allow },
-		materialPaths: [],
-	});
-	return prepared;
-}
-
-/** 主进程读到的真实用户当前轮 id。 */
-function latestUserTurnId(harness) {
-	return [...harness.state.messages].reverse().find((message) => message.role === "user")?.id ?? "turn-1";
-}
-
-function startRound(harness, view, prepared, requestId, authorization) {
-	return harness.domain.service.start({ requestId, workId: view.workId, expectedRevision: prepared.value.workRevision, preparation: prepared.value.preparation, expectedRuntime: harness.runtime.target(), authorization });
-}
+import { AGENT_ID, CREATE_TURN_TEXT, NATIVE_SESSION_ID, ROOT, SESSION_ID, TURN_HASH, TURN_TEXT, createDocumentWorkDomain, createHarness, createWork, ensureRevisionTurn, latestUserTurnId, plain, prepareCreate, prepareRevision, serviceModule, shared, startRound, waitFor } from "./helpers/documentWorkServiceHarness.mjs";
 
 test("首次实际提交建立记录；空模式不建记录，重复提交幂等", async () => {
 	const harness = createHarness();
@@ -353,14 +99,15 @@ test("缺少可确认的对齐版本、运行时换代或身份不符时都拒�
 	try {
 		const view = await createWork(harness);
 		harness.alignment({ phase: "clarifying" });
-		const notReady = await prepareCreate(harness, view);
+		const notReady = await prepareCreate(harness, view, { requestId: "req-prepare-a" });
 		assert.equal(notReady.error.code, "APPROVAL_REQUIRED");
 
 		harness.alignment({ revision: 7 });
-		assert.equal((await prepareCreate(harness, view)).error.code, "PREPARATION_STALE", "要求版本不匹配时准备失效");
+		// 每次探测用独立的 requestId：同 requestId 是幂等键，重放返回原回执而不是重新校验。
+		assert.equal((await prepareCreate(harness, view, { requestId: "req-prepare-b" })).error.code, "PREPARATION_STALE", "要求版本不匹配时准备失效");
 
 		harness.alignment();
-		const prepared = await prepareCreate(harness, view);
+		const prepared = await prepareCreate(harness, view, { requestId: "req-prepare-c" });
 		assert.equal(prepared.ok, true);
 		const wrongApproval = await startRound(harness, view, prepared, "req-start-2", { kind: "alignment_confirmation", briefId: "brief-other", revision: 2 });
 		assert.equal(wrongApproval.error.code, "APPROVAL_REQUIRED");
@@ -559,11 +306,12 @@ test("取消只针对本轮：带 attemptId 与三元组校验，取消后不留
 		const prepared = await prepareCreate(harness, view);
 		assert.equal((await startRound(harness, view, prepared, "req-start", { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 })).ok, true);
 		const withActive = plain((await harness.domain.service.getView(view.workId, SESSION_ID)).value);
-		const wrongAttempt = await harness.domain.service.cancel({ requestId: "req-cancel", workId: view.workId, expectedRevision: withActive.revision, attemptId: "at_other", expectedRuntime: harness.runtime.target() });
+		// 每次探测用独立 requestId：同 requestId 是幂等键，重放返回原回执（这正是本轮加固的语义）。
+		const wrongAttempt = await harness.domain.service.cancel({ requestId: "req-cancel-a", workId: view.workId, expectedRevision: withActive.revision, attemptId: "at_other", expectedRuntime: harness.runtime.target() });
 		assert.equal(wrongAttempt.error.code, "CANCEL_NOT_APPLICABLE");
-		const wrongRuntime = await harness.domain.service.cancel({ requestId: "req-cancel", workId: view.workId, expectedRevision: withActive.revision, attemptId: withActive.active.attemptId, expectedRuntime: { ...harness.runtime.target(), runtimeGeneration: 99 } });
+		const wrongRuntime = await harness.domain.service.cancel({ requestId: "req-cancel-b", workId: view.workId, expectedRevision: withActive.revision, attemptId: withActive.active.attemptId, expectedRuntime: { ...harness.runtime.target(), runtimeGeneration: 99 } });
 		assert.equal(wrongRuntime.error.code, "RUNTIME_CHANGED");
-		const cancelled = await harness.domain.service.cancel({ requestId: "req-cancel", workId: view.workId, expectedRevision: withActive.revision, attemptId: withActive.active.attemptId, expectedRuntime: harness.runtime.target() });
+		const cancelled = await harness.domain.service.cancel({ requestId: "req-cancel-c", workId: view.workId, expectedRevision: withActive.revision, attemptId: withActive.active.attemptId, expectedRuntime: harness.runtime.target() });
 		assert.equal(cancelled.ok, true);
 		assert.equal(harness.state.aborted.length, 1);
 		const afterCancel = plain((await harness.domain.service.getView(view.workId, SESSION_ID)).value);

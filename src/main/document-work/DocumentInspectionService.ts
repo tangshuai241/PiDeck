@@ -16,7 +16,7 @@ import { deriveInspectionStatus } from "../../shared/documentWork";
 import type { DocumentInspection, DocumentInspectionItem, InspectionStatus } from "../../shared/types/documentWork";
 import type { InspectorSection } from "./documentInspectors";
 import { fingerprintFile } from "./documentWorkPaths";
-import type { InspectionTaskInput, InspectionTaskOutput } from "./inspectionTask";
+import { decodeInspectionTaskOutput, type InspectionTaskInput, type InspectionTaskOutput } from "./inspectionTask";
 
 /** 成果文件本体预算（方案首版设计值）。 */
 export const INSPECTION_ARTIFACT_BYTE_BUDGET = 32 * 1024 * 1024;
@@ -191,7 +191,10 @@ export class DocumentInspectionService {
 				resolve(outcome);
 			};
 			const timer = delay(() => finish({ kind: "timeout" }), this.timeoutMs);
-			worker.once("message", (message: unknown) => finish({ kind: "result", output: message as InspectionTaskOutput }));
+			worker.once("message", (message: unknown) => {
+				const decoded = decodeInspectionTaskOutput(message);
+				finish(decoded ? { kind: "result", output: decoded } : { kind: "crashed" });
+			});
 			worker.once("error", () => finish({ kind: "crashed" }));
 			worker.once("exit", (code) => {
 				if (code !== 0) finish({ kind: "crashed" });

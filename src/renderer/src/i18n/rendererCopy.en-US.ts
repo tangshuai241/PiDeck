@@ -574,6 +574,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"alignment.preserve": "Must preserve",
 	"alignment.acceptance": "Acceptance criteria",
 	"documentWork.title": "This document work",
+	"documentWork.noUsableBase": "This document has no version that passed inspection yet, so a revision cannot continue. Produce and inspect a new version first.",
+	"documentWork.needsOutputRoot": "This round is a document task but no output folder is set yet. Choose a folder in the document card above, then confirm again.",
 	"documentWork.registerMaterials": "Register material from chat",
 	"documentWork.registerMaterialsEmpty": "No registrable material path was found in this chat; use Add material to pick one.",
 	"documentWork.revisionModeOn": "Revision mode on",

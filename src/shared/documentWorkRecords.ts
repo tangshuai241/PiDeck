@@ -14,6 +14,7 @@ import {
 	type DocumentInspection,
 	type DocumentInspectionItem,
 	type DocumentOutputRoot,
+	type DocumentRuntimeLease,
 	type DocumentSectionFingerprint,
 	type DocumentWorkBase,
 	type DocumentWorkChangedEvent,
@@ -178,6 +179,9 @@ export function parseDocumentWorkRecord(value: unknown): DocumentWorkRecord | un
 	const versionIds = parseIdList(value.versionIds, 512);
 	const consumedRevisionTurns = parseIdList(value.consumedRevisionTurns, 256, 200);
 	if (!sourceTurnIds || !operationRequestIds || !versionIds || !consumedRevisionTurns) return undefined;
+	// 旧记录没有轮标识字段：默认空数组（历史 hash 无法反推 id，不能拿它顶替）。
+	const consumedRevisionTurnIds = value.consumedRevisionTurnIds === undefined ? [] : parseIdList(value.consumedRevisionTurnIds, 256, 200);
+	if (!consumedRevisionTurnIds) return undefined;
 	if (!isNonNegativeInteger(value.createdAt) || !isNonNegativeInteger(value.updatedAt)) return undefined;
 	return {
 		schemaVersion: 1,
@@ -194,6 +198,7 @@ export function parseDocumentWorkRecord(value: unknown): DocumentWorkRecord | un
 		operationRequestIds,
 		versionIds,
 		consumedRevisionTurns,
+		consumedRevisionTurnIds,
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt,
 	};
@@ -301,6 +306,25 @@ export function parseDocumentWorkOperation(value: unknown, expectedWorkId?: stri
 		...(error ? { error } : {}),
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt,
+	};
+}
+
+/** 运行时租约：身份必须齐全，缺一项就不能用来排他（宁可保守阻塞也不误放）。 */
+export function parseDocumentRuntimeLease(value: unknown): DocumentRuntimeLease | undefined {
+	if (!isRecord(value) || !isBoundedText(value.sessionId, 96)) return undefined;
+	if (!isWorkId(value.workId) || !isRequestId(value.requestId) || !isWorkId(value.attemptId)) return undefined;
+	const runtime = parseSessionRuntimeTriple(value);
+	if (!runtime) return undefined;
+	if (!isNonNegativeInteger(value.acquiredAt)) return undefined;
+	return {
+		sessionId: value.sessionId,
+		agentId: runtime.agentId,
+		runtimeGeneration: runtime.runtimeGeneration,
+		...(isBoundedText(value.nativeSessionId, 200) ? { nativeSessionId: value.nativeSessionId } : {}),
+		workId: value.workId,
+		requestId: value.requestId,
+		attemptId: value.attemptId,
+		acquiredAt: value.acquiredAt,
 	};
 }
 

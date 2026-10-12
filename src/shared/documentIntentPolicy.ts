@@ -19,27 +19,19 @@ const PRODUCTION_VERB = /(?:写|起草|拟|整理成|生成|制作|产出|出一
 /** 代码与工程语境：出现这些词说明这是项目开发，不是文稿任务。 */
 const ENGINEERING_NOUN = /(?:代码|函数|接口|重构|编译|测试用例|bug|报错|堆栈|依赖|提交|分支|仓库|脚本|配置|部署|单元测试|类型|module|import|api\b)/i;
 
-export type DocumentIntentInput = {
-	/** 用户原话或对齐要求的目标/成品描述。 */
-	text: string;
-	/** 会话里是否已经有一件工作（决定「继续改稿」是否成立）。 */
-	hasWork: boolean;
-	/** 工作里是否已有通过检查的可用基稿。 */
-	hasUsableBase: boolean;
-};
-
 /**
  * 是否把这一轮接进文稿生命周期（建工作 / 拦截确认单）。
- * 保守规则：必须同时有文档名词与制作动词，且不是工程语境；已有工作也必须有可用基稿。
+ *
+ * 只判断「这一轮是不是正式文稿任务」：必须同时有文档名词与制作动词，且不是工程语境。
+ * 「已有工作但没有可用基稿」属于调用方的分支（本轮是改稿却没有基稿 → 明确阻塞），
+ * 不能在这里返回「普通聊天」，否则会把文稿轮悄悄交给原生批准。
  */
-export function isDocumentWorkIntent(input: DocumentIntentInput): boolean {
-	const text = input.text.trim();
-	if (!text) return false;
-	if (ENGINEERING_NOUN.test(text)) return false;
-	if (!DOCUMENT_NOUN.test(text)) return false;
-	if (!PRODUCTION_VERB.test(text)) return false;
-	if (input.hasWork && !input.hasUsableBase) return false;
-	return true;
+export function isDocumentWorkIntent(text: string): boolean {
+	const value = text.trim();
+	if (!value) return false;
+	if (ENGINEERING_NOUN.test(value)) return false;
+	if (!DOCUMENT_NOUN.test(value)) return false;
+	return PRODUCTION_VERB.test(value);
 }
 
 /** 明确的否定/先解释语境：出现即不启动改稿，交由聊天澄清。 */

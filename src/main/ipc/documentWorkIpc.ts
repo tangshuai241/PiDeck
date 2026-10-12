@@ -31,8 +31,17 @@ function isBoundedString(value: unknown, maxLength: number): value is string {
 	return typeof value === "string" && value.length > 0 && value.length <= maxLength;
 }
 
+/** 只读的记录属性访问：入参一律当不可信数据，先证明是记录再取字段。 */
+function asRecordValue(value: unknown): Record<string, unknown> | undefined {
+	return isRecordValue(value) ? value : undefined;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseMutation(value: unknown): { requestId: string; workId: string; expectedRevision: number } | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
+	if (!isRecordValue(value)) return undefined;
 	const requestId = Reflect.get(value, "requestId");
 	const workId = Reflect.get(value, "workId");
 	const expectedRevision = Reflect.get(value, "expectedRevision");
@@ -69,10 +78,12 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 		const paths = Reflect.get(raw, "paths");
 		if (!isBoundedString(sessionId, 96)) return workFailure("INVALID_INPUT", "session_required");
 		if (!Array.isArray(paths) || paths.length === 0 || paths.length > 24) return workFailure("INVALID_INPUT", "materials");
-		if (!paths.every((path) => isBoundedString(path, 1024))) return workFailure("INVALID_INPUT", "materials");
+		// 类型守卫收窄（不用 as）：边界校验与类型收窄必须是同一步，否则漏一行就放行非法值。
+		const boundedPaths = paths.filter((path): path is string => isBoundedString(path, 1024));
+		if (boundedPaths.length !== paths.length) return workFailure("INVALID_INPUT", "materials");
 		// 只在「这段路径确实出现在本会话的用户消息里」时登记：用户已经在聊天里引用/拖入的文件
 		// 不需要再选一次，但模型或渲染层凭空写出的路径不能借这条通道获得授权。
-		const accepted = await registerChatMaterials(sessionId, paths as string[]);
+		const accepted = await registerChatMaterials(sessionId, boundedPaths);
 		return accepted.length ? workSuccess({ paths: accepted, count: accepted.length }) : workFailure("PATH_DENIED", "material_not_referenced");
 	});
 
@@ -112,8 +123,8 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 
 	ipcMain.handle(ipcChannels.documentWorkPrepare, async (_event, raw: unknown): Promise<WorkResult<unknown>> => {
 		const mutation = parseMutation(raw);
-		if (!mutation) return workFailure("INVALID_INPUT", "mutation_fields");
-		const body = raw as Record<string, unknown>;
+		const body = asRecordValue(raw);
+		if (!mutation || !body) return workFailure("INVALID_INPUT", "mutation_fields");
 		const kind = body.kind;
 		if (kind !== "create_document" && kind !== "revise_document") return workFailure("INVALID_INPUT", "kind");
 		const requirementsRef = parseRequirementsReference(body.requirementsRef);
@@ -129,9 +140,9 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 
 	ipcMain.handle(ipcChannels.documentWorkStart, async (_event, raw: unknown): Promise<WorkResult<unknown>> => {
 		const mutation = parseMutation(raw);
-		if (!mutation) return workFailure("INVALID_INPUT", "mutation_fields");
-		const body = raw as Record<string, unknown>;
-		const preparation = typeof body.preparation === "object" && body.preparation !== null ? (body.preparation as Record<string, unknown>) : undefined;
+		const body = asRecordValue(raw);
+		if (!mutation || !body) return workFailure("INVALID_INPUT", "mutation_fields");
+		const preparation = asRecordValue(body.preparation);
 		const preparationId = preparation ? Reflect.get(preparation, "preparationId") : undefined;
 		const digest = preparation ? Reflect.get(preparation, "digest") : undefined;
 		if (!isWorkId(preparationId) || !isDigest(digest)) return workFailure("INVALID_INPUT", "preparation_ref");
@@ -153,8 +164,8 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 
 	ipcMain.handle(ipcChannels.documentWorkCancel, async (_event, raw: unknown): Promise<WorkResult<unknown>> => {
 		const mutation = parseMutation(raw);
-		if (!mutation) return workFailure("INVALID_INPUT", "mutation_fields");
-		const body = raw as Record<string, unknown>;
+		const body = asRecordValue(raw);
+		if (!mutation || !body) return workFailure("INVALID_INPUT", "mutation_fields");
 		const attemptId = body.attemptId;
 		const expectedRuntime = parseSessionRuntimeTriple(body.expectedRuntime);
 		if (!isWorkId(attemptId) || !expectedRuntime) return workFailure("INVALID_INPUT", "cancel_fields");

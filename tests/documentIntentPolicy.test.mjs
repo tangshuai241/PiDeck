@@ -11,7 +11,7 @@ const ROOT = process.cwd();
 const plain = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 const policy = loadTsCommonJs(`${ROOT}/src/shared/documentIntentPolicy.ts`);
 
-const intent = (text, hasWork = false, hasUsableBase = true) => policy.isDocumentWorkIntent({ text, hasWork, hasUsableBase });
+const intent = (text) => policy.isDocumentWorkIntent(text);
 
 test("明确文稿任务才接进文稿生命周期", () => {
 	for (const text of ["帮我写一份季度报告", "起草一份合作方案，输出 Word 文档", "把这个整理成正式文档并归档", "写一版对外说明的初稿"]) {
@@ -25,9 +25,11 @@ test("普通 Plan、编码、解释与读材料都不接进文稿归档", () => 
 	}
 });
 
-test("已有工作但没有可用基稿时不接续", () => {
-	assert.equal(intent("再写一份季度报告", true, false), false);
-	assert.equal(intent("再写一份季度报告", true, true), true);
+test("策略只管「这一轮是不是文稿任务」，可用基稿由调用方决定", () => {
+	// 同一句话无论有没有可用基稿都必须被认成文稿任务：否则「改稿却没基稿」会被
+	// 误判成普通聊天并交给原生批准，用户的要求就悄悄丢了。
+	assert.equal(intent("再写一份季度报告"), true);
+	assert.equal(intent("把第二节改短一点"), false, "只声明改哪里不算制作任务，走改稿策略");
 });
 
 test("明确改稿请求自动接续：必须同时有改稿动词与定位词", () => {

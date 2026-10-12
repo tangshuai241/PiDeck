@@ -6,47 +6,35 @@
  *   用户指令（用最新用户轮的正文指纹核对）。模型文本、布尔字段、渲染层状态都不授权。
  * - RPC 接受、扩展绑定、运行开始、检查通过分别是不同事实，任何一步都不替代下一步。
  *
- * 顺序不变量：主进程先持久化准备与操作，再绑定扩展，最后才分发批准/执行。
+ * 本类只保留「公开接口 + 授权顺序 + 事务边界」；具体职责已拆到：
+ * - `DocumentWorkTransaction`：requestId 去重台账与按 work 串行（副作用不重复）
+ * - `DocumentRuntimeLeaseRegistry`：运行时排他租约（一轮 runtime 只允许一轮执行）
+ * - `DocumentWorkPreparationFactory`：要求/材料/基稿的校验与不可变准备记录
+ * - `DocumentWorkQueries`：只读快照与真实用户轮
+ * - `DocumentAttemptRunner`：绑定 → 分发 → 稳定完成 → 归档
+ *
+ * 锁顺序（不可颠倒）：`runtime:<sessionId>` → `tx:<workId>` → store 内部锁。
  */
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { clearTimeout as clearDelay, setTimeout as delay } from "node:timers";
-import { buildWorkFolder, encodeBindingPayload, kindForRequirements, sameRequirements, sameRuntimeTriple, sanitizeWorkTitle, stableStringify, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
-import type {
-	AuthorizationReference,
-	DocumentArtifactVersion,
-	DocumentWorkChangedEvent,
-	DocumentWorkExtensionState,
-	DocumentWorkOperation,
-	DocumentWorkPreparation,
-	DocumentWorkRecord,
-	DocumentWorkView,
-	PreparedWork,
-	PreparationReference,
-	RequirementsReference,
-	SessionRuntimeTriple,
-	StartWorkInput,
-	WorkErrorCode,
-	WorkMutation,
-} from "../../shared/types/documentWork";
-import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
+import { buildWorkFolder, kindForRequirements, sameRequirements, sameRuntimeTriple, sanitizeWorkTitle, stableStringify, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
+import type { AuthorizationReference, DocumentWorkChangedEvent, DocumentWorkExtensionState, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord, DocumentWorkView, PreparedWork, RequirementsReference, SessionRuntimeTriple, StartWorkInput, WorkMutation } from "../../shared/types/documentWork";
 import type { AlignmentState } from "../../shared/types/alignment";
-import type { ArtifactStoreFailure, DocumentArtifactStore } from "./DocumentArtifactStore";
+import { isDocumentWorkIntent, isExplicitRevisionRequest, revisionScopeHints } from "../../shared/documentIntentPolicy";
+import type { DocumentArtifactStore } from "./DocumentArtifactStore";
 import type { DocumentInspectionService } from "./DocumentInspectionService";
 import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
 import type { DocumentWorkStore } from "./DocumentWorkStore";
 import { DocumentAttemptRunner } from "./DocumentAttemptRunner";
-import { selectBaseVersion, validateScopeAgainstHeadings } from "./DocumentRevisionPolicy";
-import { isDocumentWorkIntent, isExplicitRevisionRequest, revisionScopeHints } from "../../shared/documentIntentPolicy";
+import { DocumentRuntimeLeaseRegistry } from "./DocumentRuntimeLease";
+import { DocumentWorkPreparationFactory, type MaterialResolver, type PrepareWorkRequest } from "./DocumentWorkPreparation";
+import { DocumentWorkQueries } from "./DocumentWorkQueries";
+import { DocumentWorkTransaction } from "./DocumentWorkTransaction";
 import { emitWorkChanged } from "./documentWorkEvents";
-import { containPath, fingerprintFile, hashText, isReadableFile, resolveInsideDirectory } from "./documentWorkPaths";
+import { parseCancelPayload, parseCreatePayload, parseOperationPayload, parsePreparationPayload, workErrorFor } from "./documentWorkReceipts";
+import { hashText, insertId, isPathInsideAnyRoot, isReadableFile } from "./documentWorkPaths";
+import { hashTurnText } from "./documentWorkTurn";
 
 export type DocumentWorkLogger = { info(scope: string, message: string, detail?: unknown): unknown; warn(scope: string, message: string, detail?: unknown): unknown };
-
-export type MaterialResolver = {
-	/** 用户文件选择授权过的路径（含项目目录内的路径）；未授权的绝对路径一律拒绝。 */
-	isAllowed(sessionId: string, hostPath: string): Promise<boolean>;
-};
 
 export type DocumentWorkServiceDeps = {
 	store: DocumentWorkStore;
@@ -61,6 +49,8 @@ export type DocumentWorkServiceDeps = {
 	bindTimeoutMs?: number;
 	settleTimeoutMs?: number;
 	startTimeoutMs?: number;
+	/** 并发回归测试注入点：在租约锁内、读取之前触发，用来强制两个 acquire 交错。 */
+	leaseAcquireBarrier?: () => Promise<void> | void;
 };
 
 export type CreateWorkInput = {
@@ -71,14 +61,9 @@ export type CreateWorkInput = {
 	outputRootId: string;
 };
 
-export type PrepareWorkInput = WorkMutation & {
-	kind: "create_document" | "revise_document";
-	requirementsRef: RequirementsReference;
-	/** allow 声明本轮允许改动的块；缺省时基稿里已有块默认全部必须保留。 */
-	scope: { summary: string; sections: string[]; preserve: string[]; allow?: string[] };
-	materialPaths: string[];
-	baseVersionId?: string;
-};
+export type PrepareWorkInput = WorkMutation & PrepareWorkRequestFields;
+
+type PrepareWorkRequestFields = Omit<PrepareWorkRequest, "workId" | "expectedRevision" | "requestId">;
 
 export type StartWorkRequest = StartWorkInput;
 
@@ -86,39 +71,48 @@ export type CancelWorkRequest = WorkMutation & { attemptId: string; expectedRunt
 
 const MATERIAL_ALLOWLIST_TTL_MS = 30 * 60_000;
 
-/** 最新用户轮的正文指纹：授权绑定到真实用户输入，不依赖消息 ID 生成方案。 */
-export function hashTurnText(text: string): string {
-	return hashText(text.replace(/\r\n?/g, "\n").trim());
-}
-
-/** 准备记录指纹不含自身 digest 字段，字段顺序不影响结果。 */
-export function preparationDigestOf(preparation: DocumentWorkPreparation): string {
-	return hashText(stableStringify({ ...preparation, digest: undefined }));
-}
-
-type Materials = DocumentWorkPreparation["materials"];
-type Base = DocumentWorkPreparation["base"];
-
 export class DocumentWorkService {
 	private readonly byteBudget: number;
 	private readonly materialAllowlist = new Map<string, { path: string; expiresAt: number }[]>();
 	private readonly alignmentBySession = new Map<string, AlignmentState>();
 	private readonly attempts: DocumentAttemptRunner;
+	private readonly transaction: DocumentWorkTransaction;
+	private readonly leases: DocumentRuntimeLeaseRegistry;
+	private readonly queries: DocumentWorkQueries;
+	private readonly preparation: DocumentWorkPreparationFactory;
 
 	constructor(private readonly deps: DocumentWorkServiceDeps) {
 		this.byteBudget = deps.byteBudget ?? 64 * 1024 * 1024;
+		this.transaction = new DocumentWorkTransaction(deps.store);
+		this.leases = new DocumentRuntimeLeaseRegistry(deps.store, deps.leaseAcquireBarrier);
+		this.queries = new DocumentWorkQueries(deps.store, deps.runtime);
+		this.preparation = new DocumentWorkPreparationFactory({
+			store: deps.store,
+			artifacts: deps.artifacts,
+			inspection: deps.inspection,
+			runtime: deps.runtime,
+			queries: this.queries,
+			materials: deps.materials,
+			readAlignmentState: (sessionId) => this.alignmentBySession.get(sessionId),
+			byteBudget: this.byteBudget,
+		});
 		this.attempts = new DocumentAttemptRunner({
 			store: deps.store,
 			artifacts: deps.artifacts,
 			inspection: deps.inspection,
 			runtime: deps.runtime,
 			onChanged: deps.onChanged,
+			lease: this.leases,
 			...(deps.logger ? { logger: deps.logger } : {}),
 			...(deps.byteBudget !== undefined ? { byteBudget: deps.byteBudget } : {}),
 			...(deps.bindTimeoutMs !== undefined ? { bindTimeoutMs: deps.bindTimeoutMs } : {}),
 			...(deps.settleTimeoutMs !== undefined ? { settleTimeoutMs: deps.settleTimeoutMs } : {}),
 			...(deps.startTimeoutMs !== undefined ? { startTimeoutMs: deps.startTimeoutMs } : {}),
 		});
+	}
+
+	private emit(record: DocumentWorkRecord, changeKind: DocumentWorkChangedEvent["changeKind"], attemptId?: string): void {
+		emitWorkChanged(this.deps.onChanged, record, changeKind, attemptId);
 	}
 
 	// ------------------------------------------------------------------ observation
@@ -154,32 +148,31 @@ export class DocumentWorkService {
 
 	// ------------------------------------------------------------------ create
 
-	/** 去重读→执行→回执必须整体串行，否则同一 requestId 的并发送达会各执行一次。 */
+	/** 建立工作：一个会话一件，重复提交幂等返回原工作。 */
 	async createWork(input: CreateWorkInput): Promise<WorkResult<DocumentWorkView>> {
-		return this.deps.store.runExclusive(`create:${input.requestId}`, () => this.createWorkExclusive(input));
+		return this.transaction.run({
+			lockKey: `work:${input.sessionId}`,
+			requestId: input.requestId,
+			requestDigest: hashText(stableStringify({ kind: "create", sessionId: input.sessionId, sourceTurnId: input.sourceTurnId, outputRootId: input.outputRootId })),
+			decodeValue: async (value) => {
+				const stored = parseCreatePayload(value);
+				if (!stored) return undefined;
+				return this.queries.readView(stored.workId, input.sessionId);
+			},
+			action: () => this.createWorkExclusive(input),
+		});
 	}
 
 	private async createWorkExclusive(input: CreateWorkInput): Promise<WorkResult<DocumentWorkView>> {
-		const requestDigest = hashText(stableStringify({ kind: "create", sessionId: input.sessionId, sourceTurnId: input.sourceTurnId, outputRootId: input.outputRootId }));
-		const replay = await this.deps.store.readIdempotent(input.requestId, requestDigest);
-		if (replay.kind === "conflict") return workFailure<DocumentWorkView>("IDEMPOTENCY_CONFLICT");
-		if (replay.kind === "hit") {
-			const workId = readStringField(replay.payload, "workId");
-			const view = workId ? await this.readView(workId, input.sessionId) : undefined;
-			return view ? workSuccess(view) : workFailure<DocumentWorkView>("WORK_NOT_FOUND");
-		}
 		// 文稿归档只适用于明确的正式文稿任务：普通 Plan/编码/解释不建工作，走原生批准。
-		const turn = await this.latestUserTurn(input.sessionId);
-		if (!turn || !isDocumentWorkIntent({ text: turn.text, hasWork: false, hasUsableBase: false })) return workFailure<DocumentWorkView>("INVALID_INPUT", "not_document_intent");
+		const turn = await this.queries.latestUserTurn(input.sessionId);
+		if (!turn || !isDocumentWorkIntent(turn.text)) return workFailure<DocumentWorkView>("INVALID_INPUT", "not_document_intent");
 		const outputRoot = await this.deps.store.getOutputRoot(input.outputRootId);
 		if (!outputRoot || !(await this.deps.artifacts.directoryExists(outputRoot.path))) return workFailure<DocumentWorkView>("PATH_DENIED");
 		// 一个会话一件工作：已有记录直接返回，不因重复提交再建第二件。
 		const existingIds = await this.deps.store.listWorkIdsForSession(input.sessionId);
 		const existing = existingIds.length ? await this.deps.store.getRecord(existingIds[0]) : undefined;
-		if (existing) {
-			await this.deps.store.writeIdempotent(input.requestId, requestDigest, { workId: existing.workId });
-			return this.viewOf(existing);
-		}
+		if (existing) return this.queries.viewOf(existing);
 		const workId = `dw_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
 		const title = sanitizeWorkTitle(input.title, "文稿工作");
 		const workFolder = buildWorkFolder(workId, title);
@@ -200,241 +193,94 @@ export class DocumentWorkService {
 			operationRequestIds: [],
 			versionIds: [],
 			consumedRevisionTurns: [],
+			consumedRevisionTurnIds: [],
 			createdAt: now,
 			updatedAt: now,
 		};
 		const created = await this.deps.store.createRecord(record);
 		if (!created.ok) return workFailure<DocumentWorkView>(created.error.code);
-		await this.deps.store.writeIdempotent(input.requestId, requestDigest, { workId });
 		this.emit(created.value, "created");
-		return this.viewOf(created.value);
+		return this.queries.viewOf(created.value);
 	}
 
 	// ------------------------------------------------------------------ read
 
 	async getView(workId: string, sessionId: string): Promise<WorkResult<DocumentWorkView>> {
-		const view = await this.readView(workId, sessionId);
+		const view = await this.queries.readView(workId, sessionId);
 		return view ? workSuccess(view) : workFailure<DocumentWorkView>("WORK_NOT_FOUND");
 	}
 
-	async listForSession(sessionId: string): Promise<DocumentWorkView[]> {
-		const views: DocumentWorkView[] = [];
-		for (const workId of await this.deps.store.listWorkIdsForSession(sessionId)) {
-			const view = await this.readView(workId, sessionId);
-			if (view) views.push(view);
-		}
-		return views;
+	listForSession(sessionId: string): Promise<DocumentWorkView[]> {
+		return this.queries.listForSession(sessionId);
 	}
 
-	private async readView(workId: string, sessionId: string): Promise<DocumentWorkView | undefined> {
+	async getOperation(workId: string, requestId: string, sessionId: string): Promise<WorkResult<DocumentWorkOperation>> {
 		const record = await this.deps.store.getRecord(workId);
-		if (!record || record.sessionId !== sessionId) return undefined;
-		const view = await this.viewOf(record);
-		return view.ok ? view.value : undefined;
-	}
-
-	private async viewOf(record: DocumentWorkRecord): Promise<WorkResult<DocumentWorkView>> {
-		const versions = await this.deps.store.listVersions(record.workId, record.versionIds);
-		const outputRoot = await this.deps.store.getOutputRoot(record.outputRootId);
-		const activeOperation = record.activeRequestId ? await this.deps.store.getOperation(record.workId, record.activeRequestId) : undefined;
-		const values: DocumentWorkView["versions"] = versions
-			.map((version) => {
-				const primary = version.artifacts.find((artifact) => artifact.role === "primary");
-				return {
-					versionId: version.versionId,
-					ordinal: version.ordinal,
-					title: version.title,
-					fileName: primary?.relativePath ?? "",
-					inspection: version.inspection?.status ?? ("pending" as const),
-					userAcceptance: version.userAcceptance,
-					...(version.baseVersionId ? { baseVersionId: version.baseVersionId } : {}),
-					manualModification: Boolean(version.manualModification),
-					createdAt: version.createdAt,
-				};
-			})
-			.sort((left, right) => right.ordinal - left.ordinal);
-		return workSuccess({
-			workId: record.workId,
-			sessionId: record.sessionId,
-			revision: record.revision,
-			title: record.title,
-			outputRootLabel: outputRoot?.label ?? "",
-			requirementsSummary: record.requirementsSummary,
-			active: activeOperation ? { attemptId: activeOperation.attemptId, kind: activeOperation.kind, phase: activeOperation.phase, authorizationState: activeOperation.authorizationState, ...(activeOperation.error ? { error: activeOperation.error } : {}) } : null,
-			versions: values,
-			revisionReady: versions.some((version) => version.inspection?.status === "passed"),
-		});
+		if (!record || record.sessionId !== sessionId) return workFailure<DocumentWorkOperation>("WORK_NOT_FOUND");
+		const operation = await this.deps.store.getOperation(workId, requestId);
+		return operation ? workSuccess(operation) : workFailure<DocumentWorkOperation>("OPERATION_NOT_FOUND");
 	}
 
 	// ------------------------------------------------------------------ prepare
 
 	async prepare(input: PrepareWorkInput): Promise<WorkResult<PreparedWork>> {
-		return this.deps.store.runExclusive(`prepare:${input.requestId}`, () => this.prepareExclusive(input));
+		return this.transaction.run({
+			lockKey: `work:${input.workId}`,
+			requestId: input.requestId,
+			requestDigest: hashText(stableStringify(input)),
+			decodeValue: parsePreparationPayload,
+			action: () => this.preparation.prepare(input),
+		});
 	}
 
-	private async prepareExclusive(input: PrepareWorkInput): Promise<WorkResult<PreparedWork>> {
-		const requestDigest = hashText(stableStringify(input));
-		const replay = await this.deps.store.readIdempotent(input.requestId, requestDigest);
-		if (replay.kind === "conflict") return workFailure<PreparedWork>("IDEMPOTENCY_CONFLICT");
-		if (replay.kind === "hit") {
-			const reference = parsePreparationPayload(replay.payload);
-			return reference ? workSuccess(reference) : workFailure<PreparedWork>("IO_ERROR");
-		}
-		const record = await this.deps.store.getRecord(input.workId);
-		if (!record) return workFailure<PreparedWork>("WORK_NOT_FOUND");
-		if (record.revision !== input.expectedRevision) return workFailure<PreparedWork>("REVISION_CONFLICT", undefined, record.revision);
-		if (!kindForRequirements(input.kind)) return workFailure<PreparedWork>("INVALID_INPUT");
-		if (record.activeRequestId && record.activeRequestId !== input.requestId) {
-			const active = await this.deps.store.getOperation(record.workId, record.activeRequestId);
-			if (active && (active.phase === "dispatching" || active.phase === "running" || active.phase === "inspecting")) return workFailure<PreparedWork>("RUNTIME_BUSY");
-		}
-		const versions = await this.deps.store.listVersions(record.workId, record.versionIds);
-		if (input.kind === "revise_document" && versions.length === 0) return workFailure<PreparedWork>("INVALID_INPUT", "no_base_version");
-		if (input.kind === "create_document" && versions.length > 0) return workFailure<PreparedWork>("INVALID_INPUT", "work_already_has_versions");
+	// ------------------------------------------------------------------ start
 
-		const runtime = await this.deps.runtime.snapshot(record.sessionId);
-		if (!runtime) return workFailure<PreparedWork>("RUNTIME_CHANGED");
-		const requirements = await this.verifyRequirements(record, input.requirementsRef);
-		if (!requirements.ok) return requirements;
-		const materials = await this.verifyMaterials(record, input.materialPaths);
-		if (!materials.ok) return materials;
-
-		const attemptId = `at_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-		const staging = await this.deps.artifacts.ensureStagingDirectory(record.workDirectory, attemptId);
-		if (!staging.ok) return workFailure<PreparedWork>("PATH_DENIED");
-		let base: Base;
-		if (input.kind === "revise_document") {
-			const frozen = await this.freezeBase(record, versions, attemptId, input.baseVersionId);
-			if (!frozen.ok) {
-				await this.deps.store.removeStaging(staging.value);
-				return workFailure<PreparedWork>(frozen.code, frozen.detail);
-			}
-			base = frozen.base;
-			if (base) {
-				// 块大纲在 freezeBase 里从冻结副本抽出；这里只做范围冲突判定。
-				const scopeCheck = validateScopeAgainstHeadings(
-					input.scope,
-					base.sections.map((section) => section.heading),
-				);
-				if (!scopeCheck.ok) {
-					await this.deps.store.removeStaging(staging.value);
-					return workFailure<PreparedWork>("BASE_AMBIGUOUS", "scope_conflict");
-				}
-			}
-		}
-		const draft: DocumentWorkPreparation = {
-			schemaVersion: 1,
-			preparationId: `pr_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
-			digest: "",
-			workId: record.workId,
-			workRevision: record.revision + 1,
-			kind: input.kind,
-			requirements: requirements.value.requirements,
-			requirementsSummary: requirements.value.summary,
-			outputRootId: record.outputRootId,
-			stagingDirectory: staging.value,
-			materials: materials.value,
-			...(base ? { base } : {}),
-			// allow 必须一并落盘：它是「哪些块允许改」的唯一来源，丢了就会把合法改动判成违规。
-			scope: { summary: input.scope.summary.slice(0, 2000), sections: input.scope.sections.slice(0, 24), preserve: input.scope.preserve.slice(0, 24), ...(input.scope.allow ? { allow: input.scope.allow.slice(0, 24) } : {}) },
-			runtime: runtime.target,
-			...(runtime.nativeSessionId ? { nativeSessionId: runtime.nativeSessionId } : {}),
-			createdAt: Date.now(),
-		};
-		const preparation: DocumentWorkPreparation = { ...draft, digest: preparationDigestOf(draft) };
-		await this.deps.store.savePreparation(preparation);
-		const mutated = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({
-			...current,
-			requirementsSummary: preparation.requirementsSummary,
-			sourceTurnIds: requirements.value.sourceTurnId && !current.sourceTurnIds.includes(requirements.value.sourceTurnId) ? [...current.sourceTurnIds, requirements.value.sourceTurnId] : current.sourceTurnIds,
-		}));
-		if (!mutated.ok) return workFailure<PreparedWork>(mutated.error.code, undefined, mutated.error.currentRevision);
-		const value: PreparedWork = { workId: record.workId, workRevision: mutated.value.revision, preparation: { preparationId: preparation.preparationId, digest: preparation.digest }, summary: preparation.requirementsSummary };
-		await this.deps.store.writeIdempotent(input.requestId, requestDigest, value);
-		this.emit(mutated.value, "prepared", attemptId);
-		return workSuccess(value);
-	}
-
-	private async verifyRequirements(record: DocumentWorkRecord, reference: RequirementsReference): Promise<WorkResult<{ requirements: RequirementsReference; summary: string; sourceTurnId?: string }>> {
-		if (reference.kind === "alignment") {
-			const alignment = this.alignmentBySession.get(record.sessionId);
-			if (!alignment || alignment.briefId !== reference.briefId || alignment.revision !== reference.revision) return workFailure("PREPARATION_STALE", "alignment_mismatch");
-			if (alignment.phase !== "ready" && alignment.phase !== "approved") return workFailure("APPROVAL_REQUIRED", "alignment_not_ready");
-			const brief = alignment.brief;
-			return workSuccess({ requirements: reference, summary: brief ? `${brief.goal}\n${brief.deliverable}`.slice(0, 2000) : alignment.briefId });
-		}
-		const latest = await this.latestUserTurn(record.sessionId);
-		if (!latest || latest.sourceTurnId !== reference.sourceTurnId || latest.hash !== reference.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "instruction_mismatch");
-		return workSuccess({ requirements: reference, summary: latest.text.slice(0, 2000), sourceTurnId: reference.sourceTurnId });
-	}
-
-	private async verifyMaterials(record: DocumentWorkRecord, paths: readonly string[]): Promise<WorkResult<Materials>> {
-		if (paths.length > 24) return workFailure("INVALID_INPUT", "too_many_materials");
-		const materials: Materials = [];
-		for (let index = 0; index < paths.length; index++) {
-			const hostPath = paths[index];
-			if (!(await this.deps.materials.isAllowed(record.sessionId, hostPath))) return workFailure("PATH_DENIED", "material_not_allowed");
-			const fingerprint = await fingerprintFile(hostPath, this.byteBudget);
-			if (!fingerprint) return workFailure("IO_ERROR", "material_unreadable");
-			materials.push({ materialId: `m${index + 1}`, label: hostPath.split(/[\\/]/).pop() ?? hostPath, hostPath, digest: fingerprint.digest, bytes: fingerprint.bytes });
-		}
-		return workSuccess(materials);
-	}
-
-	/** 基稿冻结：读取公开成果当前字节 → 复制 → 复制前后指纹一致才继续。 */
-	private async freezeBase(record: DocumentWorkRecord, versions: readonly DocumentArtifactVersion[], attemptId: string, explicitVersionId?: string): Promise<{ ok: true; base?: Base } | { ok: false; code: WorkErrorCode; detail?: string }> {
-		const observed = await this.withObservedDigests(record, versions);
-		const selection = selectBaseVersion({ kind: "revise_document", versions: observed.versions, explicitVersionId, readableDigest: (versionId, relativePath) => observed.digestFor(versionId, relativePath) });
-		if (selection.kind === "create") return { ok: true };
-		if (selection.kind === "ambiguous") return { ok: false, code: selection.reason === "unreadable_base" ? "BASE_CHANGED" : "BASE_AMBIGUOUS", detail: selection.reason };
-		const primary = selection.version.artifacts.find((artifact) => artifact.role === "primary");
-		if (!primary) return { ok: false, code: "BASE_AMBIGUOUS", detail: "no_primary" };
-		const publicFile = resolveInsideDirectory(join(record.workDirectory, "versions", selection.version.directory), primary.relativePath);
-		if (!publicFile) return { ok: false, code: "PATH_DENIED", detail: "bad_path" };
-		const frozen = await this.deps.artifacts.freezeBase({ workId: record.workId, attemptId, sourcePath: publicFile, fileName: `${selection.version.directory}-${primary.relativePath.split("/").pop() ?? "base"}` });
-		if (!frozen.ok) return { ok: false, code: frozen.reason === "changed" ? "BASE_CHANGED" : "IO_ERROR", detail: frozen.reason };
-		// 块大纲来自冻结副本（不是公开文件），因此在「冻结后原文件又被改」的情况下结论仍然自洽。
-		const analysis = await this.deps.inspection.analyze(frozen.value.frozenPath);
-		return {
-			ok: true,
-			base: {
-				versionId: selection.version.versionId,
-				ordinal: selection.version.ordinal,
-				digest: frozen.value.digest,
-				fileName: primary.relativePath.split("/").pop() ?? "base",
-				frozenPath: frozen.value.frozenPath,
-				origin: selection.fileDigest !== primary.digest ? "external_manual" : "archived",
-				sections: analysis?.sections ?? [],
-			},
-		};
-	}
-
-	/** 公开成果被手工改过时记录观察值；归属唯一（最新版 + 恰好一个文件变化）才自动接续。 */
-	private async withObservedDigests(record: DocumentWorkRecord, versions: readonly DocumentArtifactVersion[]): Promise<{ versions: DocumentArtifactVersion[]; digestFor: (versionId: string, relativePath: string) => string | undefined }> {
-		const observed = new Map<string, string>();
-		const updated: DocumentArtifactVersion[] = [];
-		const latestOrdinal = versions.reduce((highest, version) => Math.max(highest, version.ordinal), 0);
-		for (const version of versions) {
-			const changed: string[] = [];
-			for (const artifact of version.artifacts) {
-				const directory = join(record.workDirectory, "versions", version.directory);
-				const digest = await this.deps.artifacts.observedDigestInDirectory(directory, artifact.relativePath, this.byteBudget);
-				if (digest) observed.set(`${version.versionId}:${artifact.relativePath}`, digest);
-				if (digest && digest !== artifact.digest) changed.push(artifact.relativePath);
-			}
-			const primary = version.artifacts.find((artifact) => artifact.role === "primary");
-			const primaryDigest = primary ? observed.get(`${version.versionId}:${primary.relativePath}`) : undefined;
-			const adoptable = Boolean(primary && primaryDigest && primaryDigest !== primary.digest && version.ordinal === latestOrdinal && changed.length === 1);
-			updated.push(adoptable ? { ...version, manualModification: { digest: primaryDigest as string, observedAt: Date.now() } } : version);
-		}
-		return { versions: updated, digestFor: (versionId, relativePath) => observed.get(`${versionId}:${relativePath}`) };
-	}
-
-	// ------------------------------------------------------------------ start / dispatch
-
+	/**
+	 * 开始一轮：先去重（重放返回原回执，含失败/unknown），再校验，最后占用运行时并分发。
+	 *
+	 * 事务边界覆盖「读取 → 授权校验 → operation/active 写入 → 回执」，因此并发两次 start
+	 * 不会各自写出一份 operation；运行时段则由租约保证同一 runtime 只有一轮执行。
+	 */
 	async start(input: StartWorkRequest): Promise<WorkResult<DocumentWorkOperation>> {
+		// 事务只覆盖「读取 → 授权校验 → operation/active 写入 → 回执」；
+		// 绑定与批准在事务外执行，锁不跨 RPC 等待（排他由 active 记录 + 运行时租约保证）。
+		const outcome = await this.transaction.runWithOutcome({
+			lockKey: `work:${input.workId}`,
+			requestId: input.requestId,
+			requestDigest: hashText(stableStringify(input)),
+			decodeValue: async (value) => {
+				const stored = parseOperationPayload(value);
+				if (!stored) return undefined;
+				// 回执存的是分发时的快照；重放要返回**当前**记录，否则 unknown/归档后的重放会看到旧状态。
+				return (await this.deps.store.getOperation(stored.workId, stored.requestId)) ?? stored;
+			},
+			action: () => this.startExclusive(input),
+		});
+		if (!outcome.result.ok || !outcome.executed) return outcome.result;
+		const dispatched = await this.dispatchCommitted(input.workId, outcome.result.value);
+		// 分发结果补齐回执：重放同一 requestId 得到的原结论（含失败与 unknown），且不重新分发。
+		await this.transaction.finalizeReceipt(input.requestId, hashText(stableStringify(input)), dispatched);
+		return dispatched;
+	}
+
+	/** 事务提交后的分发：重读一次记录与准备（事务里那份可能已被其它步骤推进）。 */
+	private async dispatchCommitted(workId: string, operation: DocumentWorkOperation): Promise<WorkResult<DocumentWorkOperation>> {
+		const record = await this.deps.store.getRecord(workId);
+		if (!record) return workFailure<DocumentWorkOperation>("WORK_NOT_FOUND");
+		const preparation = await this.deps.store.getPreparation(workId, operation.preparation.preparationId);
+		if (!preparation) return workFailure<DocumentWorkOperation>("PREPARATION_STALE");
+		return this.attempts.dispatch(record, preparation, operation);
+	}
+
+	private async startExclusive(input: StartWorkRequest): Promise<WorkResult<DocumentWorkOperation>> {
 		const record = await this.deps.store.getRecord(input.workId);
 		if (!record) return workFailure<DocumentWorkOperation>("WORK_NOT_FOUND");
+		// 先看有没有在途尝试（含 unknown）：这是最可操作的结论，也避免在「上一轮还没结算」时
+		// 用版本号变化把用户引到错误的修复方向（等他重新准备）。
+		if (record.activeRequestId) {
+			const active = await this.deps.store.getOperation(record.workId, record.activeRequestId);
+			if (active && active.phase !== "archived" && active.phase !== "failed" && active.phase !== "interrupted") return workFailure<DocumentWorkOperation>("RUNTIME_BUSY", active.phase);
+		}
 		if (record.revision !== input.expectedRevision) return workFailure<DocumentWorkOperation>("REVISION_CONFLICT", undefined, record.revision);
 		const preparation = await this.deps.store.getPreparation(input.workId, input.preparation.preparationId);
 		if (!preparation || preparation.digest !== input.preparation.digest) return workFailure<DocumentWorkOperation>("PREPARATION_STALE");
@@ -452,7 +298,7 @@ export class DocumentWorkService {
 		if (busy && input.authorization.kind === "revision_instruction" && !(await this.latestTurnMatches(record.sessionId, input.authorization))) return workFailure<DocumentWorkOperation>("APPROVAL_REQUIRED", "instruction_mismatch");
 		const authorization = await this.verifyAuthorization(record, preparation, input.authorization);
 		if (!authorization.ok) return authorization;
-		const materials = await this.materialsUnchanged(preparation);
+		const materials = await this.preparation.materialsUnchanged(preparation);
 		if (!materials.ok) return workFailure<DocumentWorkOperation>("PREPARATION_STALE", materials.detail);
 		if (preparation.base && !(await isReadableFile(preparation.base.frozenPath))) return workFailure<DocumentWorkOperation>("PREPARATION_STALE", "frozen_base_missing");
 
@@ -461,7 +307,7 @@ export class DocumentWorkService {
 			schemaVersion: 1,
 			requestId: input.requestId,
 			workId: record.workId,
-			attemptId: `at_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+			attemptId: insertId("at"),
 			kind: preparation.kind,
 			phase: "dispatching",
 			preparation: { preparationId: preparation.preparationId, digest: preparation.digest },
@@ -475,15 +321,26 @@ export class DocumentWorkService {
 			createdAt: now,
 			updatedAt: now,
 		};
+		// 运行时排他先占用：同一 runtime 上另一件工作也不能并行。
+		const lease = await this.leases.acquire({ sessionId: record.sessionId, target: input.expectedRuntime, ...(runtime.nativeSessionId ? { nativeSessionId: runtime.nativeSessionId } : {}), workId: record.workId, requestId: operation.requestId, attemptId: operation.attemptId });
+		if (!lease.ok) return workFailure<DocumentWorkOperation>(lease.error.code, lease.error.detail);
 		await this.deps.store.saveOperation(operation);
 		const mutated = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({
 			...current,
 			activeRequestId: operation.requestId,
 			operationRequestIds: current.operationRequestIds.includes(operation.requestId) ? current.operationRequestIds : [...current.operationRequestIds, operation.requestId],
+			// 改稿轮的「消费」在开始时就落盘：重新挂载/kill 后同一轮不会被再次自动执行。
+			// 键是轮标识（稳定 user 消息 id），不是正文 hash：新轮里重复同一句话属于新授权。
+			consumedRevisionTurns: operation.authorization.kind === "revision_instruction" ? [...new Set([...current.consumedRevisionTurns, operation.authorization.sourceTurnHash])] : current.consumedRevisionTurns,
+			consumedRevisionTurnIds: operation.authorization.kind === "revision_instruction" ? [...new Set([...current.consumedRevisionTurnIds, operation.authorization.sourceTurnId])] : current.consumedRevisionTurnIds,
 		}));
-		if (!mutated.ok) return workFailure<DocumentWorkOperation>(mutated.error.code, undefined, mutated.error.currentRevision);
+		if (!mutated.ok) {
+			await this.leases.release(record.sessionId, operation.requestId);
+			return workFailure<DocumentWorkOperation>(mutated.error.code, mutated.error.detail, mutated.error.currentRevision);
+		}
 		this.emit(mutated.value, "dispatching", operation.attemptId);
-		return this.attempts.dispatch(mutated.value, preparation, operation);
+		// 事务到此为止：分发在锁外进行（见 start）。
+		return workSuccess(operation);
 	}
 
 	private async verifyAuthorization(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, authorization: AuthorizationReference): Promise<WorkResult<{ confirmed: boolean }>> {
@@ -494,12 +351,12 @@ export class DocumentWorkService {
 			if (preparation.requirements.kind !== "alignment" || !sameRequirements(preparation.requirements, { kind: "alignment", briefId: authorization.briefId, revision: authorization.revision })) return workFailure("APPROVAL_REQUIRED", "requirements_mismatch");
 			return workSuccess({ confirmed: false });
 		}
-		const latest = await this.latestUserTurn(record.sessionId);
+		const latest = await this.queries.latestUserTurn(record.sessionId);
 		if (!latest || latest.sourceTurnId !== authorization.sourceTurnId || latest.hash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "instruction_mismatch");
-		if (record.consumedRevisionTurns.includes(authorization.sourceTurnHash)) return workFailure("APPROVAL_REQUIRED", "instruction_replayed");
+		// 按轮标识判重放：同一轮不能被消费两次（含重新挂载后），但新轮里再说一遍同样的要求是新的授权。
+		if (record.consumedRevisionTurnIds.includes(authorization.sourceTurnId)) return workFailure("APPROVAL_REQUIRED", "instruction_replayed");
 		if (preparation.requirements.kind !== "user_instruction" || preparation.requirements.sourceTurnHash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "requirements_mismatch");
-		// 授权只对应「用户明确提出的那次改稿要求」：准备里声明的范围必须就是授权的那段文字，
-		// 否则一段普通讨论被模型拿去调用工具时也能成立。
+		// 授权只对应「用户明确提出的那次改稿要求」：准备里声明的范围必须就是授权的那段文字。
 		if (hashTurnText(preparation.scope.summary) !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "scope_mismatch");
 		// 二次复核：讨论、否定或「先解释」类消息即使原样成为范围文本，也不构成改稿授权。
 		if (!isExplicitRevisionRequest(preparation.scope.summary)) return workFailure("APPROVAL_REQUIRED", "not_explicit_revision");
@@ -509,21 +366,27 @@ export class DocumentWorkService {
 	/** 本轮用户轮是否就是授权引用的那一轮（改稿排队接续时用来复核）。 */
 	private async latestTurnMatches(sessionId: string, authorization: AuthorizationReference): Promise<boolean> {
 		if (authorization.kind !== "revision_instruction") return false;
-		const latest = await this.latestUserTurn(sessionId);
+		const latest = await this.queries.latestUserTurn(sessionId);
 		return Boolean(latest && latest.sourceTurnId === authorization.sourceTurnId);
 	}
 
-	private async materialsUnchanged(preparation: DocumentWorkPreparation): Promise<{ ok: true } | { ok: false; detail: string }> {
-		for (const material of preparation.materials) {
-			const fingerprint = await fingerprintFile(material.hostPath, this.byteBudget);
-			if (!fingerprint || fingerprint.digest !== material.digest) return { ok: false, detail: "material_changed" };
-		}
-		return { ok: true };
+	// ------------------------------------------------------------------ cancel
+
+	/**
+	 * 取消只针对本轮：带 attemptId 与三元组校验；成功后释放租约并清 active。
+	 * 与 start 一样走去重事务，重复取消返回原回执。
+	 */
+	async cancel(input: CancelWorkRequest): Promise<WorkResult<{ attemptId: string }>> {
+		return this.transaction.run({
+			lockKey: `work:${input.workId}`,
+			requestId: input.requestId,
+			requestDigest: hashText(stableStringify(input)),
+			decodeValue: parseCancelPayload,
+			action: () => this.cancelExclusive(input),
+		});
 	}
 
-	// ------------------------------------------------------------------ cancel / read / recovery
-
-	async cancel(input: CancelWorkRequest): Promise<WorkResult<{ attemptId: string }>> {
+	private async cancelExclusive(input: CancelWorkRequest): Promise<WorkResult<{ attemptId: string }>> {
 		const record = await this.deps.store.getRecord(input.workId);
 		if (!record) return workFailure<{ attemptId: string }>("WORK_NOT_FOUND");
 		if (record.revision !== input.expectedRevision) return workFailure<{ attemptId: string }>("REVISION_CONFLICT", undefined, record.revision);
@@ -533,27 +396,38 @@ export class DocumentWorkService {
 		const abort = await this.deps.runtime.abort({ sessionId: record.sessionId, requestId: `abort_${operation.requestId}`, expectedRuntime: input.expectedRuntime });
 		if (!abort.accepted) return workFailure<{ attemptId: string }>("CANCEL_NOT_APPLICABLE", abort.error);
 		this.attempts.markCancelled(record.workId);
-		const cancelled: DocumentWorkOperation = { ...operation, phase: "interrupted", error: { code: "IO_ERROR", retryable: true, detail: "cancelled" }, updatedAt: Date.now() };
+		const cancelled: DocumentWorkOperation = { ...operation, phase: "interrupted", error: workErrorFor("IO_ERROR", "cancelled"), updatedAt: Date.now() };
 		await this.deps.store.saveOperation(cancelled);
 		const cleared = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({ ...current, activeRequestId: undefined }));
+		// 明确取消是解除排他租约的两种途径之一（另一种是 runtime 换代）。
+		await this.leases.release(record.sessionId, operation.requestId);
 		if (cleared.ok) this.emit(cleared.value, "cancelled", operation.attemptId);
 		return workSuccess({ attemptId: operation.attemptId });
 	}
+
+	// ------------------------------------------------------------------ revision / recovery / lifecycle
 
 	/**
 	 * 普通聊天里的明确改稿：主进程自己读「真实用户当前轮」判断，不需要用户先切模式。
 	 *
 	 * 保守策略：只有既出现改稿动词又指名要改的块、且没有「别改先解释」类语境时才接续；
-	 * 拿不准就返回 engaged=false，让这一轮停在普通聊天里，由用户自然澄清。
+	 * 已消费过的轮（含崩溃前已开始的）不再自动执行，避免重新挂载后重复跑历史消息。
 	 */
 	async autoRevise(sessionId: string, requestId: string): Promise<WorkResult<{ engaged: boolean }>> {
-		const views = await this.listForSession(sessionId);
+		const views = await this.queries.listForSession(sessionId);
 		const work = views[0];
 		if (!work) return workSuccess({ engaged: false });
-		const turn = await this.latestUserTurn(sessionId);
+		const turn = await this.queries.latestUserTurn(sessionId);
 		if (!turn) return workSuccess({ engaged: false });
 		if (!work.versions.some((version) => version.inspection === "passed")) return workSuccess({ engaged: false });
 		if (!isExplicitRevisionRequest(turn.text)) return workSuccess({ engaged: false });
+		const record = await this.deps.store.getRecord(work.workId);
+		if (!record) return workSuccess({ engaged: false });
+		if (record.consumedRevisionTurnIds.includes(turn.sourceTurnId)) return workSuccess({ engaged: false });
+		if (record.activeRequestId) {
+			const active = await this.deps.store.getOperation(record.workId, record.activeRequestId);
+			if (active && active.phase !== "archived" && active.phase !== "failed" && active.phase !== "interrupted") return workSuccess({ engaged: false });
+		}
 		const prepared = await this.prepare({
 			requestId: `${requestId}_p`,
 			workId: work.workId,
@@ -586,75 +460,43 @@ export class DocumentWorkService {
 		await this.attempts.drain();
 	}
 
-	async getOperation(workId: string, requestId: string, sessionId: string): Promise<WorkResult<DocumentWorkOperation>> {
-		const record = await this.deps.store.getRecord(workId);
-		if (!record || record.sessionId !== sessionId) return workFailure<DocumentWorkOperation>("WORK_NOT_FOUND");
-		const operation = await this.deps.store.getOperation(workId, requestId);
-		return operation ? workSuccess(operation) : workFailure<DocumentWorkOperation>("OPERATION_NOT_FOUND");
-	}
-
-	/** 进程重启后的结算：进行中的操作一律转 interrupted / unknown，绝不自动重放。 */
+	/**
+	 * 进程重启后的结算。
+	 *
+	 * 两条规则：
+	 * - 分发结果**未知**的尝试保持原状并继续持有租约：不自动重放，也不开放新请求
+	 *   （包括同一 runtime 上的另一件工作），等用户明确取消或 runtime 换代；
+	 * - 其余进行中的尝试（旧进程已经不在了）转 `interrupted`，并只清理**匹配自己**的
+	 *   租约与 active，不误放别人的 attempt。
+	 */
 	async recoverOnStartup(): Promise<void> {
+		const validLeases = await this.leases.reconcileOnStartup((sessionId) => {
+			const cached = this.deps.runtime.cached(sessionId);
+			return cached ? { target: cached.target } : undefined;
+		});
+		const leasedRequestIds = new Set(validLeases.map((lease) => `${lease.workId}:${lease.requestId}`));
 		for (const record of await this.deps.store.listAllRecords()) {
 			for (const requestId of record.operationRequestIds) {
 				const operation = await this.deps.store.getOperation(record.workId, requestId);
 				if (!operation) continue;
+				// 未知分发的尝试保持保守阻塞：不结算、不释放、也不清 active。
+				if (operation.dispatchUnknown || operation.phase === "unknown") continue;
+				// 仍持有租约且不是未知状态的尝试：等它自己的结算协程处理，不抢跑。
+				if (leasedRequestIds.has(`${record.workId}:${requestId}`) && operation.phase !== "dispatching" && operation.phase !== "running" && operation.phase !== "inspecting") continue;
 				const recovered = await this.deps.store.recoverInterruptedOperation(operation);
 				if (recovered === operation) continue;
 				if (record.activeRequestId === requestId) {
 					const current = await this.deps.store.getRecord(record.workId);
 					if (current) await this.deps.store.mutateRecord(current.workId, current.revision, (value) => ({ ...value, activeRequestId: undefined }));
 				}
+				// 只清匹配这一次尝试的租约。
+				await this.leases.release(operation.runtime.sessionId, operation.requestId);
 				const refreshed = await this.deps.store.getRecord(record.workId);
-				if (refreshed) this.emit(refreshed, recovered.phase === "unknown" ? "unknown" : "interrupted", operation.attemptId);
+				if (refreshed) this.emit(refreshed, "interrupted", operation.attemptId);
 			}
 		}
 	}
-
-	private async latestUserTurn(sessionId: string): Promise<{ sourceTurnId: string; hash: string; text: string } | undefined> {
-		const snapshot = await this.deps.runtime.snapshot(sessionId);
-		if (!snapshot) return undefined;
-		for (let index = snapshot.messages.length - 1; index >= 0; index--) {
-			const message = snapshot.messages[index];
-			if (message.role !== "user") continue;
-			return { sourceTurnId: message.id, hash: hashTurnText(message.text), text: message.text };
-		}
-		return undefined;
-	}
-
-	private emit(record: DocumentWorkRecord, changeKind: DocumentWorkChangedEvent["changeKind"], attemptId?: string): void {
-		emitWorkChanged(this.deps.onChanged, record, changeKind, attemptId);
-	}
 }
 
-/** 材料根检查：只接受用户授权目录或项目目录内的路径，其余一律拒绝。 */
-export async function isPathInsideAnyRoot(roots: readonly string[], candidate: string): Promise<boolean> {
-	for (const root of roots) {
-		const containment = await containPath(root, candidate);
-		if (containment.ok) return true;
-	}
-	return false;
-}
-
-function readStringField(value: unknown, key: string): string | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const field = Reflect.get(value, key);
-	return typeof field === "string" ? field : undefined;
-}
-
-/** 结构化 detail 只允许标识与枚举，禁止把路径或正文写进错误。 */
-function safeDetail(detail: string): string {
-	return /^[A-Za-z0-9_.:-]{1,200}$/.test(detail) ? detail : "detail_redacted";
-}
-
-export function parsePreparationPayload(value: unknown): PreparedWork | undefined {
-	const workId = readStringField(value, "workId");
-	const summary = readStringField(value, "summary");
-	const workRevision = typeof value === "object" && value !== null ? Reflect.get(value, "workRevision") : undefined;
-	const preparationValue = typeof value === "object" && value !== null ? Reflect.get(value, "preparation") : undefined;
-	const preparationId = readStringField(preparationValue, "preparationId");
-	const digest = readStringField(preparationValue, "digest");
-	if (!workId || typeof workRevision !== "number" || summary === undefined || !preparationId || !digest) return undefined;
-	const preparation: PreparationReference = { preparationId, digest };
-	return { workId, workRevision, preparation, summary };
-}
+export { hashTurnText, isPathInsideAnyRoot };
+export type { MaterialResolver, RequirementsReference };

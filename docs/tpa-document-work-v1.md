@@ -348,14 +348,20 @@ git diff --check
 | 共享类型与常量 | `src/shared/types/documentWork.ts` |
 | 有界协议解析与纯策略 | `src/shared/documentWork.ts` |
 | 磁盘记录与渲染快照解析 | `src/shared/documentWorkRecords.ts` |
-| 元数据存储（CAS / 去重 / 恢复） | `src/main/document-work/DocumentWorkStore.ts` |
+| 元数据存储（CAS / 去重台账 / 恢复） | `src/main/document-work/DocumentWorkStore.ts` |
+| 写入事务（去重 + 按 work 串行 + 回执） | `src/main/document-work/DocumentWorkTransaction.ts` |
+| 回执与有界载荷解析 | `src/main/document-work/documentWorkReceipts.ts` |
+| 运行时排他租约（原子 acquire / fail-closed） | `src/main/document-work/DocumentRuntimeLease.ts` |
 | 文件原语（指纹 / 原子写 / 真实路径边界） | `src/main/document-work/documentWorkPaths.ts` |
 | 归档与快照（排他版本目录） | `src/main/document-work/DocumentArtifactStore.ts` |
 | 只读 ZIP 解析 | `src/main/document-work/zipEntries.ts` |
 | 注册式格式检查器 | `src/main/document-work/documentInspectors.ts` |
 | 检查服务（预算 / 超时 / 聚合） | `src/main/document-work/DocumentInspectionService.ts` |
 | 基稿与范围纯策略 | `src/main/document-work/DocumentRevisionPolicy.ts` |
-| 编排（建立 / 准备 / 分发 / 结算 / 取消） | `src/main/document-work/DocumentWorkService.ts` |
+| 准备流水线（要求 / 材料 / 基稿冻结 / 大纲） | `src/main/document-work/DocumentWorkPreparation.ts` |
+| 只读查询（快照 / 会话工作 / 真实用户轮） | `src/main/document-work/DocumentWorkQueries.ts` |
+| 文稿意图与改稿策略（纯函数） | `src/shared/documentIntentPolicy.ts` |
+| 公共入口（建立 / 准备 / 开始 / 取消 / 恢复） | `src/main/document-work/DocumentWorkService.ts` |
 | 运行时适配（三元组 / 稳定完成 / 派发） | `src/main/document-work/DocumentWorkRuntimeAdapter.ts` |
 | 域装配与 pi 事件适配 | `src/main/document-work/index.ts` |
 | IPC 边界 | `src/main/ipc/documentWorkIpc.ts` |
@@ -380,8 +386,14 @@ git diff --check
 13. 输出根与材料均由用户在系统选择器里授权；主进程另外接受项目目录内或聊天里引用过的材料。
 14. 退出时先取消在途结算再 drain，未完成的运行留给启动结算记 `interrupted`；未知分发记 `unknown`；两者都不自动重放。
 
+### 写入事务与排他（2026-10-12 加固）
+
+- 所有写接口先去重再校验：`requestId` 的台账同时保存成功与失败回执，重放返回**原结论**（含 `failed` / `unknown`）且不重复副作用；同 `requestId` 异载荷显式 `IDEMPOTENCY_CONFLICT`。事务锁覆盖「读取 → 授权校验 → operation/active 写入 → 回执」，绑定与批准在锁外执行（锁不跨 RPC 等待），排他由持久化的 active 记录与运行时租约保证。
+- 租约 `acquire` 的「读 → 比较 → 写」整段在 `lease:<sessionId>` 锁内完成；锁顺序固定为 `tx:<workId>` → `lease:<sessionId>` → store 内部锁。`unknown` 分发不释放租约、不清 active：同一 runtime 上的新请求（含另一件工作）都不会再发一次 bind，直到用户明确取消或 runtime 换代。租约文件损坏时 fail-closed：既不当作 `missing` 放行，也不允许清除。
+- 改稿消费的是**用户轮**：`consumedRevisionTurnIds` 存稳定 user 消息 id，`consumedRevisionTurns` 保留正文指纹作为审计。同一轮（含重新挂载后）不能再次触发；用户在新的一轮里重复同一句话属于新授权。
+
 ### 验证范围
 
-自动化验证（`node --test`，12 个新增测试文件、105 项全绿；连同既有相关回归共 135 项全绿）覆盖：协议边界与预算、扩展镜像与主进程解析一致性、稳定/原生会话身份分离、CAS/去重并发/重启恢复、损坏记录只读证据、端到端新建与改稿归档、授权与准备失效、运行时换代与忙碌、绑定未确认、材料变化、取消、版本目录防覆盖、检查器（docx/markdown/未知格式/两级预算/超时/内容相同包不同/等长文本变化/保留块被改/无法验证结构）、真实可终止 worker（同步忙等被硬终止）、基稿选择与手工接续、anydoc 固定 argv 与缓存指纹（含隔离的真实 `--version` 探针）、IPC 入参边界、卡片呈现策略。
+自动化验证（`node --test`，16 个文稿测试文件、132 项全绿；连同触达的既有回归共 303 项全绿）覆盖：协议边界与预算、扩展镜像与主进程解析一致性、稳定/原生会话身份分离、CAS/去重并发/重启恢复、损坏记录只读证据、端到端新建与改稿归档、授权与准备失效、运行时换代与忙碌、绑定未确认、材料变化、取消、版本目录防覆盖、检查器（docx/markdown/未知格式/两级预算/超时/内容相同包不同/等长文本变化/保留块被改/无法验证结构）、真实可终止 worker（同步忙等被硬终止）、写入事务（并发 start 只一次副作用、失败/unknown 回执重放、异载荷冲突）、租约原子性（barrier 强制交错只一次 bind/批准、损坏 fail-closed）、用户轮消费（同轮拒重放、新轮同文允许）、确认单门禁（唯一批准 owner、超时/换代/异 brief 不切模式、普通编码不被接管）、基稿选择与手工接续、anydoc 固定 argv 与缓存指纹（含隔离的真实 `--version` 探针）、IPC 入参边界、卡片呈现策略。
 
 未验证边界：真实模型出稿的端到端链路、真实 Electron 应用内交互、安装包，以及真实 anydoc 对真实 Word/PDF 的转换结果。浏览器（msedge 独立 profile）验证未执行。自动化测试与合成文稿不能替代这些验收。

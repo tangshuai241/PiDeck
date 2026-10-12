@@ -100,7 +100,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 
 	const refresh = useCallback(async (): Promise<DocumentWorkView | null> => {
 		if (!enabled) return null;
-		const views = await desktopApi.documentWork.list(sessionId).catch(() => [] as DocumentWorkView[]);
+		const views: DocumentWorkView[] = await desktopApi.documentWork.list(sessionId).catch(() => []);
 		const next = views[0] ?? null;
 		store.set(viewAtom, next);
 		return next;
@@ -202,33 +202,52 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	 * 确认单点击的唯一批准入口。
 	 *
 	 * 返回值决定「谁来发批准」：
-	 * - `documentWorkDispatched`：文稿路径已由主进程发出 `/align approve`，调用方不得再发一次；
-	 * - `proceedWithAlignment`：没有文稿工作（旧入口），由原对齐控件照常发批准；
+	 * - `documentWorkDispatched`：文稿路径已由主进程发出 `/align approve`（本轮 triple+brief+revision 的准确回执），
+	 *   调用方不得再发一次；
+	 * - `proceedWithAlignment`：本轮不是正式文稿任务（普通 Plan/编码/解释），由原对齐控件照常发批准；
+	 * - `blocked`：明确是文稿任务但还缺工作记录/成果目录：不发批准、不合并流程，保留输入并说明原因；
 	 * - `aborted`：准备/开始失败或运行时不适，本轮不批准。
 	 */
-	const prepareAndStartForApproval = useCallback(async (): Promise<"documentWorkDispatched" | "proceedWithAlignment" | "aborted"> => {
+	const prepareAndStartForApproval = useCallback(async (): Promise<"documentWorkDispatched" | "proceedWithAlignment" | "blocked" | "aborted"> => {
 		if (!enabled) return "proceedWithAlignment";
 		const currentView = store.get(viewAtom);
-		if (!currentView) return "proceedWithAlignment";
-		// 已有工作也要确认本轮要求仍然是文稿任务：后续普通编码/解释必须走原生批准。
 		const currentAlignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
-		const alignmentText = currentAlignment?.brief
-			? `${currentAlignment.brief.goal}
-${currentAlignment.brief.deliverable}`
-			: latestUserMessageId(store.get(messagesAtom)?.messages)
-				? (store.get(messagesAtom)?.messages.at(-1)?.text ?? "")
-				: "";
-		if (!isDocumentWorkIntent({ text: alignmentText, hasWork: true, hasUsableBase: currentView.versions.some((version) => version.inspection === "passed") })) return "proceedWithAlignment";
-		const alignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
-		const triple = targetNow();
-		if (!alignment?.brief || !isAlignmentActive(alignment) || !triple) {
+		const latestTurn = store.get(messagesAtom)?.messages.at(-1);
+		// 只有「这份 brief 属于当前 revision」时才用 brief 判断本轮目标；用户又发了新消息
+		// （普通编码/解释）会让 revision 前进而 briefRevision 留在旧值，那时以最新用户轮为准。
+		const briefIsCurrent = Boolean(currentAlignment?.brief && currentAlignment.briefRevision !== undefined && currentAlignment.briefRevision === currentAlignment.revision);
+		const briefText = currentAlignment?.brief ? `${currentAlignment.brief.goal} ${currentAlignment.brief.deliverable}` : "";
+		const goalText = briefIsCurrent ? briefText : (latestTurn?.text ?? briefText);
+		if (!isDocumentWorkIntent(goalText)) return "proceedWithAlignment";
+		if (!currentView) {
+			// 明确文稿但还没有工作记录（例如尚未授权输出目录）：不发批准，也不要求重新确认要求。
+			store.set(errorAtom, { code: "PATH_DENIED", retryable: true });
+			showNotice(t("documentWork.needsOutputRoot"));
+			return "blocked";
+		}
+		// 有版本但没有可用基稿：本轮既不能改稿也不该退回普通聊天，直接说清缺什么。
+		if (currentView.versions.length > 0 && !currentView.versions.some((version) => version.inspection === "passed")) {
+			store.set(errorAtom, { code: "BASE_AMBIGUOUS", retryable: true });
+			showNotice(t("documentWork.noUsableBase"));
+			return "blocked";
+		}
+		const alignment = currentAlignment;
+		// 冻结本轮身份：triple + briefId + revision。之后任何一步都不许换用新的运行时状态。
+		const frozenRuntime = targetNow();
+		if (!alignment?.brief || !isAlignmentActive(alignment) || !frozenRuntime) {
 			showNotice(t("documentWork.unavailable"));
 			return "aborted";
 		}
+		const frozenBriefId = alignment.briefId;
+		const frozenRevision = alignment.revision;
 		if (store.get(phaseAtom) !== "idle") {
 			showNotice(t("documentWork.busy"));
 			return "aborted";
 		}
+		const stillCurrent = (): boolean => {
+			const now = targetNow();
+			return Boolean(now && sameRuntimeTriple(frozenRuntime, now));
+		};
 		const kind = currentView.versions.length > 0 ? "revise_document" : "create_document";
 		store.set(phaseAtom, "preparing");
 		store.set(errorAtom, undefined);
@@ -238,11 +257,20 @@ ${currentAlignment.brief.deliverable}`
 				workId: currentView.workId,
 				expectedRevision: currentView.revision,
 				kind,
-				requirementsRef: { kind: "alignment", briefId: alignment.briefId, revision: alignment.revision },
+				requirementsRef: { kind: "alignment", briefId: frozenBriefId, revision: frozenRevision },
 				// 对齐路径的范围是自然语言描述，章节引用交给改稿意图路径；这里不伪造章节名。
-				scope: { summary: `${alignment.brief.deliverable}\n${alignment.brief.goal}`.slice(0, 2000), sections: [], preserve: alignment.brief.preserve.slice(0, 24) },
+				scope: {
+					summary: `${alignment.brief.deliverable}
+${alignment.brief.goal}`.slice(0, 2000),
+					sections: [],
+					preserve: alignment.brief.preserve.slice(0, 24),
+				},
 				materialPaths: materialPathsRef.current,
 			});
+			if (!stillCurrent()) {
+				showNotice(t("alignment.runtimeChanged"));
+				return "aborted";
+			}
 			if (!prepared.ok) {
 				store.set(errorAtom, failureOf(prepared));
 				showNotice(noticeForFailure(failureOf(prepared)));
@@ -254,31 +282,43 @@ ${currentAlignment.brief.deliverable}`
 				workId: currentView.workId,
 				expectedRevision: prepared.value.workRevision,
 				preparation: prepared.value.preparation,
-				expectedRuntime: triple,
-				authorization: { kind: "alignment_confirmation", briefId: alignment.briefId, revision: alignment.revision },
+				expectedRuntime: frozenRuntime,
+				authorization: { kind: "alignment_confirmation", briefId: frozenBriefId, revision: frozenRevision },
 			});
+			if (!stillCurrent()) {
+				showNotice(t("alignment.runtimeChanged"));
+				return "aborted";
+			}
 			if (!started.ok) {
 				store.set(errorAtom, failureOf(started));
 				showNotice(noticeForFailure(failureOf(started)));
 				return "aborted";
 			}
-			store.set(preparationAtom, { preparation: prepared.value, runtime: triple, authorizationKind: "alignment_confirmation" });
-			// 权威确认到达后回到普通模式：批准已由主进程发出，渲染层不再发第二次。
-			await waitForAlignmentAcknowledgement({
-				read: () => store.get(runtimeAtom)?.state?.alignment ?? undefined,
-				isCurrent: () => sameRuntimeTriple(triple, targetNow() ?? triple),
-				subscribe: (changed) => store.sub(runtimeAtom, changed),
-				matches: (latest) => latest.phase === "approved" || latest.phase === "complete",
-			}).catch(() => undefined);
+			store.set(preparationAtom, { preparation: prepared.value, runtime: frozenRuntime, authorizationKind: "alignment_confirmation" });
+			// 只有「本轮 brief+revision 的准确回执 + 同一 runtime」才算批准；超时/换代都不改模式。
+			try {
+				await waitForAlignmentAcknowledgement({
+					read: () => store.get(runtimeAtom)?.state?.alignment ?? undefined,
+					isCurrent: stillCurrent,
+					subscribe: (changed) => store.sub(runtimeAtom, changed),
+					matches: (latest) => latest.briefId === frozenBriefId && latest.revision === frozenRevision && (latest.phase === "approved" || latest.phase === "complete"),
+				});
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : "notAcknowledged";
+				const message = reason === "runtimeChanged" ? t("alignment.runtimeChanged") : t("alignment.notAcknowledged");
+				showNotice(message);
+				// 不切模式、不触碰新 runtime 状态；错误要显式暴露而不是吞掉。
+				store.set(errorAtom, { code: "DISPATCH_UNKNOWN", retryable: true });
+				return "aborted";
+			}
 			if (store.get(sessionComposerModeBySessionIdAtomFamily(sessionId)) === "alignment") store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
 			return "documentWorkDispatched";
 		} finally {
 			store.set(phaseAtom, "idle");
 			void refresh();
 		}
-	}, [enabled, sessionId, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, refresh, targetNow]);
+	}, [enabled, sessionId, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, messagesAtom, refresh, targetNow]);
 
-	/**
 	/**
 	 * 普通聊天的明确改稿：判定与接续全在主进程。
 	 *

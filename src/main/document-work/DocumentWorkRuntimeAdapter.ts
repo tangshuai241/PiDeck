@@ -6,14 +6,44 @@
  * 第二个模型通道，也不能直接写 Pi JSONL。
  */
 import { clearTimeout as clearDelay, setTimeout as delay } from "node:timers";
-import type { AgentRuntimeState, AgentStatus, ChatMessage } from "../../shared/types";
+import type { AgentStatus, ChatMessage } from "../../shared/types";
 import type { SessionRuntimeTriple } from "../../shared/types/documentWork";
 import { sameRuntimeTriple } from "../../shared/documentWork";
+
+/**
+ * 文稿域只关心运行时状态里的这四个开关：足够判断「本轮是否还在跑」，
+ * 又不必把整个 `AgentRuntimeState` 的形状背进这一层（避免用断言收窄不可信载荷）。
+ */
+export type DocumentWorkRuntimeFlags = {
+	isStreaming?: boolean;
+	isTurnActive?: boolean;
+	isCompacting?: boolean;
+	isExecutingTool?: boolean;
+};
+
+/** 从运行时补丁里安全读出四个标志；缺字段保持 undefined（沿用上一次观测）。 */
+export function decodeRuntimeFlags(value: unknown): DocumentWorkRuntimeFlags {
+	if (typeof value !== "object" || value === null) return {};
+	const readBoolean = (key: string): boolean | undefined => {
+		const field = Reflect.get(value, key);
+		return typeof field === "boolean" ? field : undefined;
+	};
+	return {
+		...(readBoolean("isStreaming") !== undefined ? { isStreaming: readBoolean("isStreaming") } : {}),
+		...(readBoolean("isTurnActive") !== undefined ? { isTurnActive: readBoolean("isTurnActive") } : {}),
+		...(readBoolean("isCompacting") !== undefined ? { isCompacting: readBoolean("isCompacting") } : {}),
+		...(readBoolean("isExecutingTool") !== undefined ? { isExecutingTool: readBoolean("isExecutingTool") } : {}),
+	};
+}
+
+export function decodeAgentStatus(value: unknown): AgentStatus | undefined {
+	return value === "idle" || value === "running" || value === "starting" || value === "error" || value === "closed" ? value : undefined;
+}
 
 export type DocumentWorkRuntimeSnapshot = {
 	target: SessionRuntimeTriple;
 	status: AgentStatus;
-	state: AgentRuntimeState;
+	state: DocumentWorkRuntimeFlags;
 	messages: ChatMessage[];
 	/**
 	 * pi 进程自身的会话 id（AgentTab.sessionId / piSessionId）。
@@ -43,7 +73,7 @@ const SETTLE_FALLBACK_INTERVAL_MS = 10_000;
  * 稳定完成的唯一判据：回合结束、无流式、未压缩、无工具执行、无在途分发。
  * `agent_end` 单独一项不构成完成（压缩、重试收尾和排队输入都可能还在跑）。
  */
-export function isRuntimeSettled(status: AgentStatus | undefined, state: AgentRuntimeState | undefined): boolean {
+export function isRuntimeSettled(status: AgentStatus | undefined, state: DocumentWorkRuntimeFlags | undefined): boolean {
 	if (status !== "idle") return false;
 	if (!state) return false;
 	if (state.isStreaming === true) return false;
@@ -64,7 +94,7 @@ export function runtimeTripleOf(payload: unknown): SessionRuntimeTriple | undefi
 
 export class DocumentWorkRuntimeAdapter {
 	/** 最近一次观察到的运行时状态，按 sessionId 归档；运行时替换即覆盖。 */
-	private readonly latest = new Map<string, { target: SessionRuntimeTriple; status: AgentStatus; state: AgentRuntimeState }>();
+	private readonly latest = new Map<string, { target: SessionRuntimeTriple; status: AgentStatus; state: DocumentWorkRuntimeFlags }>();
 	private readonly waiters = new Set<() => void>();
 	private unsubscribe: (() => void) | undefined;
 	/** 停止后等待中的结算必须立刻收敛，而不是永远挂在 await 上。 */
@@ -85,7 +115,7 @@ export class DocumentWorkRuntimeAdapter {
 				// status 是「本轮是否还在跑」的一半证据；补丁不带 status 时沿用上一次，
 				// 带 status 时必须采纳，否则完成边沿永远到不了。
 				const status = Reflect.get(payload, "status");
-				this.note(triple, typeof status === "string" ? (status as AgentStatus) : undefined, state as AgentRuntimeState);
+				this.note(triple, decodeAgentStatus(status), decodeRuntimeFlags(state));
 			}
 			this.wake();
 		});
@@ -126,7 +156,7 @@ export class DocumentWorkRuntimeAdapter {
 	}
 
 	/** 事件驱动的状态缓存；`status` 可能不随补丁到达，缺省沿用上一次。 */
-	note(target: SessionRuntimeTriple, status: AgentStatus | undefined, state: AgentRuntimeState): void {
+	note(target: SessionRuntimeTriple, status: AgentStatus | undefined, state: DocumentWorkRuntimeFlags): void {
 		const previous = this.latest.get(target.sessionId);
 		const sameTarget = previous && sameRuntimeTriple(previous.target, target);
 		this.latest.set(target.sessionId, { target, status: status ?? (sameTarget ? previous.status : "idle"), state: sameTarget ? { ...previous.state, ...state } : state });
@@ -143,7 +173,7 @@ export class DocumentWorkRuntimeAdapter {
 		return runtime;
 	}
 
-	cached(sessionId: string): { target: SessionRuntimeTriple; status: AgentStatus; state: AgentRuntimeState } | undefined {
+	cached(sessionId: string): { target: SessionRuntimeTriple; status: AgentStatus; state: DocumentWorkRuntimeFlags } | undefined {
 		return this.latest.get(sessionId);
 	}
 

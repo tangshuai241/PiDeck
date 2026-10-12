@@ -20,6 +20,7 @@ import type { ArtifactStoreFailure, DocumentArtifactStore } from "./DocumentArti
 import type { DocumentInspectionService } from "./DocumentInspectionService";
 import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
 import type { DocumentWorkStore } from "./DocumentWorkStore";
+import type { DocumentRuntimeLeaseRegistry } from "./DocumentRuntimeLease";
 import { emitWorkChanged, type DocumentWorkChangeEmitter } from "./documentWorkEvents";
 
 const DEFAULT_BIND_TIMEOUT_MS = 20_000;
@@ -32,6 +33,8 @@ export type DocumentAttemptRunnerDeps = {
 	inspection: DocumentInspectionService;
 	runtime: DocumentWorkRuntimeAdapter;
 	onChanged: DocumentWorkChangeEmitter;
+	/** 运行时排他租约：归档/失败解除，`unknown` 保持阻塞。 */
+	lease: DocumentRuntimeLeaseRegistry;
 	logger?: { warn(scope: string, message: string, detail?: unknown): unknown };
 	byteBudget?: number;
 	bindTimeoutMs?: number;
@@ -281,8 +284,9 @@ export class DocumentAttemptRunner {
 		await this.deps.store.saveOperation(settled);
 		this.attempts.delete(record.workId);
 		await this.deps.store.removeStaging(preparation.stagingDirectory);
-		// 结算完成即释放制作上下文：旧绑定只保留后台归属，不再影响下一轮普通聊天。
+		// 结算完成即释放制作上下文与运行时租约：旧绑定只保留后台归属，不再影响下一轮普通聊天。
 		await this.releaseAttempt(record, operation);
+		await this.deps.lease.release(record.sessionId, operation.requestId);
 		this.emit(mutated.value, inspection.status === "failed" ? "failed" : "archived", operation.attemptId);
 	}
 
@@ -306,6 +310,12 @@ export class DocumentAttemptRunner {
 		await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrelease_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} release`, expectedRuntime: operation.runtime }).catch(() => undefined);
 	}
 
+	/**
+	 * 失败结算。
+	 *
+	 * `unknown` 与其余失败分开处理：分发结果未知时**不**清 active、**不**释放运行时租约，
+	 * 否则下一轮（甚至另一件工作）会在同一 runtime 上再发一次 bind，把用户的确认花两次。
+	 */
 	private async failOperation(operation: DocumentWorkOperation, code: WorkErrorCode, detail?: string, currentRevision?: number): Promise<WorkResult<DocumentWorkOperation>> {
 		const failed: DocumentWorkOperation = {
 			...operation,
@@ -317,11 +327,19 @@ export class DocumentAttemptRunner {
 		await this.deps.store.saveOperation(failed);
 		this.attempts.delete(operation.workId);
 		const recordForRelease = await this.deps.store.getRecord(operation.workId);
-		if (recordForRelease) await this.releaseAttempt(recordForRelease, operation);
-		const record = await this.deps.store.getRecord(operation.workId);
-		if (record?.activeRequestId === operation.requestId) {
-			const cleared = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({ ...current, activeRequestId: undefined }));
-			if (cleared.ok) this.emit(cleared.value, failed.phase === "unknown" ? "unknown" : "failed", operation.attemptId);
+		if (failed.phase === "unknown") {
+			// 保守阻塞：保留 active 与租约，等用户明确取消或 runtime 换代。
+			if (recordForRelease) this.emit(recordForRelease, "unknown", operation.attemptId);
+		} else {
+			if (recordForRelease) {
+				await this.releaseAttempt(recordForRelease, operation);
+				await this.deps.lease.release(recordForRelease.sessionId, operation.requestId);
+			}
+			const record = await this.deps.store.getRecord(operation.workId);
+			if (record?.activeRequestId === operation.requestId) {
+				const cleared = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({ ...current, activeRequestId: undefined }));
+				if (cleared.ok) this.emit(cleared.value, "failed", operation.attemptId);
+			}
 		}
 		this.deps.logger?.warn("document-work", "Operation failed", { workId: operation.workId, attemptId: operation.attemptId, code });
 		return workFailure<DocumentWorkOperation>(code, detail, currentRevision);

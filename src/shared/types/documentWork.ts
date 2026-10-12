@@ -293,10 +293,35 @@ export type DocumentWorkRecord = {
 	activeRequestId?: string;
 	operationRequestIds: string[];
 	versionIds: string[];
-	/** 已处理过的改稿指令来源，防止同一轮指令重复授权。 */
+	/** 已消费过的改稿轮正文指纹（审计与旧数据兼容；重放判定用下面的轮标识）。 */
 	consumedRevisionTurns: string[];
+	/**
+	 * 已消费过的用户轮标识（稳定 ChatMessage.id）。
+	 *
+	 * 为什么必须按轮而不是按正文：同一轮重挂载后不能再次触发，但用户在新的一轮里
+	 * 又说了一遍同样的改稿要求属于新授权——按 hash 会永久挡住那句话。
+	 */
+	consumedRevisionTurnIds: string[];
 	createdAt: number;
 	updatedAt: number;
+};
+
+/**
+ * 运行时排他租约：一个 runtime 同时只允许一轮文稿执行。
+ *
+ * 为什么必须跨进程持久化：`unknown` 分发与崩溃重启都不能让同一 runtime 上的新请求
+ * 悄悄开始第二轮（包括别的 work）。租约在「占用 → bind → 执行 → 权威结算」期间有效，
+ * 只有明确取消或 runtime 换代（agentId/generation/nativeId 变化）才解除。
+ */
+export type DocumentRuntimeLease = {
+	sessionId: string;
+	agentId: string;
+	runtimeGeneration: number;
+	nativeSessionId?: string;
+	workId: string;
+	requestId: string;
+	attemptId: string;
+	acquiredAt: number;
 };
 
 export type DocumentWorkChangeKind = "created" | "prepared" | "dispatching" | "running" | "inspecting" | "archived" | "failed" | "interrupted" | "unknown" | "cancelled";
