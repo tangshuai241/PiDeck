@@ -1,8 +1,12 @@
 /**
  * Requirements alignment over standard pi RPC; no GUI bridge or widget dependency.
- * Read-only deliberately forbids ALL bash (plan-mode regexes do not parse shell
- * composition), unknown MCP and orchestration tools. Existing permissions remain
- * authoritative after explicit approval; this extension never grants permission.
+ *
+ * 首版曾把整个对齐阶段设为"只读"并禁用全部 bash；2026-10 的方案 §8 取消了这道
+ * 额外禁令：模型需要 anydoc 之类的命令去读懂 Word/PDF 材料，而"任何字符串都不像
+ * 写操作"这种正则保证本身也不成立。现在**沿用用户原有的 Pi 权限控制**，只额外
+ * 挡住内建写工具、未知 MCP 与编排工具，并且不再宣称沙箱或绝对只读：
+ * 对齐阶段的写入约束是流程约束，不是操作系统隔离。
+ *
  * Snapshots are branch-scoped. briefId carries its session identity so a fork or
  * imported public message cannot silently inherit another session's approval.
  */
@@ -10,8 +14,16 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ALIGNMENT_MARKER, ALIGNMENT_SNAPSHOT_TYPE, ALIGNMENT_STATE_TYPE, briefIsReady, decodeAlignment, decodeBrief, decodeTools, isRecord, type AlignmentState } from "./pi-deck-alignment-state";
+import { documentWorkApprovalRefusal } from "./pi-deck-document-work-binding";
 
-const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "alignment_brief"]);
+/**
+ * 对齐阶段允许的工具集合。
+ *
+ * `bash` 在 2026-10 方案里被明确放开（材料读取需要转换命令），它按用户既有 Pi 权限
+ * 执行；仍然拦住的 write/edit 是内建写工具，以及未知 MCP/编排工具——这是受控入口的
+ * 流程约束，不代表操作系统级隔离。
+ */
+const ALIGNMENT_ALLOWED_TOOLS = new Set(["read", "grep", "find", "ls", "bash", "alignment_brief"]);
 const CONTEXT_TYPE = "pi-deck-alignment-context";
 const EXECUTE_TYPE = "pi-deck-alignment-execute";
 const text = () => Type.String({ maxLength: 4000 });
@@ -42,7 +54,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 
 	function restrictTools(): void {
 		if (toolsBeforeAlignment === undefined) toolsBeforeAlignment = [...pi.getActiveTools()];
-		pi.setActiveTools([...new Set([...toolsBeforeAlignment.filter((name) => READ_ONLY_TOOLS.has(name)), "alignment_brief"])]);
+		pi.setActiveTools([...new Set([...toolsBeforeAlignment.filter((name) => ALIGNMENT_ALLOWED_TOOLS.has(name)), "alignment_brief"])]);
 	}
 
 	/** Private snapshot is synchronous authority; public messages can be deferred by pi until turn end. */
@@ -186,7 +198,12 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify("Approval rejected: runtime must be idle with no queued input and no unanswered questions.", "warning");
 				return;
 			}
-			// Persist before restoring tools; a failed approval write must keep the runtime read-only.
+			// Persist before restoring tools; a failed approval write must keep the runtime restricted.
+			const refusal = documentWorkApprovalRefusal(id, Number(revision));
+			if (refusal) {
+				ctx.ui.notify(refusal, "warning");
+				return;
+			}
 			transition({ ...state, phase: "approved" });
 			executing = true;
 			executionStarted = false;
@@ -205,17 +222,13 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 
 	pi.on("tool_call", async (event, ctx) => {
 		ensureSession(ctx);
-		if (readOnly() && !READ_ONLY_TOOLS.has(event.toolName)) return { block: true, reason: "Requirements alignment is read-only: writes, edits, bash, execution and unknown MCP tools are blocked until explicit approval." };
-	});
-	pi.on("user_bash", async (_event, ctx) => {
-		ensureSession(ctx);
-		if (readOnly()) return { result: { output: "Bash is blocked during requirements alignment.", exitCode: 1, cancelled: false, truncated: false } };
+		if (readOnly() && !ALIGNMENT_ALLOWED_TOOLS.has(event.toolName)) return { block: true, reason: "Requirements alignment keeps the guided flow read-only: write and edit tools, orchestration and unknown MCP tools are blocked until explicit approval. Bash follows your existing pi permissions; this is a workflow constraint, not a sandbox." };
 	});
 	pi.on("before_agent_start", async (_event, ctx) => {
 		ensureSession(ctx);
 		if (!readOnly()) return;
 		restrictTools();
-		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls and reason; no writes, edits, bash, execution, unknown MCP or approval. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; identify unavailable material honestly. Binary documents requiring conversion cannot be converted in this strict read-only mode: report that limitation and ask for readable material when necessary; never pretend conversion succeeded. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Update every brief field with the latest user answers and changes; an explicit new format or scope replaces the superseded one. Remove answered questions and retain only genuinely missing decisions. Ask only material blocking questions; do not re-ask choices the user already made or delegated. Publish the updated complete fields via alignment_brief. The user confirms through the desktop confirmation button; never ask them to type /align commands. Do not duplicate the full brief in conversation: the desktop confirmation sheet displays it. Even ready means wait for the exact approval control; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
+		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls and reason; no writes, edits, execution, orchestration tools or approval. Shell commands run under your existing pi permissions, so use them for reading materials (for example converting a Word or PDF material with the anydoc tool) and keep them side-effect free. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; if a conversion fails, report that limitation honestly instead of quoting file contents you did not read. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Update every brief field with the latest user answers and changes; an explicit new format or scope replaces the superseded one. Remove answered questions and retain only genuinely missing decisions. Ask only material blocking questions; do not re-ask choices the user already made or delegated. Publish the updated complete fields via alignment_brief. The user confirms through the desktop confirmation button; never ask them to type /align commands. Do not duplicate the full brief in conversation: the desktop confirmation sheet displays it. Even ready means wait for the exact approval control; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
 	});
 	pi.on("context", async (event) => {
 		// Keep the current injected instructions through tool follow-ups; remove obsolete modes and executions.

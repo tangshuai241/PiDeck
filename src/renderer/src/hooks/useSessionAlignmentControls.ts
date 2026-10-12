@@ -1,4 +1,4 @@
-import { useAtomValue, useStore } from "jotai";
+import { useAtomValue, useStore, type createStore } from "jotai";
 import { useCallback, useEffect } from "react";
 import type { AgentBackend, ComposerAgentMode, SessionRuntimeTarget } from "../../../shared/types";
 import { isAlignmentActive } from "../../../shared/alignment";
@@ -6,6 +6,7 @@ import { sessionComposerModeBySessionIdAtomFamily, sessionSendStateBySessionIdAt
 import { alignmentControlPendingAtomFamily, alignmentControlErrorAtomFamily, alignmentSubmissionAtomFamily, alignmentQueuedCountAtomFamily, beginAlignmentSubmission, type AlignmentControlFailure } from "../atoms/alignment-atoms";
 import { bindSessionRuntimeAtom, type SessionRuntimeViewState } from "../atoms/session-atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../atoms/session-selectors";
+import type { AlignmentState } from "../../../shared/types/alignment";
 import { desktopApi } from "../desktopApi";
 import { buildComposerPromptSubmission } from "../composerBehavior";
 import { t } from "../i18n";
@@ -15,13 +16,27 @@ import { deriveAlignmentPresentation } from "../utils/alignmentPresentation";
 import { waitForAlignmentAcknowledgement } from "../utils/alignmentAcknowledgement";
 import { isSessionRuntimeBusy } from "./useSessionTimelineController";
 
+/** The runtime triple captured before an async bridge step; the later dispatch must still match it. */
+function expectedRuntimeOf(store: ReturnType<typeof createStore>, runtimeAtom: ReturnType<typeof sessionRuntimeBySessionIdAtomFamily>, sessionId: string): SessionRuntimeTarget | undefined {
+	const current = store.get(runtimeAtom);
+	return current?.agentId ? { sessionId, agentId: current.agentId, runtimeGeneration: current.runtimeGeneration } : undefined;
+}
+
 /** An old request's failure must not poison a replacement runtime or a newly published brief. */
 function currentFailure(failure: AlignmentControlFailure | undefined, runtime: SessionRuntimeViewState | undefined): string | undefined {
 	return failure && failure.agentId === runtime?.agentId && failure.runtimeGeneration === runtime.runtimeGeneration && failure.briefId === runtime.state?.alignment?.briefId && failure.revision === runtime.state?.alignment?.revision ? failure.message : undefined;
 }
 
+/**
+ * 文稿域的批准前钩子：绑定上下文（准备 + 分发）必须在 `/align approve` 之前完成。
+ * 返回 false 表示本轮不进入执行——对齐卡只负责说明原因，不替文稿域做决定。
+ */
+export type AlignmentApprovalBridge = {
+	beforeApprove: (state: AlignmentState) => Promise<boolean>;
+};
+
 /** Session-scoped owner shared by composer mode controls and the single timeline confirmation surface. */
-export function useSessionAlignmentControls(sessionId: string, backend: AgentBackend = "pi") {
+export function useSessionAlignmentControls(sessionId: string, backend: AgentBackend = "pi", approvalBridge?: AlignmentApprovalBridge) {
 	const store = useStore();
 	const runtimeAtom = sessionRuntimeBySessionIdAtomFamily(sessionId);
 	const modeAtom = sessionComposerModeBySessionIdAtomFamily(sessionId);
@@ -165,8 +180,18 @@ export function useSessionAlignmentControls(sessionId: string, backend: AgentBac
 			showNotice(t("alignment.busy"));
 			return;
 		}
-		void dispatch([command], "normal");
-	}, [backend, state, runtimeAtom, presentationNow, dispatch, store]);
+		// 文稿轮次先把准备与操作记录落盘，再走原本的批准入口；绑定失败就不放行执行。
+		const bridge = approvalBridge;
+		if (!bridge || !current) {
+			void dispatch([command], "normal");
+			return;
+		}
+		void (async () => {
+			const allowed = await bridge.beforeApprove(current);
+			if (allowed && sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) void dispatch([command], "normal");
+			else if (allowed) showNotice(t("alignment.runtimeChanged"));
+		})();
+	}, [backend, state, runtimeAtom, presentationNow, dispatch, store, approvalBridge, sessionId, targetNow]);
 	const resume = useCallback(() => {
 		if (backend !== "pi") return;
 		void dispatch([t("alignment.resumeRequest")], undefined, true);

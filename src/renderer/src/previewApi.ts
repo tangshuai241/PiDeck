@@ -584,6 +584,22 @@ export function createPreviewApi(): PiDesktopApi {
 			getSize: async () => 0,
 			clearAll: async () => 0,
 		},
+		documentWork: {
+			// 预览模式没有主进程：文稿能力整体不可用，界面据此隐藏入口并保留普通聊天。
+			create: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			get: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			list: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			prepare: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			start: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			getOperation: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			cancel: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			recover: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			listRoots: async () => [],
+			chooseRoot: async () => ({ ok: true as const, value: { cancelled: true as const } }),
+			setRoot: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			forgetRoot: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false, detail: "preview mode" } }),
+			onChanged: () => () => undefined,
+		},
 		noticeHistory: {
 			// 预览/浏览器模式无主进程落盘：内存环形缓冲照常工作，只是重启不保留
 			get: async () => [],

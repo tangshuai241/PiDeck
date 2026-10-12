@@ -403,6 +403,7 @@ import { RpcLogLiveBroadcaster } from "./logging/RpcLogLiveBroadcaster";
 import { registerEditorsIpc } from "./ipc/editorsIpc";
 import { registerPiAuthIpc } from "./ipc/piAuthIpc";
 import { registerEnhanceIpc } from "./ipc/enhanceIpc";
+import { createDocumentWork, type DocumentWorkAssembly } from "./document-work/documentWorkAssembly";
 import { detectExternalEditors, listConfiguredExternalEditors, mergeDetectedExternalEditors, openProjectInEditor, validateExternalEditorCommand } from "./editors/EditorDetector";
 import { FeishuBridge, type SessionRuntimeBindingGateway } from "./feishu/FeishuBridge";
 import { feishuT, normalizeFeishuLocale, type FeishuLocale } from "./feishu/FeishuI18n";
@@ -498,6 +499,8 @@ let extensionManagerNativeEntries: string[] | null = null;
 /** settings.json 的 packages 条目缓存：整包停用写在这里，扩展投影必须一并读取。 */
 let extensionManagerNativePackages: unknown[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
+/** TPA 独立文稿域装配产物（退出时配对清理）。 */
+let documentWorkDomain: DocumentWorkAssembly | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
 let skillManager: SkillManager;
@@ -4860,6 +4863,25 @@ app
 		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
 		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
 		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
+
+		// ── TPA 独立文稿域（工作记录、成果归档与改稿）────────────────────
+		// 装配收口在 documentWorkAssembly：启动文件只保留这几行。
+		// 只复用已有的 session/RPC 链路，不新增 HTTP/WS/MCP/SDK 模型旁路。
+		documentWorkDomain = createDocumentWork({
+			userDataDir: app.getPath("userData"),
+			host: agentManager,
+			coordinator: sessionRuntimeCoordinator,
+			chooseDirectory: async (title) => {
+				const result = mainWindow && !mainWindow.isDestroyed() ? await dialog.showOpenDialog(mainWindow, { title, properties: ["openDirectory", "createDirectory"] }) : { canceled: true, filePaths: [] as string[] };
+				return result.canceled ? undefined : result.filePaths[0];
+			},
+			broadcast: (event) => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.documentWorkChanged, event);
+			},
+		});
+		quitCleanup.register("document-work", async () => {
+			await documentWorkDomain?.dispose();
+		});
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({

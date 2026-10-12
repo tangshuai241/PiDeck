@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "fda7dac003e29d5d310e5ff079c74f4fd3b79d9bddb2b10bbe5ae6d49c6dc1f1",
-  "fileCount": 28,
+  "bundleSha256": "062b4abe2e08490eb90449c8c9defa26be2a25244d29e70607b2007dda5a2ba5",
+  "fileCount": 32,
   "files": [
     {
       "name": "pi-deck-alignment-mode.ts",
-      "sha256": "188253015fd28901f98b96da209c78e7e8b9715aa373f78838555e40129826e8",
-      "bytes": 14780
+      "sha256": "dac3dea1e78ca6567ee232c2c97491a4d194f8889eaa9ab6a1d7c261238b9043",
+      "bytes": 15593
     },
     {
       "name": "pi-deck-alignment-state.ts",
@@ -18,6 +18,26 @@
       "name": "pi-deck-ask-question.ts",
       "sha256": "b6b604c09feccece07ac7307882876f2d0071190051cdf3d2d03cef47e2cfb00",
       "bytes": 13855
+    },
+    {
+      "name": "pi-deck-document-materials.ts",
+      "sha256": "2b3a923ca0a0ff81fee30ec87835303951fec6db5b96773cb22db0adf2b6e425",
+      "bytes": 11909
+    },
+    {
+      "name": "pi-deck-document-work-binding.ts",
+      "sha256": "e659d1f1aa39999ffbe16ac05aa372d80c3d62fc6af26fd747eaad6aefa2b9f9",
+      "bytes": 1807
+    },
+    {
+      "name": "pi-deck-document-work-protocol.ts",
+      "sha256": "01e6c7b7d885e39fe31e801afd7f300fc5c34bb250a88a5befe232f220109ef4",
+      "bytes": 12795
+    },
+    {
+      "name": "pi-deck-document-work.ts",
+      "sha256": "5038119eaa69295aed71a93dbafcaedef2ad5fe4c5965a5802165ded7225c273",
+      "bytes": 15981
     },
     {
       "name": "pi-deck-ext-points.ts",

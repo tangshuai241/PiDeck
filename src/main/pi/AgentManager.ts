@@ -69,6 +69,7 @@ import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityD
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
+import type { DocumentArtifactCandidateReport, DocumentWorkBindingState } from "../../shared/types/documentWork";
 import { isAlignmentActive, isAlignmentReadOnlyInputAllowed, PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
 import { latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
@@ -1183,6 +1184,19 @@ export class AgentManager {
 	 */
 	async readMessageFullTextFromFile(sessionPath: string, messageId: string, entryId?: string): Promise<{ text: string }> {
 		return this.sessionHistoryReader.readMessageFullText(sessionPath, messageId, entryId);
+	}
+
+	/**
+	 * 文稿域补登记：从活动分支读隐藏的文稿绑定与候选汇报。
+	 *
+	 * 只读转发到 SessionHistoryReader（解析与有界规则都在那边），不改变运行态，
+	 * 也不恢复任何执行授权。拿不到 sessionPath 时返回空结果而不是报错：
+	 * 补登记是尽力而为的核对路径。
+	 */
+	async readDocumentWorkHistory(agentId: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[] }> {
+		const sessionPath = this.agents.get(agentId)?.tab.sessionPath;
+		if (!sessionPath) return { bindings: [], reports: [] };
+		return await this.sessionHistoryReader.readDocumentWorkEntries(sessionPath);
 	}
 
 	/**

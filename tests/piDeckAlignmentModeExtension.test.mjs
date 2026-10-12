@@ -141,18 +141,23 @@ test("hidden marker enables read-only alignment and preserves visible text and i
 	assert.equal(h.state().revision, 1, "every user answer invalidates the previous publication, even without a hidden marker");
 	assert.equal(await h.input(visible, "extension"), undefined);
 	assert.equal(h.state().revision, 1, "internal extension context is not a new user revision");
-	assert.deepEqual(h.active(), ["read", "grep", "find", "ls", "alignment_brief"]);
+	// bash 自 2026-10 方案起保持可用（材料转换需要），写工具仍然被移除。
+	assert.deepEqual(h.active(), ["read", "grep", "find", "ls", "bash", "alignment_brief"]);
 });
 
-test("on captures original tools, gate rejects execution/unknown MCP despite external tool reactivation", async () => {
+test("on captures original tools, gate rejects writes and unknown MCP but keeps bash under the user's pi permissions", async () => {
 	const h = harness();
 	await h.command("on");
 	h.setActive(ORIGINAL);
-	for (const name of ["bash", "write", "edit", "mcp_delete", "mcp_read", "custom_tool", "codemode", "todo", "ask_question"]) assert.equal((await h.gate(name)).block, true, name);
-	for (const name of ["read", "grep", "find", "ls", "alignment_brief"]) assert.equal(await h.gate(name), undefined, name);
-	assert.equal((await h.fire("user_bash", { command: "echo x" })).result.exitCode, 1);
+	// 2026-10 方案 §8：对齐阶段不再额外禁用 bash（材料转换需要命令），
+	// 但仍挡住内建写工具与未知 MCP/编排工具——这是受控入口的流程约束，不是沙箱。
+	for (const name of ["write", "edit", "mcp_delete", "mcp_read", "custom_tool", "codemode", "todo", "ask_question"]) assert.equal((await h.gate(name)).block, true, name);
+	for (const name of ["read", "grep", "find", "ls", "bash", "alignment_brief"]) assert.equal(await h.gate(name), undefined, name);
+	// 用户的 !/!! 命令也不再被对齐拦截（沿用原有 Pi 权限）。
+	assert.equal(await h.fire("user_bash", { command: "echo x" }), undefined);
 	await h.fire("before_agent_start");
-	assert.equal(h.active().includes("bash"), false);
+	assert.equal(h.active().includes("bash"), true, "bash 仍在对齐阶段的可用工具里");
+	assert.equal(h.active().includes("write"), false, "写工具仍被移除");
 	await h.command("off");
 	assert.deepEqual(h.active(), ORIGINAL);
 	assert.equal(await h.gate("write"), undefined);
@@ -323,7 +328,9 @@ test("approved reopened or interrupted session requires fresh confirmation and c
 	await h.fire("agent_start");
 	await h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
 	assert.equal(h.state().phase, "clarifying");
-	assert.equal((await h.gate("bash")).block, true);
+	// 恢复后的对齐仍然是"受控入口"而不是沙箱：写工具被挡，bash 按用户权限放行。
+	assert.equal((await h.gate("write")).block, true);
+	assert.equal(await h.gate("bash"), undefined);
 });
 
 test("private authoritative snapshot outranks delayed public messages and bad snapshot fails closed", async () => {

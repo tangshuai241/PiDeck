@@ -1135,4 +1135,32 @@ export const ipcChannels = {
 	acpSessionConfigSet: "acp:session-config-set",
 	/** 主→渲染：configOptions 变更（set 响应/config_option_update 通知）。 */
 	acpSessionConfigChanged: "acp:session-config-changed",
+
+	// ===== TPA 独立文稿（工作记录、成果归档与改稿） =====
+	/** 首次实际提交时建立工作记录（同一 requestId 幂等，不启动制作）。 */
+	documentWorkCreate: "document-work:create",
+	/** 有界工作快照（不读取全部文稿正文）。 */
+	documentWorkGet: "document-work:get",
+	/** 会话下的工作列表（重开恢复用）。 */
+	documentWorkList: "document-work:list",
+	/** 生成准备记录：规范化范围、冻结基稿、校验材料，不调模型。 */
+	documentWorkPrepare: "document-work:prepare",
+	/** 持久操作记录后经既有 RPC 分发（授权在 main 侧复核）。 */
+	documentWorkStart: "document-work:start",
+	/** 查询某个 requestId 的分发/运行/检查结果；未知结果不重制。 */
+	documentWorkOperation: "document-work:operation",
+	/** 只取消匹配运行时上的本轮运行。 */
+	documentWorkCancel: "document-work:cancel",
+	/** 会话重开恢复：只回报已知状态，不自动重放。 */
+	documentWorkRecover: "document-work:recover",
+	/** 已登记的输出根列表。 */
+	documentWorkListRoots: "document-work:list-roots",
+	/** 弹系统目录选择器并登记成果目录（用户显式授权）。 */
+	documentWorkChooseRoot: "document-work:choose-root",
+	/** 把已登记的输出根绑到工作记录上。 */
+	documentWorkSetRoot: "document-work:set-root",
+	/** 撤销某个成果根登记（已归档版本保留）。 */
+	documentWorkForgetRoot: "document-work:forget-root",
+	/** 主进程 → 渲染层：工作变更推送。 */
+	documentWorkChanged: "document-work:changed",
 } as const;

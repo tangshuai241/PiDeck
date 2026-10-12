@@ -34,6 +34,21 @@ import type {
 import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus } from "../shared/types/whisperRuntime";
 import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
+import type {
+	DocumentWorkCancelInput,
+	DocumentWorkChangedEvent,
+	DocumentWorkChooseRootOutcome,
+	DocumentWorkCreateInput,
+	DocumentWorkOperation,
+	DocumentWorkOperationQuery,
+	DocumentWorkOutputRoot,
+	DocumentWorkPrepareInput,
+	DocumentWorkRecord,
+	DocumentWorkSnapshot,
+	DocumentWorkStartInput,
+	PreparedWork,
+} from "../shared/types/documentWork";
+import type { WorkResult } from "../shared/documentWork";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -440,6 +455,34 @@ const api = {
 		getSize: () => ipcRenderer.invoke(ipcChannels.pasteFilesGetSize) as Promise<number>,
 		/** 设置页一键清空两个受管根下的 paste-* 文件。 */
 		clearAll: () => ipcRenderer.invoke(ipcChannels.pasteFilesClearAll) as Promise<number>,
+	},
+	documentWork: {
+		/** 首次实际提交时建立工作记录（幂等；不启动制作）。 */
+		create: (input: DocumentWorkCreateInput) => ipcRenderer.invoke(ipcChannels.documentWorkCreate, input) as Promise<WorkResult<DocumentWorkRecord>>,
+		/** 有界工作快照（不含全部文稿正文）。 */
+		get: (input: { workId: string; sessionId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkGet, input) as Promise<WorkResult<DocumentWorkSnapshot>>,
+		/** 会话下的工作列表（重开恢复）。 */
+		list: (sessionId: string) => ipcRenderer.invoke(ipcChannels.documentWorkList, sessionId) as Promise<WorkResult<DocumentWorkRecord[]>>,
+		/** 生成准备记录：范围规范化 + 基稿冻结 + 材料登记，不调模型。 */
+		prepare: (input: DocumentWorkPrepareInput) => ipcRenderer.invoke(ipcChannels.documentWorkPrepare, input) as Promise<WorkResult<PreparedWork>>,
+		/** 持久操作记录后经既有 RPC 分发；授权由主进程复核。 */
+		start: (input: DocumentWorkStartInput) => ipcRenderer.invoke(ipcChannels.documentWorkStart, input) as Promise<WorkResult<DocumentWorkOperation>>,
+		/** 查询 requestId 的结果；未知结果不重制。 */
+		getOperation: (input: DocumentWorkOperationQuery) => ipcRenderer.invoke(ipcChannels.documentWorkOperation, input) as Promise<WorkResult<DocumentWorkOperation>>,
+		/** 只取消匹配运行时上的本轮运行。 */
+		cancel: (input: DocumentWorkCancelInput) => ipcRenderer.invoke(ipcChannels.documentWorkCancel, input) as Promise<WorkResult<DocumentWorkOperation>>,
+		/** 重开恢复：只回报已记录状态，不自动重放执行。 */
+		recover: (sessionId: string) => ipcRenderer.invoke(ipcChannels.documentWorkRecover, sessionId) as Promise<WorkResult<{ works: DocumentWorkRecord[]; operations: DocumentWorkOperation[] }>>,
+		/** 已登记的输出根。 */
+		listRoots: () => ipcRenderer.invoke(ipcChannels.documentWorkListRoots) as Promise<DocumentWorkOutputRoot[]>,
+		/** 弹系统目录选择器并登记成果目录（用户显式授权；不接受模型指定路径）。 */
+		chooseRoot: () => ipcRenderer.invoke(ipcChannels.documentWorkChooseRoot) as Promise<WorkResult<DocumentWorkChooseRootOutcome>>,
+		/** 把已登记输出根绑到工作记录。 */
+		setRoot: (input: { workId: string; expectedRevision: number; outputRootId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkSetRoot, input) as Promise<WorkResult<{ workId: string; revision: number }>>,
+		/** 撤销成果根登记（已归档版本保留）。 */
+		forgetRoot: (outputRootId: string) => ipcRenderer.invoke(ipcChannels.documentWorkForgetRoot, outputRootId) as Promise<WorkResult<boolean>>,
+		/** 工作变更推送；返回退订函数（渲染层卸载必须退订）。 */
+		onChanged: (callback: (event: DocumentWorkChangedEvent) => void) => subscribe(ipcChannels.documentWorkChanged, callback),
 	},
 	noticeHistory: {
 		/** 读取落盘通知历史（启动回灌环形缓冲用）。 */

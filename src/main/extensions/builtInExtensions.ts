@@ -36,6 +36,8 @@ export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-nul-redirect-fix.ts",
 	"pi-deck-plan-mode.ts",
 	"pi-deck-alignment-mode.ts",
+	// 文稿扩展在需求扩展之后加载：对齐批准前的绑定闸由共享注册表协作，不靠加载顺序。
+	"pi-deck-document-work.ts",
 	"pi-deck-retry-no-body.ts",
 	"pi-deck-security-gate.ts",
 	"pi-deck-session-title.ts",

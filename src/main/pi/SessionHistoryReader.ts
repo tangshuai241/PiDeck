@@ -2,6 +2,8 @@ import { open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionBranchNode, SessionBranchTree, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
+import { DOCUMENT_WORK_STATE_TYPE, parseArtifactCandidateReport, parseBindingState } from "../../shared/documentWork";
+import type { DocumentArtifactCandidateReport, DocumentWorkBindingState } from "../../shared/types/documentWork";
 import { ALIGNMENT_MESSAGE_TYPE, latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { isFileChangeToolName } from "../../shared/fileChanges";
@@ -639,6 +641,39 @@ export class SessionHistoryReader {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * 文稿域补登记：从活动分支读隐藏的文稿状态与候选汇报。
+	 *
+	 * 只读、有界（最多各 16 条、单条 256KiB 上限），并且**不恢复执行授权**：
+	 * 补登记只用于把重启期间已经发生的候选汇报纳入核对，绝不触发新一轮制作。
+	 */
+	async readDocumentWorkEntries(sessionPath: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[] }> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const bindings: DocumentWorkBindingState[] = [];
+		const reports: DocumentArtifactCandidateReport[] = [];
+		for (let position = index.activeBranch.length - 1; position >= 0; position--) {
+			const entry = index.activeBranch[position];
+			if (entry.role !== "custom" || entry.customType !== DOCUMENT_WORK_STATE_TYPE) continue;
+			if (entry.oversized || entry.byteLength > 256 * 1024) continue;
+			try {
+				const [raw] = await this.readIndexedRawLines(index.hostPath, [entry]);
+				if (!isRecord(raw)) continue;
+				const message = entry.type === "custom_message" ? { ...raw, role: "custom" } : raw.message;
+				if (!isRecord(message) || !isRecord(message.details)) continue;
+				const details = message.details;
+				const binding = details.documentWork === undefined ? undefined : parseBindingState(details.documentWork);
+				const report = details.report === undefined ? undefined : parseArtifactCandidateReport(details.report);
+				if (binding && bindings.length < 16) bindings.push(binding);
+				if (report && reports.length < 16) reports.push(report);
+				if (bindings.length >= 16 && reports.length >= 16) break;
+			} catch {
+				// 单条损坏不影响其它条目；补登记失败不阻断会话。
+				continue;
+			}
+		}
+		return { bindings, reports };
 	}
 
 	/**
