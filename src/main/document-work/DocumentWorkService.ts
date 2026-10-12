@@ -463,11 +463,18 @@ export class DocumentWorkService {
 		if (typeof triple.sessionId !== "string" || typeof triple.agentId !== "string" || !Number.isSafeInteger(triple.runtimeGeneration)) return workFail("INVALID_INPUT", false, { detail: "expectedRuntime must carry the full runtime triple" });
 		const read = this.deps.store.readWork(workId);
 		if ("error" in read) return read;
+		// 会话归属：expectedRuntime 必须指向这条工作记录所属的会话，跨会话一律拒绝。
+		if (read.value.record.sessionId !== triple.sessionId) return workFail("WORK_NOT_FOUND", false, { detail: "this work does not belong to the runtime's session" });
 		const operation = read.value.operations[attemptId];
 		if (!operation) return workFail("WORK_NOT_FOUND", false, { detail: "the attempt does not belong to this work" });
+		// 尝试归属：expectedRuntime 的三代组必须与这条 attempt 记录的一致。
+		// 这一步必须在下面的 `unknown` 清理**之前**，否则错误 agent/generation（乃至别的会话）
+		// 就能解除别人的未知占用——未知占用是"无法证明没执行过"的保守状态，不能被任意身份清掉。
+		if (operation.runtime.agentId !== triple.agentId || operation.runtime.runtimeGeneration !== triple.runtimeGeneration) return workFail("RUNTIME_CHANGED", true, { detail: "the cancellation targets a different runtime than this attempt was dispatched to" });
 		if (this.isTerminal(operation.state) && operation.state !== "unknown") return workOk(operation);
-		// `unknown` 是唯一"终态但可显式清理"的状态：它是保守占用（阻止同运行时的新 attempt），
-		// 用户点取消就是那条权威证据——把它记成 interrupted，释放运行时。
+		// `unknown` 是唯一"终态但可显式清理"的状态：它是保守占用（阻止同运行时的新 attempt）。
+		// 用户显式清理只表示"解除这条保守占用、让运行时可以被重新使用"，
+		// **不**表示旧派发没有执行过——那一轮的副作用仍然未知，不会有任何重放或补记。
 		if (operation.state === "unknown") {
 			const cleared = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "DISPATCH_UNKNOWN", detail: "the user cleared an unknown outcome for this attempt" }, this.now);
 			if (cleared) this.deps.emit(cleared);

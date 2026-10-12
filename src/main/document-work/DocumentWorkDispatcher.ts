@@ -56,8 +56,9 @@ export class DocumentWorkDispatcher {
 	private finish(workId: string, attemptId: string, outcome: ArchiveOutcome, target?: DocumentWorkRuntimeTarget): void {
 		const event = finishOperation(this.deps.store, workId, attemptId, outcome, this.now);
 		if (event) this.deps.emit(event);
-		// 结算即释放租约（unknown 也是终态）：重放保护来自 requestId 台账与终态，
-		// 租约只负责"同时只有一件工作在使用这个运行时"。
+		// 结算即释放内存租约（unknown 也是终态）：租约只负责"同一时刻只有一件工作在绑定/运行"。
+		// `unknown` 的同运行时**保守占用**由持久化判定接管（DocumentWorkStore.blockingUnknownOperation，
+		// 重启后仍生效），解除只能靠用户显式清理或换绑运行时——不要在这里靠"保留内存租约"表达它。
 		if (target) this.deps.lease.release({ target, attemptId });
 	}
 

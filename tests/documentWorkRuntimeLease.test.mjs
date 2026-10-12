@@ -232,3 +232,45 @@ test("未知占用可以被用户显式取消清理，之后同运行时恢复�
 	const next = await prepareAndStart(h, workB, "B", { ...h.runtime.target });
 	assert.equal(next.ok, true, next.ok ? "" : JSON.stringify(next.error));
 });
+
+test("取消未知占用必须先核对身份：跨会话/错误 agent/generation 一律拒绝，只有同目标能清理", async () => {
+	const h = harness({ bindAckMs: 20 });
+	const workA = h.createWork(STABLE_SESSION, "create_a").value;
+	const started = await prepareAndStart(h, workA, "A", { ...h.runtime.target });
+	const attemptId = started.value.attemptId;
+	for (let index = 0; index < 200 && h.store.readWork(workA.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(h.store.readWork(workA.workId).value.operations[attemptId].state, "unknown");
+	const blocking = () => h.store.blockingUnknownOperation({ sessionId: STABLE_SESSION, target: { agentId: "agent-1", runtimeGeneration: 1 } });
+	assert.equal(blocking()?.attemptId, attemptId);
+	const revision = () => h.store.readWork(workA.workId).value.record.revision;
+	const cancel = (expectedRuntime) => h.service.cancel({ requestId: "cancel_x", workId: workA.workId, attemptId, expectedRevision: revision(), expectedRuntime });
+
+	// 1) 形态不符：INVALID_INPUT
+	const malformed = await h.service.cancel({ requestId: "cancel_x", workId: workA.workId, attemptId, expectedRevision: revision(), expectedRuntime: { sessionId: STABLE_SESSION, agentId: "agent-1" } });
+	assert.equal(malformed.ok, false);
+	assert.equal(malformed.error.code, "INVALID_INPUT");
+
+	// 2) 跨会话：WORK_NOT_FOUND，且不能解除占用
+	const crossSession = await cancel({ sessionId: h.second.sessionId, agentId: "agent-1", runtimeGeneration: 1, piSessionId: NATIVE_SESSION });
+	assert.equal(crossSession.ok, false);
+	assert.equal(crossSession.error.code, "WORK_NOT_FOUND");
+	assert.equal(blocking()?.attemptId, attemptId, "跨会话不得解除未知占用");
+
+	// 3) 错误 agent / 错误 generation：RUNTIME_CHANGED，且不能解除占用
+	const wrongAgent = await cancel({ sessionId: STABLE_SESSION, agentId: "agent-9", runtimeGeneration: 1, piSessionId: NATIVE_SESSION });
+	assert.equal(wrongAgent.ok, false);
+	assert.equal(wrongAgent.error.code, "RUNTIME_CHANGED");
+	const wrongGeneration = await cancel({ sessionId: STABLE_SESSION, agentId: "agent-1", runtimeGeneration: 7, piSessionId: NATIVE_SESSION });
+	assert.equal(wrongGeneration.ok, false);
+	assert.equal(wrongGeneration.error.code, "RUNTIME_CHANGED");
+	assert.equal(blocking()?.attemptId, attemptId, "错误身份不得解除未知占用");
+
+	// 4) 同目标显式清理：解除保守占用（不等于证明旧派发没执行），同运行时恢复可用
+	const cleared = await cancel({ sessionId: STABLE_SESSION, agentId: "agent-1", runtimeGeneration: 1, piSessionId: NATIVE_SESSION });
+	assert.equal(cleared.ok, true);
+	assert.equal(cleared.value.state, "interrupted");
+	assert.equal(blocking(), undefined);
+	const workB = h.createWork(STABLE_SESSION, "create_b").value;
+	const next = await prepareAndStart(h, workB, "B", { ...h.runtime.target });
+	assert.equal(next.ok, true, next.ok ? "" : JSON.stringify(next.error));
+});

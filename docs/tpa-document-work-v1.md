@@ -433,3 +433,12 @@ node scripts/generate-extensions-manifest.mjs --check
    是**持久化**判定（重启后仍生效）：同一会话里存在结果未知且 runtime 三代组相同的操作时，
    新的文稿 attempt（含另一件工作的新 requestId）一律 `DISPATCH_UNKNOWN` 拒绝；解除方式只有
    用户显式取消（`unknown → interrupted`）或会话换绑到新运行时。租约与 workId 互斥顺序不变，清理成对。
+
+### 15.1 未知占用的清理必须先核对身份（B4）
+
+`cancel` 的 `unknown` 清理分支原先在身份核对之前执行：错误会话/agent/世代（乃至另一个会话）能解除
+别人的未知占用。现在顺序固定为：形态校验（`INVALID_INPUT`）→ 会话归属（跨会话 `WORK_NOT_FOUND`）
+→ attempt 归属（未知 attempt `WORK_NOT_FOUND`）→ 三代组一致（不符 `RUNTIME_CHANGED`）→ 才是清理。
+清理本身只表示"解除这条保守占用、让运行时可以被重新使用"，**不**表示旧派发没有执行过；
+那一轮的副作用仍然未知，既不会重放也不会补记。同运行时的保守占用由持久化判定
+（`blockingUnknownOperation`）持有，内存租约只表达"同一时刻只有一件工作在绑定/运行"。
