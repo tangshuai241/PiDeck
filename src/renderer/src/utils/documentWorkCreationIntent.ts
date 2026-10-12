@@ -1,0 +1,48 @@
+/**
+ * 首次建档的转场纯策略：这一轮该不该、以及该以哪一轮身份建立工作记录。
+ *
+ * 为什么必须独立成纯函数（缺陷背景）：原实现把判断写在 effect 里，依赖数组写成了
+ * **稳定的 atom 对象**而不是订阅到的值，于是 Pi 发布 ready brief 后组件重渲染、
+ * effect 却不再执行，建档入口永远不出现（真实验收里 `documentWork.list` 一直是 `[]`）。
+ * 把「值 → 决策」抽出来后，effect 只需要依赖决策的稳定签名，转场就不会再被漏掉。
+ *
+ * 决策规则（每条都有对应的行为测试）：
+ * 1. 有在途操作（phase 非 idle）→ keep：不和正在进行的建档/制作抢状态。
+ * 2. 已有工作记录 → clear：建档只服务「还没有工作」的情况；工作快照是异步载入的，
+ *    载入后必须把可能已经武装的待建撤掉，否则既有文稿的会话会一直显示「选择目录」。
+ * 3. 对齐未激活（无快照、cancelled、complete）→ clear：这一轮没有待办，不残留待建卡。
+ * 4. revision < 1 → clear：只选了需求模式、还没提交实际要求，不建记录。
+ * 5. 没有真实用户轮身份 → keep：不能在缺身份时建档，等消息到达后重新决策。
+ * 6. 正式文稿证据：当前 revision 的 brief 文本或最新用户轮文本命中 `isDocumentWorkIntent`。
+ *    命中 → arm（绑定该轮身份）；未命中 → clear（普通计划/编码轮不得出现文稿卡）。
+ */
+import { isAlignmentActive } from "../../../shared/alignment";
+import { isDocumentWorkIntent } from "../../../shared/documentIntentPolicy";
+import type { AlignmentState } from "../../../shared/types/alignment";
+import type { DocumentWorkPhase } from "../atoms/document-work-atoms";
+
+export type DocumentWorkFirstCreateIntent = { sourceTurnId: string; title?: string };
+export type DocumentWorkFirstCreateAction = { kind: "arm"; intent: DocumentWorkFirstCreateIntent } | { kind: "clear" } | { kind: "keep" };
+
+export function deriveDocumentWorkFirstCreateAction(input: { alignment?: AlignmentState; hasWorkView: boolean; phase: DocumentWorkPhase; latestUserTurn?: { id: string; text: string } }): DocumentWorkFirstCreateAction {
+	if (input.phase !== "idle") return { kind: "keep" };
+	if (input.hasWorkView) return { kind: "clear" };
+	const alignment = input.alignment;
+	if (!isAlignmentActive(alignment) || !alignment) return { kind: "clear" };
+	// 空模式：只选模式（revision 0）不算一次实际提交。
+	if (alignment.revision < 1) return { kind: "clear" };
+	if (!input.latestUserTurn?.id) return { kind: "keep" };
+	// brief 只有在属于当前 revision 时才代表本轮；否则以最新用户轮为准。
+	const briefIsCurrent = Boolean(alignment.brief && alignment.briefRevision !== undefined && alignment.briefRevision === alignment.revision);
+	const briefText = alignment.brief ? `${alignment.brief.goal}\n${alignment.brief.deliverable}` : "";
+	const turnText = input.latestUserTurn.text;
+	const documentEvidence = (briefIsCurrent && isDocumentWorkIntent(briefText)) || isDocumentWorkIntent(turnText);
+	if (!documentEvidence) return { kind: "clear" };
+	const title = alignment.brief?.goal?.trim();
+	return { kind: "arm", intent: { sourceTurnId: input.latestUserTurn.id, ...(title ? { title } : {}) } };
+}
+
+/** 决策的稳定签名：effect 依赖它，值变了才重跑，避免依赖稳定 atom 漏掉转场。 */
+export function documentWorkFirstCreateKey(action: DocumentWorkFirstCreateAction): string {
+	return action.kind === "arm" ? `arm:${action.intent.sourceTurnId}:${action.intent.title ?? ""}` : action.kind;
+}

@@ -4,6 +4,7 @@ import type { AgentBackend } from "../../../shared/types";
 import type { DocumentWorkView, PreparedWork, SessionRuntimeTriple } from "../../../shared/types/documentWork";
 import { isAlignmentActive } from "../../../shared/alignment";
 import { isDocumentWorkIntent } from "../../../shared/documentIntentPolicy";
+import { deriveDocumentWorkFirstCreateAction, documentWorkFirstCreateKey } from "../utils/documentWorkCreationIntent";
 import { sameRuntimeTriple } from "../../../shared/documentWork";
 import { sessionComposerModeBySessionIdAtomFamily, setSessionComposerModeAtom } from "../atoms/composer-atoms";
 import { waitForAlignmentAcknowledgement } from "../utils/alignmentAcknowledgement";
@@ -53,9 +54,14 @@ function noticeForFailure(failure: DocumentWorkFailure): string {
 
 /** 最新用户消息 id：建立工作与授权改稿都以真实用户轮为准。 */
 function latestUserMessageId(messages: readonly { id: string; role: string }[] | undefined): string | undefined {
+	return latestUserTurn(messages)?.id;
+}
+
+/** 最新真实用户轮（id + 正文）：建档与改稿都以它绑定身份，不依赖消息 ID 生成方案。 */
+function latestUserTurn(messages: readonly { id: string; role: string; text?: string }[] | undefined): { id: string; text: string } | undefined {
 	if (!messages) return undefined;
 	for (let index = messages.length - 1; index >= 0; index--) {
-		if (messages[index].role === "user") return messages[index].id;
+		if (messages[index].role === "user") return { id: messages[index].id, text: messages[index].text ?? "" };
 	}
 	return undefined;
 }
@@ -117,15 +123,25 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		return unsubscribe;
 	}, [enabled, sessionId, refresh, store, changeAtom]);
 
+	/**
+	 * 首次建档的转场。
+	 *
+	 * 关键点（真实验收缺陷的根因）：依赖必须是**订阅到的值**推出的稳定签名，不能是 atom 对象
+	 * 本身——否则 Pi 发布 ready brief 之后组件重渲染、effect 不再执行，建档入口永远不出现。
+	 */
+	const createAction = useMemo(() => deriveDocumentWorkFirstCreateAction({ alignment: runtime?.state?.alignment ?? undefined, hasWorkView: Boolean(view), phase, latestUserTurn: latestUserTurn(messages) }), [runtime, view, phase, messages]);
+	const createActionKey = documentWorkFirstCreateKey(createAction);
 	useEffect(() => {
-		if (!enabled || view || pendingCreation || phase !== "idle") return;
-		const alignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
-		// 空模式不建记录：只选模式（revision 0）不算一次实际提交。
-		if (!isAlignmentActive(alignment) || (alignment?.revision ?? 0) < 1) return;
-		const sourceTurnId = latestUserMessageId(store.get(messagesAtom)?.messages);
-		if (!sourceTurnId) return;
-		store.set(pendingAtom, { sourceTurnId, ...(alignment?.brief?.goal ? { title: alignment.brief.goal } : {}) });
-	}, [enabled, view, pendingCreation, phase, store, runtimeAtom, messagesAtom, pendingAtom]);
+		if (!enabled) return;
+		if (createAction.kind === "arm") {
+			// 同一轮不重写（待建状态跨渲染保持）；换了新的文稿轮才更新绑定的身份。
+			const current = store.get(pendingAtom);
+			if (!current || current.sourceTurnId !== createAction.intent.sourceTurnId) store.set(pendingAtom, createAction.intent);
+			return;
+		}
+		// 非文稿轮/退出对齐：撤掉还没被消费的待建，避免普通轮显示文稿卡。
+		if (createAction.kind === "clear" && store.get(pendingAtom)) store.set(pendingAtom, undefined);
+	}, [enabled, createActionKey, store, pendingAtom, createAction]);
 
 	/**
 	 * 登记聊天里已经引用/拖入的材料：用户不必再选一次。
