@@ -108,6 +108,12 @@ export function createDocumentWorkHarness(options = {}) {
 	const store = createStore();
 	const hookRuntime = createHookRuntime();
 	const composerMode = new Map();
+	/** 会话级可写 mode 原子：hook 会读、确认路径会写回 normal。 */
+	const modeAtomFor = (id) => {
+		const key = `mode:${id}`;
+		if (!composerMode.has(key)) composerMode.set(key, atom("normal"));
+		return composerMode.get(key);
+	};
 	const calls = { list: 0, create: [], chooseOutputRoot: 0, prepare: [], start: [], autoRevise: [] };
 	const notices = [];
 	const workState = { views: options.initialViews ?? [] };
@@ -146,7 +152,10 @@ export function createDocumentWorkHarness(options = {}) {
 	});
 
 	const module = loadTsCommonJs(resolve(`${ROOT}/src/renderer/src/hooks/useSessionDocumentWork.ts`), {
-		globals: { crypto: { randomUUID: () => `req-${calls.create.length + calls.prepare.length + 1}` } },
+		// 生产里 setTimeout/clearTimeout 由浏览器提供；vm 沙箱默认注入，这里显式再给一次，
+		// 保证真实确认等待器（alignmentAcknowledgement 用 globalThis 定时器）不会因环境缺失
+		// 直接抛 TypeError 被误判成「本轮失败」。生产代码不得 import node:timers。
+		globals: { crypto: { randomUUID: () => `req-${calls.create.length + calls.prepare.length + 1}` }, setTimeout, clearTimeout },
 		stubs: {
 			jotai: { atom, useStore: () => store, useAtomValue: trackAtom },
 			"jotai/utils": {
@@ -161,13 +170,8 @@ export function createDocumentWorkHarness(options = {}) {
 			react: reactStub,
 			"../atoms/document-work-atoms": atoms,
 			"../atoms/composer-atoms": {
-				sessionComposerModeBySessionIdAtomFamily: (id) => {
-					// 会话级可写 mode 原子：hook 会读、确认路径会写回 normal。
-					const key = `mode:${id}`;
-					if (!composerMode.has(key)) composerMode.set(key, atom("normal"));
-					return composerMode.get(key);
-				},
-				setSessionComposerModeAtom: atom(null, (_get, set, value) => set(composerMode.get(`mode:${value.sessionId}`), value.mode)),
+				sessionComposerModeBySessionIdAtomFamily: (id) => modeAtomFor(id),
+				setSessionComposerModeAtom: atom(null, (_get, set, value) => set(modeAtomFor(value.sessionId), value.mode)),
 			},
 			// 生产里这些是 atomFamily：同一个 sessionId 必须每次都拿到同一个 atom 身份。
 			// 桩若每次 new 一个 atom，依赖数组里的 atom 会「每轮都变」，原缺陷就被掩盖成通过。
@@ -245,7 +249,15 @@ export function createDocumentWorkHarness(options = {}) {
 		/** 会话消息更新（同一数组实例不触发变化，必须换新数组，与真实 atom 更新一致）。 */
 		setMessages: (next) => store.set(messagesAtom, { s1: { messages: next } }),
 		unmount: () => hookRuntime.unmount(),
+		/** 只推进对齐快照（保留 runtime 三元组），模拟 Pi 的 RPC 状态更新。 */
+		setAlignment: (alignment) => {
+			const current = store.get(runtimesAtom).s1;
+			store.set(runtimesAtom, { s1: { ...(current ?? { agentId: "a1", runtimeGeneration: 1, status: "idle", state: {} }), state: { ...(current?.state ?? {}), alignment } } });
+		},
+		mode: () => store.get(modeAtomFor("s1")),
+		setMode: (value) => store.set(modeAtomFor("s1"), value),
 		/** 冲掉一个宏任务：等异步的 IPC 桩（例如 list 返回工作快照）落地后再渲染。 */
+		notices,
 		flush: () => new Promise((resolve) => setImmediate(resolve)),
 	};
 }

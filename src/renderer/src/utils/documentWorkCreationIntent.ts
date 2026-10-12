@@ -13,11 +13,12 @@
  * 3. 对齐未激活（无快照、cancelled、complete）→ clear：这一轮没有待办，不残留待建卡。
  * 4. revision < 1 → clear：只选了需求模式、还没提交实际要求，不建记录。
  * 5. 没有真实用户轮身份 → keep：不能在缺身份时建档，等消息到达后重新决策。
- * 6. 正式文稿证据：当前 revision 的 brief 文本或最新用户轮文本命中 `isDocumentWorkIntent`。
- *    命中 → arm（绑定该轮身份）；未命中 → clear（普通计划/编码轮不得出现文稿卡）。
+ * 6. 当前轮路由（与确认单批准路径共用 `routeDocumentTurn`）：用户原话、当前 revision 的
+ *    brief 二者之一命中正式文稿证据 → arm（绑定该轮身份）；明确工程/编码轮或两者都没有
+ *    证据 → clear（普通计划/编码轮不得出现文稿卡）。
  */
 import { isAlignmentActive } from "../../../shared/alignment";
-import { isDocumentWorkIntent } from "../../../shared/documentIntentPolicy";
+import { routeDocumentTurn } from "../../../shared/documentIntentPolicy";
 import type { AlignmentState } from "../../../shared/types/alignment";
 import type { DocumentWorkPhase } from "../atoms/document-work-atoms";
 
@@ -32,12 +33,11 @@ export function deriveDocumentWorkFirstCreateAction(input: { alignment?: Alignme
 	// 空模式：只选模式（revision 0）不算一次实际提交。
 	if (alignment.revision < 1) return { kind: "clear" };
 	if (!input.latestUserTurn?.id) return { kind: "keep" };
-	// brief 只有在属于当前 revision 时才代表本轮；否则以最新用户轮为准。
+	// brief 只有在属于当前 revision 时才参与路由；否则只看最新用户轮（旧 brief 不参与）。
 	const briefIsCurrent = Boolean(alignment.brief && alignment.briefRevision !== undefined && alignment.briefRevision === alignment.revision);
-	const briefText = alignment.brief ? `${alignment.brief.goal}\n${alignment.brief.deliverable}` : "";
-	const turnText = input.latestUserTurn.text;
-	const documentEvidence = (briefIsCurrent && isDocumentWorkIntent(briefText)) || isDocumentWorkIntent(turnText);
-	if (!documentEvidence) return { kind: "clear" };
+	const briefText = briefIsCurrent && alignment.brief ? `${alignment.brief.goal}\n${alignment.brief.deliverable}` : "";
+	// 与确认单批准路径共用同一套当前轮路由：用户原话优先于模型措辞。
+	if (routeDocumentTurn({ userText: input.latestUserTurn.text, briefText }) !== "document") return { kind: "clear" };
 	const title = alignment.brief?.goal?.trim();
 	return { kind: "arm", intent: { sourceTurnId: input.latestUserTurn.id, ...(title ? { title } : {}) } };
 }

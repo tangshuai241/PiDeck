@@ -48,6 +48,41 @@ test("讨论、否定与「先解释」都不构成改稿授权", () => {
 	}
 });
 
+test("裸「提交」不是工程语境，工程搭配仍然是", () => {
+	// 真实验收 defect：正式 brief 里的「本轮只提交确认单」被当成工程词，整轮被降级成原生批准。
+	const liveBrief = "按用户给定内容起草正式 Word 报告《桥梁监测安排》（DOCX）：正文只含两节，逐字使用消息中提供的文字，不加事实、不扩写；本轮只提交确认单，待用户确认后再生成文件。";
+	assert.equal(policy.hasOrdinaryEngineeringIntent("本轮只提交确认单，待用户确认后再生成文件"), false, "裸提交不得当工程语境");
+	assert.equal(policy.isDocumentWorkIntent(liveBrief), true, "真实 brief 必须被判成正式文稿要求");
+	assert.equal(policy.isDocumentWorkIntent("起草一份正式报告并提交确认单，待确认后生成文件"), true, "文稿语境里的提交不被否决");
+	// 工程搭配与其余工程词的保护原样保留。
+	for (const text of ["提交代码到分支", "提交这次改动", "git commit 一下", "帮我重构这个模块", "补一下单元测试"]) {
+		assert.equal(policy.hasOrdinaryEngineeringIntent(text), true, text);
+		assert.equal(policy.isDocumentWorkIntent(text), false, text);
+	}
+});
+
+test("正式文稿内容里的技术名词不得否决文稿域，代码动作仍判普通轮", () => {
+	// 用户要的是「正式 Word 报告」，内容里出现「类型/接口」等词是正常的题材描述。
+	assert.equal(policy.isDocumentWorkIntent("生成一份正式 Word 报告，介绍桥梁类型和传感器接口"), true, "正式产物 + 技术题材仍是文稿");
+	assert.equal(policy.routeDocumentTurn({ userText: "生成一份正式 Word 报告，介绍桥梁类型和传感器接口", briefText: "" }), "document");
+	// 反过来，用户要的是代码产物时，即使提到 Word/docx 也必须是普通轮。
+	for (const text of ["写一个处理 docx 的函数", "重构 Word 报告生成接口", "帮我写一个生成 Word 文档的脚本"]) {
+		assert.equal(policy.isDocumentWorkIntent(text), false, text);
+		assert.equal(policy.routeDocumentTurn({ userText: text, briefText: "" }), "ordinary", text);
+	}
+});
+
+test("当前轮路由：用户原话优先，旧版 brief 不参与", () => {
+	const brief = "起草正式 Word 报告《季度经营分析》（DOCX），只提交确认单，待确认后生成文件。";
+	assert.equal(policy.routeDocumentTurn({ userText: "请帮我生成一份正式 Word 文档", briefText: brief }), "document", "用户原话与 brief 都是文稿 → 文稿域");
+	assert.equal(policy.routeDocumentTurn({ userText: "", briefText: brief }), "document", "用户原话无信号时由当前 brief 决定");
+	assert.equal(policy.routeDocumentTurn({ userText: "按上面的要求执行。", briefText: brief }), "document");
+	assert.equal(policy.routeDocumentTurn({ userText: "帮我重构这个模块并补单元测试", briefText: brief }), "ordinary", "明确工程轮不得被 brief 拖进文稿域");
+	assert.equal(policy.routeDocumentTurn({ userText: "", briefText: "" }), "ordinary", "两侧都没有证据 → 普通轮");
+	// 旧 brief 由调用方负责不传入（briefRevision ≠ revision）；传空即普通轮。
+	assert.equal(policy.routeDocumentTurn({ userText: "继续吧。", briefText: "" }), "ordinary");
+});
+
 test("改稿范围提示只取用户指到的块名", () => {
 	assert.deepEqual(plain(policy.revisionScopeHints("把第二节改短，标题也换一下")), ["第二节", "标题"]);
 	assert.deepEqual(plain(policy.revisionScopeHints("润色附录和摘要")), ["附录", "摘要"]);

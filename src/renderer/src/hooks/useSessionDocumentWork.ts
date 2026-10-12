@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AgentBackend } from "../../../shared/types";
 import type { DocumentWorkView, PreparedWork, SessionRuntimeTriple } from "../../../shared/types/documentWork";
 import { isAlignmentActive } from "../../../shared/alignment";
-import { isDocumentWorkIntent } from "../../../shared/documentIntentPolicy";
+import { routeDocumentTurn } from "../../../shared/documentIntentPolicy";
 import { deriveDocumentWorkFirstCreateAction, documentWorkFirstCreateKey } from "../utils/documentWorkCreationIntent";
 import { sameRuntimeTriple } from "../../../shared/documentWork";
 import { sessionComposerModeBySessionIdAtomFamily, setSessionComposerModeAtom } from "../atoms/composer-atoms";
@@ -228,13 +228,13 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		if (!enabled) return "proceedWithAlignment";
 		const currentView = store.get(viewAtom);
 		const currentAlignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
-		const latestTurn = store.get(messagesAtom)?.messages.at(-1);
-		// 只有「这份 brief 属于当前 revision」时才用 brief 判断本轮目标；用户又发了新消息
-		// （普通编码/解释）会让 revision 前进而 briefRevision 留在旧值，那时以最新用户轮为准。
+		const latestTurn = latestUserTurn(store.get(messagesAtom)?.messages);
+		// 只有「这份 brief 属于当前 revision」时才让 brief 参与路由；用户又发了新消息会让
+		// revision 前进而 briefRevision 留在旧值，那时旧 brief 不参与。
 		const briefIsCurrent = Boolean(currentAlignment?.brief && currentAlignment.briefRevision !== undefined && currentAlignment.briefRevision === currentAlignment.revision);
-		const briefText = currentAlignment?.brief ? `${currentAlignment.brief.goal} ${currentAlignment.brief.deliverable}` : "";
-		const goalText = briefIsCurrent ? briefText : (latestTurn?.text ?? briefText);
-		if (!isDocumentWorkIntent(goalText)) return "proceedWithAlignment";
+		const briefText = briefIsCurrent && currentAlignment?.brief ? `${currentAlignment.brief.goal} ${currentAlignment.brief.deliverable}` : "";
+		// 与首次建档共用同一套当前轮路由：用户原话优先于模型措辞，工程轮不被旧文稿域吞掉。
+		if (routeDocumentTurn({ userText: latestTurn?.text, briefText }) !== "document") return "proceedWithAlignment";
 		if (!currentView) {
 			// 明确文稿但还没有工作记录（例如尚未授权输出目录）：不发批准，也不要求重新确认要求。
 			store.set(errorAtom, { code: "PATH_DENIED", retryable: true });
