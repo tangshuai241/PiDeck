@@ -15,6 +15,7 @@ import type { DocumentInspectionService } from "./DocumentInspectionService";
 import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
 import type { DocumentWorkStore } from "./DocumentWorkStore";
 import { selectBaseVersion, validateScopeAgainstHeadings } from "./DocumentRevisionPolicy";
+import { resolveRevisionScope } from "../../shared/documentRevisionScope";
 import { preparationDigestOf } from "./documentWorkTurn";
 import { fingerprintFile, resolveInsideDirectory } from "./documentWorkPaths";
 import type { DocumentWorkQueries } from "./DocumentWorkQueries";
@@ -34,6 +35,11 @@ export type PrepareWorkRequest = {
 	scope: { summary: string; sections: string[]; preserve: string[]; allow?: string[] };
 	materialPaths: string[];
 	baseVersionId?: string;
+	/**
+	 * 普通聊天指令型改稿：范围由主进程按**冻结基稿的真实标题**解析（覆盖 scope.allow/preserve）。
+	 * 渲染层不能构造这个字段（IPC 不接收），避免「信任渲染层 scope」。
+	 */
+	instructionScope?: { instruction: string };
 };
 
 type Materials = DocumentWorkPreparation["materials"];
@@ -97,6 +103,20 @@ export class DocumentWorkPreparationFactory {
 				}
 			}
 		}
+		// 指令型改稿：把「改哪里」解析成冻结基稿里的真实标题；歧义/无法解析一律 fail closed。
+		let resolvedScope = input.scope;
+		if (input.instructionScope) {
+			const resolution = resolveRevisionScope({ instruction: input.instructionScope.instruction, headings: (base?.sections ?? []).map((section) => section.heading) });
+			if (resolution.kind === "ordinary") {
+				await this.deps.store.removeStaging(staging.value);
+				return workFailure<PreparedWork>("APPROVAL_REQUIRED", "not_explicit_revision");
+			}
+			if (resolution.kind === "unresolved") {
+				await this.deps.store.removeStaging(staging.value);
+				return workFailure<PreparedWork>("BASE_AMBIGUOUS", resolution.reason);
+			}
+			resolvedScope = { summary: input.scope.summary, sections: [], preserve: resolution.preserve, allow: resolution.allow };
+		}
 		const draft: DocumentWorkPreparation = {
 			schemaVersion: 1,
 			preparationId: `pr_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
@@ -111,7 +131,7 @@ export class DocumentWorkPreparationFactory {
 			materials: materials.value,
 			...(base ? { base } : {}),
 			// allow 必须一并落盘：它是「哪些块允许改」的唯一来源，丢了就会把合法改动判成违规。
-			scope: { summary: input.scope.summary.slice(0, 2000), sections: input.scope.sections.slice(0, 24), preserve: input.scope.preserve.slice(0, 24), ...(input.scope.allow ? { allow: input.scope.allow.slice(0, 24) } : {}) },
+			scope: { summary: resolvedScope.summary.slice(0, 2000), sections: resolvedScope.sections.slice(0, 24), preserve: resolvedScope.preserve.slice(0, 24), ...(resolvedScope.allow ? { allow: resolvedScope.allow.slice(0, 24) } : {}) },
 			runtime: runtime.target,
 			...(runtime.nativeSessionId ? { nativeSessionId: runtime.nativeSessionId } : {}),
 			createdAt: Date.now(),

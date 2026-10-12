@@ -82,9 +82,3 @@ test("当前轮路由：用户原话优先，旧版 brief 不参与", () => {
 	// 旧 brief 由调用方负责不传入（briefRevision ≠ revision）；传空即普通轮。
 	assert.equal(policy.routeDocumentTurn({ userText: "继续吧。", briefText: "" }), "ordinary");
 });
-
-test("改稿范围提示只取用户指到的块名", () => {
-	assert.deepEqual(plain(policy.revisionScopeHints("把第二节改短，标题也换一下")), ["第二节", "标题"]);
-	assert.deepEqual(plain(policy.revisionScopeHints("润色附录和摘要")), ["附录", "摘要"]);
-	assert.deepEqual(plain(policy.revisionScopeHints("随便看看")), []);
-});

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NATIVE_SESSION_ID, SESSION_ID, TURN_HASH, TURN_TEXT, createDocumentWorkDomain, createHarness, createWork, plain, prepareCreate, startRound, waitFor } from "./helpers/documentWorkServiceHarness.mjs";
 
-const CREATE_ROUND = ["# 季度报告", "", "第一节 概述", "", "原始结论", "", "第二节 方法", "", "可以改的部分", ""].join("\n");
+const CREATE_ROUND = ["# 季度报告", "", "## 第一节 概述", "", "原始结论", "", "## 第二节 方法", "", "可以改的部分", ""].join("\n");
 
 async function archiveInitialDraft(harness, view, prepared) {
 	await startRound(harness, view, prepared, "req-start", { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 });
@@ -37,7 +37,7 @@ test("新轮里重复同一句改稿要求属于新授权，可以再次开工",
 		assert.equal(firstTurn.ok, true, JSON.stringify(firstTurn));
 		assert.equal(firstTurn.value.engaged, true, "明确改稿要求必须自动接续");
 		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
-		await harness.finishRound(`${CREATE_ROUND}\n# 第三节 结论\n\n新结论\n`);
+		await harness.finishRound(`${CREATE_ROUND}\n## 第三节 结论\n\n新结论\n`);
 		assert.equal((await harness.terminal(view.workId, "auto-1_s")).phase, "archived");
 
 		// 用户在新的一轮里又说了一遍同样的话：正文 hash 相同，但这是新的授权。

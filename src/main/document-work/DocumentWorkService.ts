@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { buildWorkFolder, kindForRequirements, sameRequirements, sameRuntimeTriple, sanitizeWorkTitle, stableStringify, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
 import type { AuthorizationReference, DocumentWorkChangedEvent, DocumentWorkExtensionState, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord, DocumentWorkView, PreparedWork, RequirementsReference, SessionRuntimeTriple, StartWorkInput, WorkMutation } from "../../shared/types/documentWork";
 import type { AlignmentState } from "../../shared/types/alignment";
-import { isDocumentWorkIntent, isExplicitRevisionRequest, revisionScopeHints } from "../../shared/documentIntentPolicy";
+import { isDocumentWorkIntent, isExplicitRevisionRequest } from "../../shared/documentIntentPolicy";
 import type { DocumentArtifactStore } from "./DocumentArtifactStore";
 import type { DocumentInspectionService } from "./DocumentInspectionService";
 import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
@@ -434,7 +434,9 @@ export class DocumentWorkService {
 			expectedRevision: work.revision,
 			kind: "revise_document",
 			requirementsRef: { kind: "user_instruction", sourceTurnId: turn.sourceTurnId, sourceTurnHash: turn.hash },
-			scope: { summary: turn.text, sections: [], preserve: [], allow: revisionScopeHints(turn.text) },
+			// 范围由准备阶段按冻结基稿的真实标题解析（见 DocumentWorkPreparation）。
+			scope: { summary: turn.text, sections: [], preserve: [] },
+			instructionScope: { instruction: turn.text },
 			materialPaths: [],
 		});
 		if (!prepared.ok) return workFailure<{ engaged: boolean }>(prepared.error.code, prepared.error.detail);

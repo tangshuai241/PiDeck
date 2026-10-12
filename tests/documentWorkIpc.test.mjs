@@ -119,6 +119,24 @@ test("prepare：kind、requirementsRef、scope 与材料形态都要过边界校
 	}
 });
 
+test("prepare 不接受渲染层自报的可改范围：allow 与 instructionScope 都不透传", async () => {
+	calls.length = 0;
+	const result = await invoke("documentWorkPrepare", {
+		requestId: "req-1",
+		workId: "dw_1",
+		expectedRevision: 2,
+		kind: "revise_document",
+		requirementsRef: { kind: "alignment", briefId: "brief-1", revision: 2 },
+		scope: { summary: "改一点", sections: [], preserve: [], allow: ["任意章节"] },
+		materialPaths: [],
+		instructionScope: { instruction: "把第一节改成别的" },
+	});
+	assert.equal(result.ok, true);
+	const forwarded = calls.at(-1).input;
+	assert.equal(Object.prototype.hasOwnProperty.call(forwarded.scope, "allow"), false, "渲染层不得声明本轮可改范围");
+	assert.equal(Object.prototype.hasOwnProperty.call(forwarded, "instructionScope"), false, "指令范围解析只能由主进程发起");
+});
+
 test("start：授权引用必须是受支持形态，运行时三元组必须完整", async () => {
 	calls.length = 0;
 	const base = { requestId: "req-1", workId: "dw_1", expectedRevision: 3, preparation: { preparationId: "pr_1", digest: DIGEST }, expectedRuntime: { sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1 }, authorization: { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 } };

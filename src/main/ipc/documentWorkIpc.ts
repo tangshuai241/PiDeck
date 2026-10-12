@@ -135,7 +135,11 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 		if (!materialPaths.every((path) => isBoundedString(path, 1024)) || materialPaths.length > 24) return workFailure("INVALID_INPUT", "materials");
 		const baseVersionId = body.baseVersionId;
 		if (baseVersionId !== undefined && baseVersionId !== null && !isWorkId(baseVersionId)) return workFailure("INVALID_INPUT", "base_version");
-		return service.prepare({ ...mutation, kind, requirementsRef, scope, materialPaths, ...(typeof baseVersionId === "string" ? { baseVersionId } : {}) });
+		// `allow`（本轮允许改动的块）只能由主进程在解析真实用户指令后写入
+		// （见 DocumentWorkPreparation.instructionScope）；渲染层不得自行声明可改范围，
+		// 否则一个渲染层字段就能放开未授权修改。这里只透传描述性字段。
+		const rendererScope = { summary: scope.summary, sections: scope.sections, preserve: scope.preserve };
+		return service.prepare({ ...mutation, kind, requirementsRef, scope: rendererScope, materialPaths, ...(typeof baseVersionId === "string" ? { baseVersionId } : {}) });
 	});
 
 	ipcMain.handle(ipcChannels.documentWorkStart, async (_event, raw: unknown): Promise<WorkResult<unknown>> => {

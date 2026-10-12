@@ -100,11 +100,3 @@ export function isExplicitRevisionRequest(text: string): boolean {
 	if (hasOrdinaryEngineeringIntent(value)) return false;
 	return REVISION_VERB.test(value) && REVISION_LOCATOR.test(value);
 }
-
-/** 从明确的改稿要求里抽出用户指到的块名，作为本轮的允许改动范围。 */
-export function revisionScopeHints(text: string): string[] {
-	const hints: string[] = [];
-	for (const match of text.matchAll(/第[一二三四五六七八九十百零〇\d]+[章节节篇部分条]/g)) hints.push(match[0]);
-	for (const match of text.matchAll(/(?:标题|开头|结尾|落款|附录|摘要|结论|正文|附注)/g)) hints.push(match[0]);
-	return [...new Set(hints)].slice(0, 8);
-}
