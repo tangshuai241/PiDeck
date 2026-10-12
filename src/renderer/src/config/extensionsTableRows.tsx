@@ -20,6 +20,8 @@ const BUILT_IN_EXTENSION_DESC: Record<string, TranslationKey> = {
 	"pi-deck-model-trace.ts": "config.builtInExtDesc.pi-deck-model-trace",
 	"pi-deck-nul-redirect-fix.ts": "config.builtInExtDesc.pi-deck-nul-redirect-fix",
 	"pi-deck-alignment-mode.ts": "config.builtInExtDesc.pi-deck-alignment-mode",
+	"pi-deck-document-work.ts": "config.builtInExtDesc.pi-deck-document-work",
+	"pi-deck-document-materials.ts": "config.builtInExtDesc.pi-deck-document-materials",
 	"pi-deck-plan-mode.ts": "config.builtInExtDesc.pi-deck-plan-mode",
 	"pi-deck-retry-no-body.ts": "config.builtInExtDesc.pi-deck-retry-no-body",
 	"pi-deck-security-gate.ts": "config.builtInExtDesc.pi-deck-security-gate",

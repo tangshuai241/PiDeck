@@ -1,0 +1,260 @@
+/**
+ * 文稿元数据事实源：`userData/document-work/`。
+ *
+ * 分工：
+ * - 这里是工作、操作、准备与版本记录的权威存储，Pi 原生会话仍是对话事实源；
+ * - 所有写入都经原子替换 + `.bak` 回退；`revision` 做乐观并发检查；
+ * - `requestId` 去重按「同 requestId 必须同载荷」判定，重放返回原结果而不是再执行一次。
+ *
+ * 崩溃恢复：进程重启后仍在 dispatching/running/inspecting 的操作不会被自动重放，
+ * 统一落成 `interrupted`，等待用户重新发起。
+ */
+import { join } from "node:path";
+import { readdir, rm } from "node:fs/promises";
+import { hashText, readJsonResilient, writeFileAtomic, ensureDirectory } from "./documentWorkPaths";
+import { isRequestId, isWorkId, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
+import { parseDocumentOutputRoot, parseDocumentWorkOperation, parseDocumentWorkPreparation, parseArtifactVersion, parseDocumentWorkRecord } from "../../shared/documentWorkRecords";
+import type { DocumentArtifactVersion, DocumentOutputRoot, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord } from "../../shared/types/documentWork";
+
+/** 无重叠的键控串行锁：同一工作的读改写不会互相覆盖。 */
+class KeyedMutex {
+	private readonly tails = new Map<string, Promise<unknown>>();
+
+	async run<T>(key: string, action: () => Promise<T>): Promise<T> {
+		const previous = this.tails.get(key) ?? Promise.resolve();
+		// 无论前一个任务成功或失败都继续排队；失败由各自的调用者结算。
+		const next = previous.then(action, action);
+		const settled = next.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.tails.set(key, settled);
+		try {
+			return await next;
+		} finally {
+			// 只有队尾仍是自己时才回收，避免删掉后来者的排队记录。
+			if (this.tails.get(key) === settled) this.tails.delete(key);
+		}
+	}
+}
+
+type IdempotencyEntry = { requestDigest: string; payload: unknown };
+
+export class DocumentWorkStore {
+	private readonly mutex = new KeyedMutex();
+
+	constructor(
+		private readonly rootDir: string,
+		private readonly logger?: { warn(scope: string, message: string, detail?: unknown): unknown },
+	) {}
+
+	get directory(): string {
+		return this.rootDir;
+	}
+
+	/** 材料转换缓存根：交给扩展写入，仍由 TPA 管理，不落在用户成果目录里。 */
+	get materialCacheDirectory(): string {
+		return join(this.rootDir, "materials", "cache");
+	}
+
+	private workDir(workId: string): string {
+		return join(this.rootDir, "works", workId);
+	}
+
+	async initialize(): Promise<void> {
+		await ensureDirectory(join(this.rootDir, "works"));
+		await ensureDirectory(join(this.rootDir, "idempotency"));
+		await ensureDirectory(join(this.rootDir, "frozen"));
+		await ensureDirectory(join(this.rootDir, "snapshots"));
+		await ensureDirectory(join(this.rootDir, "materials"));
+		await ensureDirectory(this.materialCacheDirectory);
+	}
+
+	// ---------------------------------------------------------------- output roots
+
+	private get outputRootsFile(): string {
+		return join(this.rootDir, "output-roots.json");
+	}
+
+	async listOutputRoots(): Promise<DocumentOutputRoot[]> {
+		const raw = await readJsonResilient(this.outputRootsFile);
+		if (!Array.isArray(raw)) return [];
+		const roots: DocumentOutputRoot[] = [];
+		for (const entry of raw) {
+			const parsed = parseDocumentOutputRoot(entry);
+			if (parsed) roots.push(parsed);
+		}
+		return roots;
+	}
+
+	/** 同一个真实路径只登记一次；重复选择返回既有条目，不产生第二个 ID。 */
+	async registerOutputRoot(realPath: string, label: string): Promise<DocumentOutputRoot> {
+		return this.mutex.run("output-roots", async () => {
+			const existing = await this.listOutputRoots();
+			const match = existing.find((root) => root.path.toLowerCase() === realPath.toLowerCase());
+			if (match) return match;
+			const entry: DocumentOutputRoot = { outputRootId: `or_${hashText(realPath).slice(0, 16)}`, label, path: realPath, addedAt: Date.now() };
+			await writeFileAtomic(this.outputRootsFile, JSON.stringify([...existing, entry], null, 2));
+			return entry;
+		});
+	}
+
+	async getOutputRoot(outputRootId: string): Promise<DocumentOutputRoot | undefined> {
+		return (await this.listOutputRoots()).find((root) => root.outputRootId === outputRootId);
+	}
+
+	// ---------------------------------------------------------------- work records
+
+	async getRecord(workId: string): Promise<DocumentWorkRecord | undefined> {
+		if (!isWorkId(workId)) return undefined;
+		const raw = await readJsonResilient(join(this.workDir(workId), "work.json"));
+		const record = parseDocumentWorkRecord(raw);
+		if (!record) {
+			if (raw !== undefined) this.logger?.warn("document-work", "Unreadable work record", { workId });
+			return undefined;
+		}
+		return record;
+	}
+
+	async saveRecord(record: DocumentWorkRecord): Promise<void> {
+		await writeFileAtomic(join(this.workDir(record.workId), "work.json"), JSON.stringify(record, null, 2));
+		await writeFileAtomic(join(this.rootDir, "sessions", `${hashText(record.sessionId)}.json`), JSON.stringify({ sessionId: record.sessionId, workId: record.workId }));
+	}
+
+	async listWorkIdsForSession(sessionId: string): Promise<string[]> {
+		const raw = await readJsonResilient(join(this.rootDir, "sessions", `${hashText(sessionId)}.json`));
+		if (typeof raw !== "object" || raw === null) return [];
+		const workId = Reflect.get(raw, "workId");
+		const stored = Reflect.get(raw, "sessionId");
+		return isWorkId(workId) && stored === sessionId ? [workId] : [];
+	}
+
+	/**
+	 * 乐观并发的唯一写入口。`expectedRevision` 为 undefined 时只允许创建；
+	 * 传入数字时必须与磁盘一致，否则返回带 currentRevision 的冲突。
+	 */
+	async mutateRecord(workId: string, expectedRevision: number | undefined, mutate: (record: DocumentWorkRecord) => DocumentWorkRecord | undefined): Promise<WorkResult<DocumentWorkRecord>> {
+		return this.mutex.run(`work:${workId}`, async () => {
+			const existing = await this.getRecord(workId);
+			if (!existing) return workFailure<DocumentWorkRecord>("WORK_NOT_FOUND");
+			if (expectedRevision === undefined) return workFailure<DocumentWorkRecord>("IDEMPOTENCY_CONFLICT");
+			if (existing.revision !== expectedRevision) return workFailure<DocumentWorkRecord>("REVISION_CONFLICT", undefined, existing.revision);
+			const mutated = mutate(existing);
+			if (!mutated) return workFailure<DocumentWorkRecord>("INVALID_INPUT");
+			const next: DocumentWorkRecord = { ...mutated, revision: existing.revision + 1, updatedAt: Date.now() };
+			await this.saveRecord(next);
+			return workSuccess(next);
+		});
+	}
+
+	async createRecord(record: DocumentWorkRecord): Promise<WorkResult<DocumentWorkRecord>> {
+		return this.mutex.run(`work:${record.workId}`, async () => {
+			const existing = await this.getRecord(record.workId);
+			if (existing) return workSuccess(existing);
+			await this.saveRecord(record);
+			return workSuccess(record);
+		});
+	}
+
+	// ---------------------------------------------------------------- idempotency
+
+	private idempotencyFile(requestId: string): string {
+		return join(this.rootDir, "idempotency", `${requestId}.json`);
+	}
+
+	/** 同 requestId 不同载荷必须显式失败，不能悄悄按后来的载荷执行。 */
+	async readIdempotent(requestId: string, requestDigest: string): Promise<{ kind: "miss" } | { kind: "hit"; payload: unknown } | { kind: "conflict" }> {
+		if (!isRequestId(requestId)) return { kind: "conflict" };
+		const raw = await readJsonResilient(this.idempotencyFile(requestId));
+		if (raw === undefined) return { kind: "miss" };
+		if (typeof raw !== "object" || raw === null) return { kind: "conflict" };
+		const entry = raw as Partial<IdempotencyEntry>;
+		if (typeof entry.requestDigest !== "string") return { kind: "conflict" };
+		if (entry.requestDigest !== requestDigest) return { kind: "conflict" };
+		return { kind: "hit", payload: entry.payload };
+	}
+
+	async writeIdempotent(requestId: string, requestDigest: string, payload: unknown): Promise<void> {
+		const entry: IdempotencyEntry = { requestDigest, payload };
+		await writeFileAtomic(this.idempotencyFile(requestId), JSON.stringify(entry));
+	}
+
+	// ---------------------------------------------------------------- operations / preparations / versions
+
+	private operationsDir(workId: string): string {
+		return join(this.workDir(workId), "operations");
+	}
+
+	async saveOperation(operation: DocumentWorkOperation): Promise<void> {
+		await writeFileAtomic(join(this.operationsDir(operation.workId), `${operation.requestId}.json`), JSON.stringify(operation, null, 2));
+	}
+
+	async getOperation(workId: string, requestId: string): Promise<DocumentWorkOperation | undefined> {
+		if (!isWorkId(workId) || !isRequestId(requestId)) return undefined;
+		const raw = await readJsonResilient(join(this.operationsDir(workId), `${requestId}.json`));
+		return parseDocumentWorkOperation(raw, workId);
+	}
+
+	async savePreparation(preparation: DocumentWorkPreparation): Promise<void> {
+		await writeFileAtomic(join(this.workDir(preparation.workId), "preparations", `${preparation.preparationId}.json`), JSON.stringify(preparation, null, 2));
+	}
+
+	async getPreparation(workId: string, preparationId: string): Promise<DocumentWorkPreparation | undefined> {
+		if (!isWorkId(workId) || !isWorkId(preparationId)) return undefined;
+		const raw = await readJsonResilient(join(this.workDir(workId), "preparations", `${preparationId}.json`));
+		return parseDocumentWorkPreparation(raw, workId);
+	}
+
+	async saveVersion(version: DocumentArtifactVersion): Promise<void> {
+		await writeFileAtomic(join(this.workDir(version.workId), "versions", `${version.versionId}.json`), JSON.stringify(version, null, 2));
+	}
+
+	async getVersion(workId: string, versionId: string): Promise<DocumentArtifactVersion | undefined> {
+		if (!isWorkId(workId) || !isWorkId(versionId)) return undefined;
+		const raw = await readJsonResilient(join(this.workDir(workId), "versions", `${versionId}.json`));
+		return parseArtifactVersion(raw, workId);
+	}
+
+	async listVersions(workId: string, versionIds: readonly string[]): Promise<DocumentArtifactVersion[]> {
+		const versions: DocumentArtifactVersion[] = [];
+		for (const versionId of versionIds) {
+			const version = await this.getVersion(workId, versionId);
+			if (version) versions.push(version);
+		}
+		return versions;
+	}
+
+	/**
+	 * 启动时结算：进程不在运行，任何进行中的分发都不可能完成。
+	 * 只改状态、不重放，也不把中断伪装成失败以外的结果。
+	 */
+	async recoverInterruptedOperation(operation: DocumentWorkOperation): Promise<DocumentWorkOperation> {
+		if (operation.phase !== "dispatching" && operation.phase !== "running" && operation.phase !== "inspecting") return operation;
+		const recovered: DocumentWorkOperation = {
+			...operation,
+			phase: operation.dispatchUnknown ? "unknown" : "interrupted",
+			error: operation.dispatchUnknown ? { code: "DISPATCH_UNKNOWN", retryable: false } : { code: "IO_ERROR", retryable: false, detail: "interrupted" },
+			updatedAt: Date.now(),
+		};
+		await this.saveOperation(recovered);
+		return recovered;
+	}
+
+	/** 只删本次尝试的 staging 目录；已归档版本与冻结副本永不清理。 */
+	async removeStaging(stagingDirectory: string): Promise<void> {
+		await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined);
+	}
+
+	/** 启动结算用：枚举全部工作记录。单条损坏只跳过它，不影响其他工作。 */
+	async listAllRecords(): Promise<DocumentWorkRecord[]> {
+		const worksDirectory = join(this.rootDir, "works");
+		const entries = await readdir(worksDirectory, { withFileTypes: true }).catch(() => []);
+		const records: DocumentWorkRecord[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const record = await this.getRecord(entry.name);
+			if (record) records.push(record);
+		}
+		return records;
+	}
+}

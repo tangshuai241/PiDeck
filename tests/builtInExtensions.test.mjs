@@ -50,9 +50,13 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
 		// Alignment is an entry point; its state parser must be packaged but never injected as an extension.
-		assert.equal(BUILT_IN_EXTENSIONS.length, 16);
+		assert.equal(BUILT_IN_EXTENSIONS.length, 18);
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-mode.ts"));
 		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-state.ts"));
+		// 文稿入口也是入口点；它的镜像类型文件必须随包分发，但不作为独立扩展注入。
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-document-work.ts"));
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-document-materials.ts"));
+		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-document-work-types.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-gui-bridge.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-ext-points.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-goal-mode.ts"));

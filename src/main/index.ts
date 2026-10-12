@@ -349,6 +349,10 @@ import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
 import { registerScratchPadIpc } from "./ipc/scratchPadIpc";
+import { registerDocumentWorkIpc } from "./ipc/documentWorkIpc";
+import { createDocumentWorkDomain, type DocumentWorkDomain } from "./document-work";
+import { isPathInsideAnyRoot } from "./document-work/DocumentWorkService";
+import { directoryLabel, resolveRealPath } from "./document-work/documentWorkPaths";
 import { registerPasteFilesIpc } from "./ipc/pasteFilesIpc";
 import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
@@ -467,6 +471,8 @@ let gitService: GitService;
 let gitRefsWatcher: GitRefsWatcher;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
+/** TPA 独立文稿域：自有元数据/归档/检查，只经既有 RPC 与既有会话协调器执行。 */
+let documentWorkDomain: DocumentWorkDomain | null = null;
 /** 全局模型 capability snapshot；仅在启动/配置变更时临时拉起 Pi。 */
 let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
@@ -714,6 +720,8 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 	};
 	sessionRuntimeCoordinator.observeRuntimeEvent(event);
 	automationRunCoordinator?.observeRuntimeEvent(event);
+	// 文稿域的稳定完成判据与服务端对齐快照都从这条既有事件流读取：不新增第二条通道。
+	if (sourceChannel === ipcChannels.agentsRuntimeState) documentWorkDomain?.observeRuntimeState(payload);
 	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
@@ -2593,6 +2601,17 @@ function registerIpc() {
 	registerResourceImportIpc(resourceImportManager);
 
 	registerScratchPadIpc({ appLogger });
+
+	// TPA 独立文稿：输出根与材料路径都只能来自用户经系统选择器的授权结果。
+	registerDocumentWorkIpc({
+		service: documentWorkDomain!.service,
+		getWindow: () => mainWindow,
+		registerOutputRoot: async (realPath) => {
+			const resolved = await resolveRealPath(realPath);
+			if (!resolved) return undefined;
+			return documentWorkDomain?.store.registerOutputRoot(resolved, directoryLabel(resolved));
+		},
+	});
 
 	// 通知历史落盘：showNotice 单点记录后推送主进程，重启可回灌（渲染层环形缓冲只服务当次会话）
 	registerNoticeHistoryIpc(
@@ -4860,6 +4879,58 @@ app
 		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
 		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
 		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
+
+		documentWorkDomain = createDocumentWorkDomain({
+			userDataPath: app.getPath("userData"),
+			runtimePort: {
+				readRuntime: async (sessionId) => {
+					const target = sessionRuntimeCoordinator.getTarget(sessionId);
+					if (!target) return undefined;
+					const result = await sessionRuntimeCoordinator.getRuntimeState(target);
+					if (!result.ok) return undefined;
+					const tab = agentManager.list().find((candidate) => candidate.id === target.agentId);
+					return {
+						target,
+						status: tab?.status ?? "idle",
+						state: result.value.value,
+						messages: agentManager.getMessages(target.agentId),
+					};
+				},
+				dispatch: async (input) => {
+					const result = await sessionRuntimeCoordinator.send({ sessionId: input.sessionId, requestId: input.requestId, message: input.message, expectedRuntime: input.expectedRuntime });
+					if (result.accepted) return { accepted: true, unknown: false };
+					return { accepted: false, unknown: result.delivery === "unknown", error: result.error };
+				},
+				abort: async (input) => {
+					const result = await sessionRuntimeCoordinator.abortRuntime(input.expectedRuntime);
+					return result.ok ? { accepted: true, unknown: false } : { accepted: false, unknown: false, error: result.error.code };
+				},
+				hasDispatchInFlight: (sessionId) => sessionRuntimeCoordinator.hasDispatchInFlight(sessionId),
+				subscribeOutputs: (listener) => agentManager.onOutput(listener),
+				subscribePiEvents: (listener) => agentManager.addLocalEventListener(listener),
+			},
+			materials: {
+				// 材料路径只接受用户经文件选择器授权的结果，或会话项目目录内的文件。
+				isAllowed: async (sessionId, hostPath) => {
+					if (documentWorkDomain?.service.allowedMaterialPaths(sessionId).includes(hostPath)) return true;
+					const record = sessionCatalog.getRecord(sessionId);
+					const projectPath = record ? projectStore.get(record.projectId)?.path : undefined;
+					if (!projectPath) return false;
+					return isPathInsideAnyRoot([projectPath], hostPath);
+				},
+			},
+			onChanged: (event) => {
+				const window = mainWindow;
+				if (window && !window.isDestroyed()) window.webContents.send(ipcChannels.documentWorkChanged, event);
+			},
+			logger: appLogger,
+		});
+		// 进程重启后不自动重放：进行中的操作统一结算成 interrupted / unknown。
+		void documentWorkDomain.service.recoverOnStartup().catch((error) => appLogger.warn("document-work", "Startup recovery failed", { error: error instanceof Error ? error.message : String(error) }));
+		quitCleanup.register("document-work", () => {
+			void documentWorkDomain?.dispose();
+			documentWorkDomain = null;
+		});
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({

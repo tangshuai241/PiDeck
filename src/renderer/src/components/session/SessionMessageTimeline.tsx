@@ -6,6 +6,7 @@ import type { ComponentProps, ReactNode, Ref, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
 import { SessionAlignmentTimeline } from "./SessionAlignmentTimeline";
+import { SessionDocumentWorkTimeline } from "./SessionDocumentWorkTimeline";
 import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import { Button } from "../ui-shadcn/button";
 import { DiagnosticMessageCard, EmptyState, MultiSelectModal, RespondingIndicator, TurnRow, UserBubble, stripMarkdown } from "./SurfaceParts";
@@ -948,6 +949,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 					})}
 
 					{sessionId && <SessionAlignmentTimeline sessionId={sessionId} />}
+
+					{sessionId && <SessionDocumentWorkTimeline sessionId={sessionId} />}
 
 					{hasActiveConversation && !cancellingUi && isRuntimeBusy && (
 						<RespondingIndicator isCompacting={isCompacting} isStarting={activeConversationStatus === "starting"} isExecutingTool={activeRuntimeState?.isExecutingTool} executingToolName={activeRuntimeState?.executingToolName} liveTextStreaming={liveTextStreaming} liveThinkingStreaming={liveThinkingStreaming} />

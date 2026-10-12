@@ -1130,6 +1130,14 @@ export class SessionRuntimeCoordinator {
 	}
 
 	/**
+	 * 只读版在途分发查询（文稿域结算判据用）：有在途 prompt 时不算「稳定完成」。
+	 * 不抛异常，避免把「忙」当成错误处理。
+	 */
+	hasDispatchInFlight(sessionId: string): boolean {
+		return this.hasDispatchLease(sessionId, this.getAgentId(sessionId));
+	}
+
+	/**
 	 * DSH fork/clone 的绑定预留（C10）：执行期间占用 replacement 槽位，阻止并发
 	 * restart/其他 replacement 命令交错（restart 的 reserveBoundRuntime 会发现
 	 * replacement 已被占用而拒绝）；执行完成后释放。DSH fork 保持同一

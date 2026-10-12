@@ -1984,6 +1984,19 @@ export function createPreviewApi(): PiDesktopApi {
 			previewCron: async () => ({ valid: true, nextRuns: [] }),
 			onChanged: () => () => {},
 		},
+		// TPA 独立文稿：预览/Web 不重建文稿链路，返回结构化「不可用」，让 UI 明确禁用而不是假装成功。
+		documentWork: {
+			create: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			get: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			list: async () => [],
+			prepare: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			start: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			operation: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			cancel: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			chooseOutputRoot: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			chooseMaterials: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			onChanged: () => () => {},
+		},
 		cua: {
 			onApprovalRequest: () => () => {},
 			sendApprovalResponse: async () => {},

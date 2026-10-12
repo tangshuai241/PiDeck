@@ -36,6 +36,9 @@ export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-nul-redirect-fix.ts",
 	"pi-deck-plan-mode.ts",
 	"pi-deck-alignment-mode.ts",
+	// TPA 文稿：绑定/成果候选汇报在先在，材料读取工具紧随（读绑定分支里的 materialId）。
+	"pi-deck-document-work.ts",
+	"pi-deck-document-materials.ts",
 	"pi-deck-retry-no-body.ts",
 	"pi-deck-security-gate.ts",
 	"pi-deck-session-title.ts",
