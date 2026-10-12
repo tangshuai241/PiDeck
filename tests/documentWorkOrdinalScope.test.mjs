@@ -31,6 +31,10 @@ async function mountWorkWithBase(harness) {
 	assert.equal((await startRound(harness, view, prepared, "req-start", { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 })).ok, true);
 	await harness.finishRound(BASE_MD);
 	assert.equal((await harness.terminal(view.workId, "req-start")).phase, "archived");
+	// 归档先把 operation 写成终态，再发 `/tpa-work release` 并清租约：只等相位会让夹具在
+	// 释放还在途时返回，后续用例捕到的 dispatched.length 会在断言前被这一条 release 顶大。
+	// drain() 等的就是本次 attempt 的结算协程（不关停服务），因此这里把首轮彻底收敛后再交夹具。
+	await harness.domain.service.drain();
 	return view;
 }
 
