@@ -7,13 +7,15 @@
  * 边界声明：
  * - Pi 仍唯一负责模型、工具和原生会话；这里只经 `SessionRuntimeCoordinator` 既有的
  *   `send`/`abortRuntime` 与 `AgentManager` 既有的事件订阅工作，不新增第二条通道；
- * - 主进程不写运行中的 Pi JSONL：补登记走 `SessionHistoryReader` 的只读解析；
+ * - 主进程不写运行中的 Pi JSONL：补登记与授权核对走 `SessionHistoryReader` 的只读解析；
+ * - **原生身份**：绑定载荷同时带稳定会话 id 与原生 Pi 会话 id（`tab.sessionId`），
+ *   扩展只核对后者，主进程两者都核；
  * - 目录选择走 Electron 原生对话框，路径只在主进程内使用。
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentRuntimeState, SessionRuntimeTarget, SendSessionPromptResult } from "../../shared/types";
-import type { DocumentArtifactCandidateReport, DocumentWorkBindingState, DocumentWorkChangedEvent } from "../../shared/types/documentWork";
+import type { AgentRuntimeState, AgentTab, SessionRuntimeTarget, SendSessionPromptResult } from "../../shared/types";
+import type { DocumentArtifactCandidateReport, DocumentWorkBindingState, DocumentWorkChangedEvent, DocumentWorkRevisionIntent } from "../../shared/types/documentWork";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { registerDocumentWorkIpc } from "../ipc/documentWorkIpc";
 import { DocumentArchiveService } from "./DocumentArchiveService";
@@ -73,13 +75,16 @@ export const nodeDocumentPathFs: DocumentPathFsPort = {
 };
 
 export type DocumentWorkAppHost = {
-	/** 读取某一轮用户消息的原文（授权核对）。 */
-	readMessageFullText(agentId: string, messageId: string): Promise<{ text: string }>;
-	/** 活动分支上的文稿绑定与候选汇报（补登记）。 */
-	readDocumentWorkHistory(agentId: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[] }>;
+	/** 一轮用户消息的权威快照（角色/当前正文/指纹/是否最后一条用户消息）。 */
+	readUserTurnSnapshot(agentId: string, entryId: string): Promise<{ entryId: string; role: string; text: string; textDigest: string; isLatestUserTurn: boolean } | undefined>;
+	/** 原生 Pi 会话身份与项目目录。 */
+	readAgentRuntimeIdentity(agentId: string): { piSessionId?: string; sessionPath?: string; cwd?: string } | undefined;
+	/** 活动分支上的文稿绑定、候选汇报与改稿意向（补登记）。 */
+	readDocumentWorkHistory(agentId: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[]; intents: DocumentWorkRevisionIntent[] }>;
 	getRuntimeState(agentId: string): Promise<AgentRuntimeState>;
 	addLocalEventListener(listener: (agentId: string, event: unknown) => void): () => void;
 	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void;
+	list(): AgentTab[];
 };
 
 export type DocumentWorkCoordinatorHost = {
@@ -95,13 +100,16 @@ export type DocumentWorkAssemblyDeps = {
 	coordinator: DocumentWorkCoordinatorHost;
 	chooseDirectory: (title: string) => Promise<string | undefined>;
 	broadcast: (event: DocumentWorkChangedEvent) => void;
+	/** 检查 worker 与 core 所在目录的候选（打包态 resources/document-work / 开发态仓库同目录）。 */
+	inspectionPaths?: readonly string[];
 };
 
 export type DocumentWorkAssembly = {
 	service: DocumentWorkService;
 	store: DocumentWorkStore;
 	adapter: DocumentWorkRuntimeAdapter;
-	/** 退出/重启时的配对清理：退订事件、等待在途编排收口。 */
+	inspection: DocumentInspectionService;
+	/** 退出/重启时的配对清理：退订事件、终止 worker、等待在途编排收口。 */
 	dispose: () => Promise<void>;
 };
 
@@ -116,6 +124,16 @@ function toAlignmentSnapshot(alignment: AlignmentState | null | undefined): Docu
 	};
 }
 
+/** 依次尝试候选目录：worker 与 core 必须**成对**存在，否则视为不可用（记 unverified）。 */
+export function resolveInspectionWorkerPaths(dirs: readonly string[]): { workerPath: string; corePath: string } | undefined {
+	for (const dir of dirs) {
+		const workerPath = join(dir, "documentInspectionWorker.cjs");
+		const corePath = join(dir, "documentInspectionCore.cjs");
+		if (existsSync(workerPath) && existsSync(corePath)) return { workerPath, corePath };
+	}
+	return undefined;
+}
+
 export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWorkAssembly {
 	const workRoot = join(deps.userDataDir, "document-work");
 	const store = new DocumentWorkStore({ dir: workRoot });
@@ -125,12 +143,22 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 			if (!stat || !stat.isFile() || stat.size > maxBytes) return undefined;
 			return nodeDocumentPathFs.readFile(path);
 		},
+		resolveWorkerPaths: () => resolveInspectionWorkerPaths(deps.inspectionPaths ?? []),
 	});
 
 	const runtime: DocumentWorkRuntimePort = {
 		async resolveRuntime(sessionId) {
 			const target = deps.coordinator.getTarget(sessionId);
-			return target ? { sessionId: target.sessionId, agentId: target.agentId, runtimeGeneration: target.runtimeGeneration } : undefined;
+			if (!target) return undefined;
+			const identity = deps.host.readAgentRuntimeIdentity(target.agentId);
+			if (!identity) return undefined;
+			return {
+				sessionId: target.sessionId,
+				agentId: target.agentId,
+				runtimeGeneration: target.runtimeGeneration,
+				...(identity.piSessionId ? { piSessionId: identity.piSessionId } : {}),
+				...(identity.cwd ? { projectRoot: identity.cwd } : {}),
+			};
 		},
 		readRuntimeBinding(agentId) {
 			return deps.coordinator.getRuntimeBinding(agentId);
@@ -143,12 +171,14 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 				return undefined;
 			}
 		},
-		async readUserTurnText(sessionId, turnId) {
-			const target = deps.coordinator.getTarget(sessionId);
+		async readUserTurn(input) {
+			const target = deps.coordinator.getTarget(input.sessionId);
 			if (!target) return undefined;
 			try {
-				const result = await deps.host.readMessageFullText(target.agentId, turnId);
-				return typeof result.text === "string" ? result.text : undefined;
+				const snapshot = await deps.host.readUserTurnSnapshot(target.agentId, input.turnId);
+				if (!snapshot) return undefined;
+				const role = snapshot.role === "user" || snapshot.role === "assistant" || snapshot.role === "system" || snapshot.role === "tool" ? snapshot.role : "other";
+				return { entryId: snapshot.entryId, role, text: snapshot.text, textDigest: snapshot.textDigest, isLatestUserTurn: snapshot.isLatestUserTurn };
 			} catch {
 				return undefined;
 			}
@@ -181,8 +211,22 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 
 	const adapter = new DocumentWorkRuntimeAdapter({ ports: runtime, events: deps.host });
 	const archive = new DocumentArchiveService({ store, pathFs: nodeDocumentPathFs, workRoot, inspection });
-	const service = new DocumentWorkService({ store, runtime, adapter, archive, pathFs: nodeDocumentPathFs, workRoot, emit: deps.broadcast });
+	const service = new DocumentWorkService({
+		store,
+		runtime,
+		adapter,
+		archive,
+		pathFs: nodeDocumentPathFs,
+		workRoot,
+		emit: deps.broadcast,
+		readBaseHeadings: (absolutePath) => inspection.listHeadings(absolutePath),
+	});
 	adapter.start();
+	// 普通聊天的改稿意向只作**候选**：主进程在这里重新验证、等稳定点、再决定是否派发。
+	adapter.subscribe((event) => {
+		if (event.kind !== "intent" || event.stale) return;
+		void service.handleRevisionIntent({ target: event.target, intent: event.intent }).catch(() => undefined);
+	});
 
 	registerDocumentWorkIpc({ service, store, chooseDirectory: deps.chooseDirectory, broadcast: deps.broadcast });
 
@@ -190,8 +234,10 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 		service,
 		store,
 		adapter,
+		inspection,
 		dispose: async () => {
 			adapter.dispose();
+			await inspection.shutdown();
 			await service.shutdown();
 		},
 	};

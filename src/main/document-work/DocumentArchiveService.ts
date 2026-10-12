@@ -52,14 +52,19 @@ export class DocumentArchiveService {
 		});
 	}
 
-	/** staging 目录 + 冻结基稿副本；复制前后指纹不一致直接失败（BASE_CHANGED）。 */
-	async freezePreparation(input: { preparation: DocumentWorkPreparation; outputRootPath: string }): Promise<WorkResult<{ stagingAbsolutePath: string; frozenBaseRelativePath?: string }>> {
+	/**
+	 * staging 目录 + 冻结基稿副本；复制前后指纹不一致直接失败（BASE_CHANGED）。
+	 *
+	 * 先冻结再定范围：改稿范围要落到冻结基稿里真实存在的章节上，所以准备阶段
+	 * 需要拿到冻结副本的绝对路径。
+	 */
+	async prepareStaging(input: { outputRootPath: string; outputRelativeDir: string; stagingRelativeDir: string; base?: DocumentWorkPreparation["base"] }): Promise<WorkResult<{ stagingAbsolutePath: string; frozenBaseRelativePath?: string; frozenBaseAbsolutePath?: string }>> {
 		const artifacts = this.storeFor(input.outputRootPath);
-		const layout = artifacts.ensureLayout(input.preparation.outputRelativeDir);
+		const layout = artifacts.ensureLayout(input.outputRelativeDir);
 		if ("error" in layout) return layout;
-		const staging = artifacts.createStaging(input.preparation.outputRelativeDir, input.preparation.stagingRelativeDir.split("/").pop() ?? "");
+		const staging = artifacts.createStaging(input.outputRelativeDir, input.stagingRelativeDir.split("/").pop() ?? "");
 		if ("error" in staging) return staging;
-		const base = input.preparation.base;
+		const base = input.base;
 		if (!base) return workOk({ stagingAbsolutePath: staging.value.absolutePath });
 		const source = resolveWithinRoot(this.deps.pathFs, input.outputRootPath, base.relativePath);
 		if (!source.ok) return workFail(source.error.code, false, { detail: source.error.detail });
@@ -69,11 +74,11 @@ export class DocumentArchiveService {
 		} catch {
 			return workFail("IO_ERROR", true, { detail: "failed to prepare the frozen base directory" });
 		}
-		const frozenRelativePath = `${input.preparation.stagingRelativeDir}/${STAGING_INTERNAL_DIR}/base/${basename(base.relativePath)}`;
+		const frozenRelativePath = `${input.stagingRelativeDir}/${STAGING_INTERNAL_DIR}/base/${basename(base.relativePath)}`;
 		const destination = join(internalDir, basename(base.relativePath));
 		const copied = artifacts.copyVerified({ sourceAbsolutePath: source.absolutePath, destinationAbsolutePath: destination, expectedSha256: base.sha256 });
 		if ("error" in copied) return copied;
-		return workOk({ stagingAbsolutePath: staging.value.absolutePath, frozenBaseRelativePath: frozenRelativePath });
+		return workOk({ stagingAbsolutePath: staging.value.absolutePath, frozenBaseRelativePath: frozenRelativePath, frozenBaseAbsolutePath: destination });
 	}
 
 	/** 等待权威稳定点；`agent_end` 只用于识别中断，不用于结算。 */

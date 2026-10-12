@@ -1,14 +1,25 @@
 /**
- * 文稿域测试夹具：内存文件系统、假运行时端口、合成文稿。
+ * 文稿域测试夹具：内存文件系统、假运行时端口、合成文稿与合成 OOXML。
  *
  * 三条约定（与仓库测试标准一致）：
  * - 不依赖真实网络/模型/Electron/Pi 进程：运行时端口全是注入的假实现；
  * - 文件行为用内存 fs 模拟（含符号链接），需要真实字节时再用临时目录；
  * - 夹具构造完整对象（不用 `as` 强转绕过类型），生产类型变化会在这里红灯。
+ *
+ * 身份约定：稳定会话 id（catalog）与原生 Pi 会话 id 默认**不同**，
+ * 因为真实新草稿就是这样；任何"两者相等才通过"的实现都会在这里暴露。
  */
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+export const STABLE_SESSION = "session_17afa0c2";
+export const NATIVE_SESSION = "pi-native-9c41-4d0b";
+export const WORK_ID = "work_1";
+export const ATTEMPT_ID = "attempt_1";
+export const PREPARATION_ID = "prep_1";
+export const DIGEST = "digest-1";
 
 /** 内存文件系统：支持目录、文件、符号链接；`faults` 用来注入写入/复制失败。 */
 export function createMemoryFs(seed = {}) {
@@ -160,68 +171,48 @@ export function createTempDir(prefix = "pideck-document-work-") {
 	return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** 完整路径 fs（真实磁盘）：给需要真实字节的检查/归档用例。 */
-export function createNodePathFs() {
-	return {
-		realpath: (path) => path,
-		stat: (path) => undefined,
-		readFile: () => undefined,
-		exists: () => false,
-		mkdirExclusive: () => false,
-		mkdirRecursive: () => undefined,
-		copyFile: () => undefined,
-		remove: () => undefined,
-		writeFile: () => undefined,
-		listDir: () => [],
-	};
-}
-
-/** 假运行时端口：记录所有调用，便于断言"未知分发不再调用 RPC"。 */
+/**
+ * 假运行时端口：记录所有调用，便于断言"未知分发不再调用 RPC"。
+ *
+ * `target` 默认带 `piSessionId`（原生身份）与 `projectRoot`；两者都是真实装配会提供的。
+ */
 export function createFakeRuntime(options = {}) {
 	const calls = [];
-	const reports = [];
-	const bindings = [];
-	const history = options.history ?? { bindings: [], reports: [] };
-	const target = options.target ?? { sessionId: "session-1", agentId: "agent-1", runtimeGeneration: 1 };
-	return {
-		calls,
-		reports,
-		bindings,
-		history,
-		target,
-		port: {
-			async resolveRuntime(sessionId) {
-				calls.push({ kind: "resolveRuntime", sessionId });
-				// 返回副本：真实协调器每次给新的快照对象，服务侧必须靠字段比较而不是对象身份。
-				if (options.target === null || sessionId !== target.sessionId) return undefined;
-				return { ...target };
-			},
-			readRuntimeBinding(agentId) {
-				return options.target === null || agentId !== target.agentId ? undefined : { sessionId: target.sessionId, runtimeGeneration: target.runtimeGeneration };
-			},
-			async readAlignment() {
-				calls.push({ kind: "readAlignment" });
-				return options.alignment;
-			},
-			async readUserTurnText(sessionId, turnId) {
-				calls.push({ kind: "readUserTurnText", sessionId, turnId });
-				return options.turnTexts?.[turnId];
-			},
-			async runtimeFlags() {
-				return { busy: options.busy === true, queued: options.queued === true };
-			},
-			async sendControl(input) {
-				calls.push({ kind: "sendControl", message: input.message, requestId: input.requestId });
-				return options.rejectSend ? { accepted: false, error: "busy" } : { accepted: true };
-			},
-			async abort() {
-				calls.push({ kind: "abort" });
-			},
-			async readHistory() {
-				return history;
-			},
+	const history = options.history ?? { bindings: [], reports: [], intents: [] };
+	const target = options.target ?? { sessionId: STABLE_SESSION, agentId: "agent-1", runtimeGeneration: 1, piSessionId: NATIVE_SESSION, projectRoot: "C:/project" };
+	const port = {
+		async resolveRuntime(sessionId) {
+			calls.push({ kind: "resolveRuntime", sessionId });
+			// 返回副本：真实协调器每次给新的快照对象，服务侧必须靠字段比较而不是对象身份。
+			if (options.target === null || sessionId !== target.sessionId) return undefined;
+			return { ...target };
+		},
+		readRuntimeBinding(agentId) {
+			return options.target === null || agentId !== target.agentId ? undefined : { sessionId: target.sessionId, runtimeGeneration: target.runtimeGeneration };
+		},
+		async readAlignment() {
+			calls.push({ kind: "readAlignment" });
+			return options.alignment;
+		},
+		async readUserTurn(input) {
+			calls.push({ kind: "readUserTurn", turnId: input.turnId });
+			return options.turns?.[input.turnId];
+		},
+		async runtimeFlags() {
+			return { busy: options.busy === true, queued: options.queued === true };
+		},
+		async sendControl(input) {
+			calls.push({ kind: "sendControl", message: input.message, requestId: input.requestId });
+			return options.rejectSend ? { accepted: false, error: "busy" } : { accepted: true };
+		},
+		async abort() {
+			calls.push({ kind: "abort" });
+		},
+		async readHistory() {
+			return history;
 		},
 	};
+	return { calls, history, target, port };
 }
 
 /** 假事件源：手动投递 pi 事件，模拟 message_end / agent_end / agent_settled。 */
@@ -249,45 +240,73 @@ export function createFakeEventSource() {
 	};
 }
 
-export function documentWorkStateMessage(state, report) {
-	return {
-		role: "custom",
-		customType: "tpa-document-work-state",
-		display: false,
-		details: { documentWork: state, ...(report ? { report } : {}) },
-	};
-}
-
 export function bindingState(overrides = {}) {
 	return {
 		schemaVersion: 1,
-		sessionId: "session-1",
-		workId: "work_1",
-		attemptId: "attempt_1",
-		preparationId: "prep_1",
-		digest: "digest-1",
+		sessionId: STABLE_SESSION,
+		nativeSessionId: NATIVE_SESSION,
+		workId: WORK_ID,
+		attemptId: ATTEMPT_ID,
+		preparationId: PREPARATION_ID,
+		digest: DIGEST,
 		phase: "bound",
 		...overrides,
 	};
 }
 
+export function documentWorkStateMessage(state, report, message = {}) {
+	return {
+		role: "custom",
+		customType: "tpa-document-work-state",
+		display: false,
+		details: { documentWork: state, ...(report ? { report } : {}) },
+		...message,
+	};
+}
+
+export function revisionIntentMessage(intent) {
+	return { role: "custom", customType: "tpa-document-work-intent", display: false, details: { intent } };
+}
+
+export function revisionIntent(overrides = {}) {
+	return {
+		schemaVersion: 1,
+		sessionId: STABLE_SESSION,
+		nativeSessionId: NATIVE_SESSION,
+		workId: WORK_ID,
+		sourceTurnId: "turn_1",
+		instructionDigest: "0".repeat(64),
+		summary: "please rewrite section two",
+		...overrides,
+	};
+}
+
+/** 一轮用户消息的权威快照（默认是最新用户轮次）。 */
+export function userTurn(text, overrides = {}) {
+	const digest = createHashHex(text.trim());
+	return { entryId: "turn_1", role: "user", text, textDigest: digest, isLatestUserTurn: true, ...overrides };
+}
+
 export function candidateReport(overrides = {}) {
 	return {
 		schemaVersion: 1,
-		workId: "work_1",
-		attemptId: "attempt_1",
-		preparationId: "prep_1",
-		digest: "digest-1",
+		workId: WORK_ID,
+		attemptId: ATTEMPT_ID,
+		preparationId: PREPARATION_ID,
+		digest: DIGEST,
 		reportId: "report_1",
-		artifacts: ["work_1/staging/prep_1/deliverable.docx"],
-		editableSources: ["work_1/staging/prep_1/source.md"],
+		artifacts: [`${WORK_ID}/staging/${PREPARATION_ID}/deliverable.docx`],
+		editableSources: [`${WORK_ID}/staging/${PREPARATION_ID}/source.md`],
 		summary: "first draft",
 		risks: [],
 		...overrides,
 	};
 }
 
-export const DOCX_MINIMAL = Buffer.from("PK\u0003\u0004placeholder", "utf8");
+/** 与生产一致的 sha256（十六进制小写）。 */
+export function createHashHex(value) {
+	return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 /** 极小的 CRC32（ZIP 头用）；表驱动会占篇幅，这里直接按位算。 */
 function crc32(data) {
@@ -300,7 +319,7 @@ function crc32(data) {
 }
 
 /**
- * 构造 stored（不压缩）ZIP：检查器的 OOXML 用例需要真实容器字节，
+ * 构造 stored（不压缩）ZIP：检查器用例需要真实容器字节，
  * 且需要精确控制部件名/数量/大小（解压炸弹、重复部件、超大部件等场景）。
  */
 export function makeZip(parts) {
@@ -313,24 +332,15 @@ export function makeZip(parts) {
 		const header = Buffer.alloc(30);
 		header.writeUInt32LE(0x04034b50, 0);
 		header.writeUInt16LE(20, 4);
-		header.writeUInt16LE(0, 6);
-		header.writeUInt16LE(0, 8);
-		header.writeUInt16LE(0, 10);
-		header.writeUInt16LE(0, 12);
 		header.writeUInt32LE(crc32(data), 14);
 		header.writeUInt32LE(data.length, 18);
 		header.writeUInt32LE(data.length, 22);
 		header.writeUInt16LE(nameBuffer.length, 26);
-		header.writeUInt16LE(0, 28);
 		const record = Buffer.concat([header, nameBuffer, data]);
 		const cd = Buffer.alloc(46);
 		cd.writeUInt32LE(0x02014b50, 0);
 		cd.writeUInt16LE(20, 4);
 		cd.writeUInt16LE(20, 6);
-		cd.writeUInt16LE(0, 8);
-		cd.writeUInt16LE(0, 10);
-		cd.writeUInt16LE(0, 12);
-		cd.writeUInt16LE(0, 14);
 		cd.writeUInt32LE(crc32(data), 16);
 		cd.writeUInt32LE(data.length, 20);
 		cd.writeUInt32LE(data.length, 24);
@@ -356,7 +366,7 @@ export function makeDocx(paragraphs, options = {}) {
 	const body = paragraphs
 		.map((paragraph) => {
 			const style = paragraph.headingLevel ? `<w:pPr><w:pStyle w:val="Heading${paragraph.headingLevel}"/></w:pPr>` : "";
-			return `<w:p>${style}<w:r><w:t>${paragraph.text}</w:t></w:r></w:p>`;
+			return `<w:p>${style}${paragraph.runs ?? ""}<w:r><w:t>${paragraph.text}</w:t></w:r></w:p>`;
 		})
 		.join("");
 	const parts = {
@@ -367,3 +377,5 @@ export function makeDocx(paragraphs, options = {}) {
 	for (const [name, value] of Object.entries(options.parts ?? {})) parts[name] = value;
 	return makeZip(parts);
 }
+
+export { crc32 };

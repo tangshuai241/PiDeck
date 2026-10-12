@@ -11,7 +11,7 @@
  * 3. 检查失败/未验证的版本保留，但不会被自动选为基稿。
  */
 import { workFail, workOk, type WorkResult } from "../../shared/documentWork";
-import type { DocumentArtifactVersion, DocumentChangeScope, DocumentInspectionStatus, DocumentBaseSelection } from "../../shared/types/documentWork";
+import type { DocumentArtifactVersion, DocumentChangeScope, DocumentBaseSelection } from "../../shared/types/documentWork";
 
 export type BaseSelectionInput = {
 	/** 本件工作已归档的版本（按 ordinal 升序）。 */
@@ -136,131 +136,95 @@ export function continueFromHandEdit(input: { versions: readonly DocumentArtifac
 	});
 }
 
-/** 定位块：正文比较以块为单位，标题层级用于把"允许修改章节"映射到实际段落。 */
-export type LocatedBlock = {
-	text: string;
-	/** 1 = 一级标题；undefined = 普通段落。 */
-	headingLevel?: number;
-};
+/** 改稿指令的范围判定结果：要么给出本轮冻结范围，要么要求澄清。 */
+export type InstructionScopeDecision = { kind: "scope"; scope: DocumentChangeScope; matched: string[]; note?: string } | { kind: "clarify"; reason: string };
 
-export type TextStructureFlags = {
-	/** 重复标题：无法唯一定位章节。 */
-	duplicateHeadings: boolean;
-	/** 未解析的修订（w:ins/w:del 等）。 */
-	unresolvedRevisions: boolean;
-	/** 无法定位的文本框/浮动内容。 */
-	unlocatedTextBoxes: boolean;
-	/** 存在未覆盖的部件或未知格式。 */
-	unknownParts: boolean;
-};
+/** 明确的改动动词；没有它们就不是执行指令（只是讨论/提问）。 */
+const CHANGE_VERBS = /(改|修|调整|重写|更新|补充|删|去掉|换|精简|润色|扩写|加|rewrite|revise|update|adjust|edit|change|add|remove|shorten|expand|replace)/i;
+/** 明确的禁止/否定：要求"别改，只解释"时绝不构成执行授权。 */
+const PROHIBITION = /(不要改|别改|先别改|不用改|无须改|无需改|不改动|先解释|只解释|只要解释|先说明|只说明|do ?n[o']?t (change|edit|modify|touch)|just explain|only explain|no changes? (yet|please)?)/i;
+/** 整篇授权：只有明确说了才成立。 */
+const WHOLE_DOCUMENT = /(全文|整篇|通篇|全篇|整份|整篇重写|rewrite (the )?(whole|entire)|from scratch|rewrite it all)/i;
+/** 「第N节/章/部分/条」的显式定位。 */
+const ORDINAL_SECTION = /第\s*([一二三四五六七八九十百\d]+)\s*(节|章|部分|条|段)/g;
+/** 引号里的标题（中英文引号）。 */
+const QUOTED = /[“"「『]([^”"」』]{1,80})[”"」』]/g;
 
-export type TextComparisonOutcome = {
-	status: DocumentInspectionStatus;
-	/** 覆盖范围说明（检查结论只说明实际覆盖的内容）。 */
-	coverage: string;
-	changes: string[];
-	reason?: string;
-};
-
-function normalized(value: string): string {
+function normalizedText(value: string): string {
 	return value.replace(/\s+/g, " ").trim();
 }
 
-/** 章节归属：返回每个块所属的顶层标题（含自身若是标题）。 */
-function sectionOf(blocks: readonly LocatedBlock[]): number[] {
-	const sections: number[] = [];
-	let current = -1;
-	blocks.forEach((block, index) => {
-		if (block.headingLevel !== undefined) current = index;
-		sections.push(current);
-	});
-	return sections;
-}
+const CHINESE_DIGITS = new Map<string, number>([
+	["一", 1],
+	["二", 2],
+	["三", 3],
+	["四", 4],
+	["五", 5],
+	["六", 6],
+	["七", 7],
+	["八", 8],
+	["九", 9],
+	["十", 10],
+]);
 
-function blockMatchesScope(block: LocatedBlock, sectionHeading: string | undefined, scope: DocumentChangeScope): boolean {
-	const text = normalized(block.text);
-	const heading = normalized(sectionHeading ?? "");
-	return scope.allow.some((entry) => {
-		const target = normalized(entry);
-		return (heading.length > 0 && (heading === target || heading.includes(target))) || text.includes(target);
-	});
-}
-
-function blockMustBePreserved(block: LocatedBlock, sectionHeading: string | undefined, scope: DocumentChangeScope): boolean {
-	const text = normalized(block.text);
-	const heading = normalized(sectionHeading ?? "");
-	return scope.preserve.some((entry) => {
-		const target = normalized(entry);
-		return (heading.length > 0 && (heading === target || heading.includes(target))) || text.includes(target);
-	});
+function ordinalValue(raw: string): number | undefined {
+	if (/^\d+$/.test(raw)) return Number(raw);
+	const trimmed = raw.replace(/^十/, "").trim();
+	if (!trimmed) return 10;
+	const digits = [...trimmed].map((character) => CHINESE_DIGITS.get(character));
+	if (digits.some((digit) => digit === undefined)) return undefined;
+	return (digits as number[]).reduce((total: number, digit: number) => total * 10 + digit, 0);
 }
 
 /**
- * 正文比较：先掐掉公共前后缀（得到真正的变化区间），再判定这些变化是否在授权范围内。
+ * 从本轮用户指令推导授权范围。
  *
- * - 出现未授权变化 → `failed`（保留候选版本，并给出具体位置）；
- * - 结构未覆盖（重复标题、未解析修订、文本框、未知部件）→ `unverified`，不因为
- *   "能对上的部分一样"就判通过；
- * - 结果只能说明实际覆盖的块数。
+ * 两条硬性规则：
+ * 1. 授权来自"这一轮由真实用户发出的指令"（由调用方验证角色与最新性），
+ *    这里只负责把**范围**说清楚；范围不能沿用上一轮的要求单，否则"只改第二节"
+ *    会被放宽成整篇授权；
+ * 2. 说不清范围就返回澄清（`APPROVAL_REQUIRED`），不做关键词以外的猜测、
+ *    也不默认允许改动。
+ *
+ * @param baseHeadings 冻结基稿里实际存在的标题（按文档顺序）；用于把"第N节"或
+ *   引号标题落到真实章节上。拿不到标题时按空处理，引用序号的指令会走澄清。
  */
-export function compareBlocks(input: { scope: DocumentChangeScope; baseBlocks: readonly LocatedBlock[]; candidateBlocks: readonly LocatedBlock[]; structure: TextStructureFlags }): TextComparisonOutcome {
-	const base = [...input.baseBlocks];
-	const candidate = [...input.candidateBlocks];
-	const coverage = `blocks=${base.length}->${candidate.length}`;
-	if (input.structure.duplicateHeadings || input.structure.unlocatedTextBoxes || input.structure.unknownParts) {
-		const reason = input.structure.duplicateHeadings ? "duplicate headings make section locations ambiguous" : input.structure.unlocatedTextBoxes ? "text boxes cannot be located" : "the document contains parts the inspector does not cover";
-		return { status: "unverified", coverage, changes: [], reason };
-	}
-	// 未解析修订意味着"看到的文字"和"最终呈现"可能不同，不能据此判通过。
-	if (input.structure.unresolvedRevisions) return { status: "unverified", coverage, changes: [], reason: "unresolved revisions change the effective text" };
-
-	let start = 0;
-	while (start < base.length && start < candidate.length && normalized(base[start].text) === normalized(candidate[start].text)) start++;
-	let endBase = base.length;
-	let endCandidate = candidate.length;
-	while (endBase > start && endCandidate > start && normalized(base[endBase - 1].text) === normalized(candidate[endCandidate - 1].text)) {
-		endBase--;
-		endCandidate--;
-	}
-	if (start === endBase && start === endCandidate) {
-		return { status: "passed", coverage, changes: [] };
-	}
-	const baseSections = sectionOf(base);
-	const candidateSections = sectionOf(candidate);
-	const changes: string[] = [];
-	let unauthorized = 0;
-	const record = (blocks: readonly LocatedBlock[], sections: readonly number[], from: number, to: number, offset: number) => {
-		for (let index = from; index < to; index++) {
-			const block = blocks[index];
-			const headingIndex = sections[index];
-			const heading = headingIndex >= 0 ? blocks[headingIndex]?.text : undefined;
-			// 参考候选/基稿两侧的章节名：改动章节标题本身时任一命中即可。
-			const otherHeadingIndex = headingIndex - offset;
-			const otherHeading = otherHeadingIndex >= 0 && otherHeadingIndex < (blocks === base ? candidate.length : base.length) ? (blocks === base ? candidate[otherHeadingIndex]?.text : base[otherHeadingIndex]?.text) : undefined;
-			const headingCandidate = heading ?? otherHeading ?? "";
-			if (blockMustBePreserved(block, headingCandidate, input.scope) || (otherHeading !== undefined && input.scope.preserve.some((entry) => normalized(entry) === normalized(otherHeading ?? "")))) {
-				unauthorized++;
-				changes.push(`preserved block changed: ${normalized(block.text).slice(0, 120)}`);
-				continue;
-			}
-			if (input.scope.wholeDocument) continue;
-			if (!blockMatchesScope(block, headingCandidate, input.scope) && !(otherHeading !== undefined && input.scope.allow.some((entry) => normalized(entry) === normalized(otherHeading ?? "")))) {
-				unauthorized++;
-				changes.push(`block outside the authorized scope changed: ${normalized(block.text).slice(0, 120)}`);
-			}
-			if (changes.length >= 40) return;
-		}
+export function deriveInstructionScope(input: { instruction: string; baseHeadings: readonly string[]; inheritedPreserve?: readonly string[] }): InstructionScopeDecision {
+	const instruction = normalizedText(input.instruction);
+	if (!instruction) return { kind: "clarify", reason: "the change request is empty" };
+	if (PROHIBITION.test(instruction)) return { kind: "clarify", reason: "the message asks not to change anything (or only to explain); confirm the change explicitly" };
+	const headings = input.baseHeadings.map((heading) => normalizedText(heading)).filter((heading) => heading.length > 0);
+	const preserve = [...new Set((input.inheritedPreserve ?? []).map((item) => normalizedText(item)).filter((item) => item.length > 0))];
+	const matched: string[] = [];
+	const pushMatch = (heading: string) => {
+		if (!matched.includes(heading)) matched.push(heading);
 	};
-	record(base, baseSections, start, endBase, endCandidate - endBase);
-	if (changes.length < 40) record(candidate, candidateSections, start, endCandidate, endBase - endCandidate);
-	if (unauthorized > 0) return { status: "failed", coverage, changes: changes.slice(0, 40), reason: `${unauthorized} change(s) were not authorized by this round's scope` };
-
-	// 授权范围内的改写，但两侧块数不一致说明有增删——覆盖范围如实记入结论。
-	const coverageDetail = `${coverage}; changedBlocks=${candidate.length - start - (candidate.length - endCandidate)}`;
-	return { status: "passed", coverage: coverageDetail, changes: [] };
-}
-
-/** 供服务层判定"这一版能不能当基稿"：检查失败/未验证不算合格。 */
-export function isUsableBaseStatus(status: DocumentInspectionStatus): boolean {
-	return status === "passed";
+	for (const heading of headings) {
+		// 标题必须原样出现在指令里才算点名；不做模糊相似度匹配。
+		if (instruction.includes(heading)) pushMatch(heading);
+	}
+	for (const match of instruction.matchAll(QUOTED)) {
+		const quoted = normalizedText(match[1] ?? "");
+		if (!quoted) continue;
+		const hit = headings.find((heading) => heading.includes(quoted) || quoted.includes(heading));
+		if (hit) pushMatch(hit);
+	}
+	for (const match of instruction.matchAll(ORDINAL_SECTION)) {
+		const value = ordinalValue(match[1] ?? "");
+		if (value === undefined || value < 1 || value > headings.length) {
+			if (value !== undefined && value >= 1) return { kind: "clarify", reason: `the document has ${headings.length} located headings, so section ${value} cannot be identified` };
+			continue;
+		}
+		pushMatch(headings[value - 1]);
+	}
+	const wholeDocument = WHOLE_DOCUMENT.test(instruction);
+	if (wholeDocument) {
+		// 明确整篇重写：允许全篇改动，但保留块（上一轮要求里的"必须保留"）仍然生效。
+		return { kind: "scope", scope: { allow: [], preserve, wholeDocument: true }, matched: [], note: "explicit whole-document rewrite" };
+	}
+	if (matched.length === 0 || !CHANGE_VERBS.test(instruction)) {
+		return { kind: "clarify", reason: "the change request does not name a section that exists in the document, or is not an explicit change instruction" };
+	}
+	const ordered = headings.filter((heading) => matched.includes(heading));
+	return { kind: "scope", scope: { allow: ordered, preserve, wholeDocument: false }, matched: ordered };
 }

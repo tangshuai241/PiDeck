@@ -17,6 +17,7 @@ export const DOCUMENT_WORK_PROTOCOL = {
 	command: "tpa-work",
 	materialTool: "tpa_read_material",
 	reportTool: "tpa_artifact_report",
+	intentType: "tpa-document-work-intent",
 	converterVersion: "anydoc-v1",
 	budgets: {
 		bindPayloadBytes: 64 * 1024,
@@ -34,6 +35,8 @@ export const DOCUMENT_WORK_PROTOCOL = {
 		concurrentConversions: 2,
 		bindAckMs: 20000,
 		settleMs: 15 * 60_000,
+		instructionChars: 4000,
+		workerTerminateMs: 1000,
 	},
 } as const;
 
@@ -82,11 +85,20 @@ function parseScope(value: unknown): DocumentChangeScope | undefined {
 	return { allow: [...(value.allow as string[])], preserve: [...(value.preserve as string[])], wholeDocument: value.wholeDocument };
 }
 
-export type DocumentMaterialBinding = { materialId: string; relativePath: string; sha256: string; converter: string };
+export type DocumentMaterialBinding = { materialId: string; rootId: string; relativePath: string; sha256: string; converter: string };
+
+/** 材料根：成果目录或会话项目目录（都来自用户已有授权入口）。 */
+export type DocumentMaterialRoot = { rootId: string; path: string; kind: string; label: string };
 
 export type DocumentWorkBindingPayload = {
 	schemaVersion: 1;
+	/** 稳定会话 id（catalog SessionRecord.id）：扩展只回显，不据此判断身份。 */
 	sessionId: string;
+	/** 原生 Pi 会话 id：**扩展身份校验只用这个**（pi 进程里只能看到它）。 */
+	nativeSessionId: string;
+	agentId: string;
+	runtimeGeneration: number;
+	outputRootId: string;
 	workId: string;
 	attemptId: string;
 	preparationId: string;
@@ -96,9 +108,12 @@ export type DocumentWorkBindingPayload = {
 	outputRelativeDir: string;
 	outputRootPath: string;
 	materials: DocumentMaterialBinding[];
-	base?: { relativePath: string; sha256: string };
+	materialRoots: DocumentMaterialRoot[];
+	base?: { relativePath: string; sha256: string; versionId?: string };
 	scope: DocumentChangeScope;
 	budgetBytes: number;
+	/** 改稿轮由主进程冻结的指令正文；扩展只用它触发回合，不做授权判断。 */
+	instruction?: { sourceTurnId: string; text: string; textDigest: string };
 	/** 本轮对应哪份确认单（初稿轮）；改稿轮没有这一项。 */
 	briefId?: string;
 	briefRevision?: number;
@@ -131,7 +146,11 @@ export function decodeBindingPayload(encoded: string): DocumentWorkBindingPayloa
 export function parseBindingPayload(value: unknown): DocumentWorkBindingPayload | undefined {
 	if (!isRecord(value) || value.schemaVersion !== DOCUMENT_WORK_PROTOCOL.schemaVersion) return undefined;
 	if (!isBoundedText(value.sessionId, 200) || !value.sessionId) return undefined;
-	if (!isBoundedId(value.workId) || !isBoundedId(value.attemptId) || !isBoundedId(value.preparationId)) return undefined;
+	// 原生会话 id 是身份校验的必需品：缺失即拒绝绑定（不退回"信任稳定 id"）。
+	if (!isBoundedText(value.nativeSessionId, 200) || !value.nativeSessionId) return undefined;
+	if (!isBoundedText(value.agentId, 200) || !value.agentId) return undefined;
+	if (typeof value.runtimeGeneration !== "number" || !Number.isSafeInteger(value.runtimeGeneration) || value.runtimeGeneration < 0) return undefined;
+	if (!isBoundedId(value.outputRootId)) return undefined;
 	if (!isBoundedText(value.digest, 200) || !value.digest) return undefined;
 	if (value.kind !== "create_document" && value.kind !== "revise_document") return undefined;
 	if (!isSafeRelativePath(value.stagingRelativeDir) || !isSafeRelativePath(value.outputRelativeDir)) return undefined;
@@ -141,13 +160,27 @@ export function parseBindingPayload(value: unknown): DocumentWorkBindingPayload 
 	if (!Array.isArray(value.materials) || value.materials.length > 32) return undefined;
 	const materials: DocumentMaterialBinding[] = [];
 	for (const item of value.materials) {
-		if (!isRecord(item) || !isBoundedId(item.materialId) || !isSafeRelativePath(item.relativePath) || !isHexDigest(item.sha256) || !isBoundedText(item.converter, 80) || !item.converter) return undefined;
-		materials.push({ materialId: item.materialId, relativePath: item.relativePath, sha256: item.sha256, converter: item.converter });
+		if (!isRecord(item) || !isBoundedId(item.materialId) || !isBoundedId(item.rootId) || !isSafeRelativePath(item.relativePath) || !isHexDigest(item.sha256) || !isBoundedText(item.converter, 80) || !item.converter) return undefined;
+		materials.push({ materialId: item.materialId, rootId: item.rootId, relativePath: item.relativePath, sha256: item.sha256, converter: item.converter });
 	}
-	let base: { relativePath: string; sha256: string } | undefined;
+	if (!Array.isArray(value.materialRoots) || value.materialRoots.length > 16) return undefined;
+	const materialRoots: DocumentMaterialRoot[] = [];
+	for (const item of value.materialRoots) {
+		if (!isRecord(item) || !isBoundedId(item.rootId) || !isBoundedText(item.path, 4000) || !item.path || !isBoundedText(item.label, 200) || !isBoundedText(item.kind, 40)) return undefined;
+		materialRoots.push({ rootId: item.rootId, path: item.path, kind: item.kind, label: item.label });
+	}
+	const rootIds = new Set(materialRoots.map((root) => root.rootId));
+	if (materials.some((material) => !rootIds.has(material.rootId))) return undefined;
+	let base: { relativePath: string; sha256: string; versionId?: string } | undefined;
 	if (value.base !== undefined) {
 		if (!isRecord(value.base) || !isSafeRelativePath(value.base.relativePath) || !isHexDigest(value.base.sha256)) return undefined;
-		base = { relativePath: value.base.relativePath, sha256: value.base.sha256 };
+		base = { relativePath: value.base.relativePath, sha256: value.base.sha256, ...(isBoundedId(value.base.versionId) ? { versionId: value.base.versionId } : {}) };
+	}
+	let instruction: { sourceTurnId: string; text: string; textDigest: string } | undefined;
+	if (value.instruction !== undefined) {
+		if (!isRecord(value.instruction) || !isBoundedId(value.instruction.sourceTurnId) || !isHexDigest(value.instruction.textDigest)) return undefined;
+		if (!isBoundedText(value.instruction.text, DOCUMENT_WORK_PROTOCOL.budgets.instructionChars) || !value.instruction.text) return undefined;
+		instruction = { sourceTurnId: value.instruction.sourceTurnId, text: value.instruction.text, textDigest: value.instruction.textDigest };
 	}
 	if (!isBoundedText(value.outputRootPath, 4000)) return undefined;
 	const briefId = value.briefId === undefined ? undefined : isBoundedId(value.briefId) ? value.briefId : null;
@@ -157,6 +190,10 @@ export function parseBindingPayload(value: unknown): DocumentWorkBindingPayload 
 	return {
 		schemaVersion: DOCUMENT_WORK_PROTOCOL.schemaVersion,
 		sessionId: value.sessionId,
+		nativeSessionId: value.nativeSessionId,
+		agentId: value.agentId,
+		runtimeGeneration: value.runtimeGeneration,
+		outputRootId: value.outputRootId,
 		workId: value.workId,
 		attemptId: value.attemptId,
 		preparationId: value.preparationId,
@@ -166,7 +203,9 @@ export function parseBindingPayload(value: unknown): DocumentWorkBindingPayload 
 		outputRelativeDir: value.outputRelativeDir,
 		outputRootPath: value.outputRootPath,
 		materials,
+		materialRoots,
 		...(base ? { base } : {}),
+		...(instruction ? { instruction } : {}),
 		scope,
 		budgetBytes: typeof value.budgetBytes === "number" && Number.isSafeInteger(value.budgetBytes) && value.budgetBytes > 0 ? value.budgetBytes : DOCUMENT_WORK_PROTOCOL.budgets.artifactBytes,
 		...(briefId === undefined ? {} : { briefId }),
@@ -187,7 +226,10 @@ export function contentDigest(data: Buffer | string): string {
 /** 绑定状态：`details.documentWork`，与主进程 parseBindingState 字段一致。 */
 export type DocumentWorkBindingState = {
 	schemaVersion: 1;
+	/** 稳定会话 id（catalog）；扩展只回显。 */
 	sessionId: string;
+	/** 原生 Pi 会话 id；主进程用它核对身份。 */
+	nativeSessionId: string;
 	workId: string;
 	attemptId: string;
 	preparationId: string;
@@ -201,13 +243,15 @@ export type DocumentWorkBindingState = {
 
 export function parseBindingState(value: unknown): DocumentWorkBindingState | undefined {
 	if (!isRecord(value) || value.schemaVersion !== DOCUMENT_WORK_PROTOCOL.schemaVersion) return undefined;
-	if (!isBoundedText(value.sessionId, 200) || !value.sessionId || !isBoundedId(value.workId) || !isBoundedId(value.attemptId) || !isBoundedId(value.preparationId)) return undefined;
+	if (!isBoundedText(value.sessionId, 200) || !value.sessionId || !isBoundedText(value.nativeSessionId, 200) || !value.nativeSessionId) return undefined;
+	if (!isBoundedId(value.workId) || !isBoundedId(value.attemptId) || !isBoundedId(value.preparationId)) return undefined;
 	if (!isBoundedText(value.digest, 200) || !value.digest) return undefined;
 	if (value.phase !== "bound" && value.phase !== "running" && value.phase !== "reported" && value.phase !== "failed") return undefined;
 	if (value.reportId !== undefined && !isBoundedId(value.reportId)) return undefined;
 	const state: DocumentWorkBindingState = {
 		schemaVersion: DOCUMENT_WORK_PROTOCOL.schemaVersion,
 		sessionId: value.sessionId,
+		nativeSessionId: value.nativeSessionId,
 		workId: value.workId,
 		attemptId: value.attemptId,
 		preparationId: value.preparationId,
@@ -266,4 +310,45 @@ export function ensureTrailingSeparatorFree(value: string): string {
 /** 汇报路径必须落在本轮 staging 目录内；越界直接拒绝。 */
 export function isInsideStaging(stagingRelativeDir: string, candidate: string): boolean {
 	return isSafeRelativePath(candidate) && candidate.startsWith(`${stagingRelativeDir}/`) && !candidate.includes("/_tpa/");
+}
+
+/** 改稿意向（候选）：形状不符直接丢弃，候选永远不能变成授权。 */
+export type DocumentWorkRevisionIntent = {
+	schemaVersion: 1;
+	sessionId: string;
+	nativeSessionId: string;
+	workId: string;
+	sourceTurnId: string;
+	instructionDigest: string;
+	summary: string;
+};
+
+export function parseRevisionIntent(value: unknown): DocumentWorkRevisionIntent | undefined {
+	if (!isRecord(value) || value.schemaVersion !== DOCUMENT_WORK_PROTOCOL.schemaVersion) return undefined;
+	if (!isBoundedText(value.sessionId, 200) || !value.sessionId || !isBoundedText(value.nativeSessionId, 200) || !value.nativeSessionId) return undefined;
+	if (!isBoundedId(value.workId) || !isBoundedId(value.sourceTurnId) || !isHexDigest(value.instructionDigest)) return undefined;
+	if (!isBoundedText(value.summary, 500)) return undefined;
+	return {
+		schemaVersion: DOCUMENT_WORK_PROTOCOL.schemaVersion,
+		sessionId: value.sessionId,
+		nativeSessionId: value.nativeSessionId,
+		workId: value.workId,
+		sourceTurnId: value.sourceTurnId,
+		instructionDigest: value.instructionDigest,
+		summary: value.summary,
+	};
+}
+
+/**
+ * 改稿指令的轻量前置判断：只为"要不要报候选"服务。
+ *
+ * 真正能不能授权、范围是什么，全部由主进程从权威轮次重新判定；这里宁可少报，
+ * 也不把讨论/否定/提问当成交付意图。
+ */
+export function looksLikeChangeRequest(text: string): boolean {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (!normalized || normalized.length > DOCUMENT_WORK_PROTOCOL.budgets.instructionChars) return false;
+	if (/(不要改|别改|先别改|不用改|保持原样|先解释|只解释|只要解释|do ?n[o']?t (change|edit|modify)|just explain|only explain)/i.test(normalized)) return false;
+	if (!/(改|修|调整|重写|更新|补充|删除|精简|润色|扩写|rewrite|revise|update|adjust|edit|change|add|remove|replace)/i.test(normalized)) return false;
+	return /(全文|整篇|通篇|全篇|第\s*[一二三四五六七八九十百\d]+\s*(节|章|部分|条|段)|[“"「『][^”"」』]{1,80}[”"」』]|rewrite (the )?(whole|entire))/i.test(normalized);
 }

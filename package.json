@@ -184,6 +184,13 @@
         ]
       },
       {
+        "from": "resources/document-work",
+        "to": "document-work",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "resources/skills",
         "to": "skills",
         "filter": [

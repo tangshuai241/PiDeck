@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionBranchNode, SessionBranchTree, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
-import { DOCUMENT_WORK_STATE_TYPE, parseArtifactCandidateReport, parseBindingState } from "../../shared/documentWork";
-import type { DocumentArtifactCandidateReport, DocumentWorkBindingState } from "../../shared/types/documentWork";
+import { DOCUMENT_WORK_INTENT_TYPE, DOCUMENT_WORK_STATE_TYPE, parseArtifactCandidateReport, parseBindingState, parseRevisionIntent } from "../../shared/documentWork";
+import type { DocumentArtifactCandidateReport, DocumentWorkBindingState, DocumentWorkRevisionIntent } from "../../shared/types/documentWork";
 import { ALIGNMENT_MESSAGE_TYPE, latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { isFileChangeToolName } from "../../shared/fileChanges";
@@ -649,13 +650,14 @@ export class SessionHistoryReader {
 	 * 只读、有界（最多各 16 条、单条 256KiB 上限），并且**不恢复执行授权**：
 	 * 补登记只用于把重启期间已经发生的候选汇报纳入核对，绝不触发新一轮制作。
 	 */
-	async readDocumentWorkEntries(sessionPath: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[] }> {
+	async readDocumentWorkEntries(sessionPath: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[]; intents: DocumentWorkRevisionIntent[] }> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
 		const bindings: DocumentWorkBindingState[] = [];
 		const reports: DocumentArtifactCandidateReport[] = [];
+		const intents: DocumentWorkRevisionIntent[] = [];
 		for (let position = index.activeBranch.length - 1; position >= 0; position--) {
 			const entry = index.activeBranch[position];
-			if (entry.role !== "custom" || entry.customType !== DOCUMENT_WORK_STATE_TYPE) continue;
+			if (entry.role !== "custom" || (entry.customType !== DOCUMENT_WORK_STATE_TYPE && entry.customType !== DOCUMENT_WORK_INTENT_TYPE)) continue;
 			if (entry.oversized || entry.byteLength > 256 * 1024) continue;
 			try {
 				const [raw] = await this.readIndexedRawLines(index.hostPath, [entry]);
@@ -665,15 +667,57 @@ export class SessionHistoryReader {
 				const details = message.details;
 				const binding = details.documentWork === undefined ? undefined : parseBindingState(details.documentWork);
 				const report = details.report === undefined ? undefined : parseArtifactCandidateReport(details.report);
+				const intent = details.intent === undefined ? undefined : parseRevisionIntent(details.intent);
 				if (binding && bindings.length < 16) bindings.push(binding);
 				if (report && reports.length < 16) reports.push(report);
-				if (bindings.length >= 16 && reports.length >= 16) break;
+				if (intent && intents.length < 16) intents.push(intent);
+				if (bindings.length >= 16 && reports.length >= 16 && intents.length >= 16) break;
 			} catch {
 				// 单条损坏不影响其它条目；补登记失败不阻断会话。
 				continue;
 			}
 		}
-		return { bindings, reports };
+		return { bindings, reports, intents };
+	}
+
+	/**
+	 * 文稿授权用的一轮用户消息快照：角色、**当前**正文（含编辑后的替换文本）、
+	 * 内容指纹，以及"是不是这条会话里最后一条用户消息"。
+	 *
+	 * 授权只认权威来源，所以这里刻意不走渲染层：正文从会话文件读，编辑过的正文
+	 * 用 context_edit 的替换文本，旧轮由"最后一条用户消息"判定挡掉。
+	 * 找不到条目返回 undefined（调用方按未授权处理）。
+	 */
+	async readUserTurnSnapshot(sessionPath: string, entryId: string): Promise<{ entryId: string; role: string; text: string; textDigest: string; isLatestUserTurn: boolean } | undefined> {
+		if (!entryId) return undefined;
+		let index: SessionDisplayIndex;
+		try {
+			index = await this.getSessionDisplayIndex(sessionPath);
+		} catch {
+			return undefined;
+		}
+		const entry = index.activeMessageEntries.find((candidate) => candidate.id === entryId);
+		if (!entry) return undefined;
+		const raw = await this.readIndexedSessionMessages(index.hostPath, [entry]);
+		const content = (raw[0] as { content?: unknown } | undefined)?.content;
+		const extracted = extractResendContent(content);
+		const replacement = index.contextEdits.replacementText.get(entry.id);
+		const text = replacement !== undefined ? replacement : extracted.text;
+		let latestUserId: string | undefined;
+		for (let position = index.activeBranch.length - 1; position >= 0; position--) {
+			const candidate = index.activeBranch[position];
+			if (candidate.role === "user") {
+				latestUserId = candidate.id;
+				break;
+			}
+		}
+		return {
+			entryId: entry.id,
+			role: typeof entry.role === "string" ? entry.role : "other",
+			text,
+			textDigest: createHash("sha256").update(text, "utf8").digest("hex"),
+			isLatestUserTurn: latestUserId === entry.id,
+		};
 	}
 
 	/**

@@ -385,3 +385,16 @@ node scripts/generate-extensions-manifest.mjs --check
 - 结构比较在检查服务内做异步让出与硬超时，没有独立 worker 线程；方案 §7 的"worker 执行"仍是后续项。
 - 检查器首版覆盖 docx/xlsx/pptx 容器与 Markdown/纯文本；PDF 等格式如实记 `unverified`。
 - `create` 的 `sourceTurnId` 记录的是本次提交的程序生成 id，仅作来源登记；授权一律在准备与分发阶段重新推导。
+
+## 13. 审查修正（实现 B，第二轮）
+
+主协调者独立审阅后指出六类缺口，本轮逐条修正并补了行为验证：
+
+1. **会话身份**：绑定载荷同时携带稳定 catalog 会话 id 与**原生 Pi 会话 id**，扩展只用后者校验（新草稿两者不同，旧实现会拒绝所有绑定）；主进程侧 `readAgentRuntimeIdentity` 取原生身份，恢复按原生 id 匹配，换代/旧 runtime 迟到消息被标 stale。联合测试用真实扩展 handler + 真实 service/adapter，覆盖恢复、restart 与迟到拒绝。
+2. **授权与当前范围**：首次制作只认**当前**对齐确认单（版本不符→失效、用户指令/未决问题→拒绝）；改稿授权要求该轮是**最后一条真实用户消息**且正文指纹与读回正文一致，角色必须是 user，否定句/提问/assistant 文本/旧轮/编辑后正文一律不授权；范围由**本轮指令**推导（"只改第二节"落到冻结基稿里真实存在的章节），不再沿用上一轮的全篇 scope。
+3. **普通聊天改稿入口**：扩展在普通聊天里只报 `tpa-document-work-intent` **候选**；主进程重新验证、等该回合权威稳定且同 runtime 后准备、bind 并只派发一次 `/tpa-work revise`，扩展用主进程冻结的指令正文触发回合。联合测试证明真的产出并归档了新版本。
+4. **Windows anydoc**：解析器把 npm `.cmd` shim 还原成 `node + 真实 JS 入口`（完全不经 shell），不再接受无扩展名的 bash shim；固定 argv、`shell:false`、同步 spawn 失败/非零退出/超时都结算；真实进程测试覆盖带空格路径与真机 `anydoc --version`。材料根扩到成果目录 + 会话项目目录。
+5. **检查器 worker**：解析与比较移到可终止的 `worker_threads` worker（`resources/document-work/*.cjs`，随包分发），2 秒硬截止用 `terminate()` 真打断，并发 2；页眉页脚正文、编号、表格、修订、文本框、重复标题、异常 ZIP/XML、超预算一律 `unverified`；同长度格式变化由逐块格式指纹（真实哈希）与整篇格式哈希证据支撑。程序格式检查不等于渲染验收。
+6. **档案损坏与幂等**：主档损坏时**不自动修复、不重建**，`.bak` 只作只读展示，损坏文件原样保留且写入与新执行被拒；`prepare/start/cancel` 全程持按 workId 的互斥锁，重复确认只发一次 approve 与实际 prompt，未知分发不重放。
+
+仍属未验收：真实模型端到端（初稿 → 改稿 → 重开）、完整 Electron 交互与安装包分发、Word 局部修改保真度、方案 §7 的性能目标（p95）未实测。

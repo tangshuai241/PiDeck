@@ -90,6 +90,11 @@ export function DocumentWorkCard(props: { sessionId: string; controls: SessionDo
 					<span>{t("documentWork.operationFailed", { code: operation.error.code })}</span>
 				</p>
 			)}
+			{controls.snapshot?.corrupt && (
+				<p role="status" aria-live="polite" className="text-destructive">
+					{t("documentWork.corruptRecord")}
+				</p>
+			)}
 			{controls.error && (
 				<p role="status" aria-live="polite" className="text-destructive">
 					{controls.error}

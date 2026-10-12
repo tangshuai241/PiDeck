@@ -129,7 +129,7 @@ test("损坏记录：保留原文件、停止写入、返回结构化错误", ()
 	assert.equal(write.ok, false);
 });
 
-test("主文件损坏但有可解析的 .bak 时原位修复", () => {
+test("主文件损坏但有可解析的 .bak 时只做只读展示，不原位修复", () => {
 	const { store, fs } = createStore();
 	const rootId = registerRoot(store);
 	const created = createWork(store, rootId);
@@ -137,10 +137,15 @@ test("主文件损坏但有可解析的 .bak 时原位修复", () => {
 	const backup = Buffer.from(fs.readFile(path));
 	fs.writeFile(`${path}.bak`, backup.toString("utf8"));
 	fs.writeFile(path, "{truncated");
+	// 关键语义：**不自动修复**。损坏文件原样保留，旧内容只作只读展示，
+	// 这样一次自动修复不会把旧授权"恢复"回来。
 	const read = store.readWork(created.value.workId);
-	assert.equal(read.ok, true);
-	assert.equal(read.value.record.workId, created.value.workId);
-	assert.equal(fs.readFile(path).toString("utf8").includes("{truncated"), false, "恢复后主文件必须是可解析内容");
+	assert.equal(read.ok, false);
+	assert.equal(read.error.code, "IO_ERROR");
+	assert.equal(fs.readFile(path).toString("utf8").includes("{truncated"), true, "损坏文件必须原样保留");
+	const display = store.readWorkForDisplay(created.value.workId);
+	assert.equal(display.corrupt?.repairedFromBackup, true);
+	assert.equal(display.record?.workId, created.value.workId);
 });
 
 test("未知 schemaVersion 的记录视为损坏，不补齐字段", () => {

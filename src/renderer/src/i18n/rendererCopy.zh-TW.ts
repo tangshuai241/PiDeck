@@ -612,6 +612,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"documentWork.accepted": "使用者已認可",
 	"documentWork.rejected": "使用者未認可",
 	"documentWork.operationFailed": "本輪未成功歸檔（{code}）。已保留輸入與中間檔案，不會自動重試。",
+	"documentWork.corruptRecord": "文稿記錄已損毀，僅作唯讀顯示；損毀檔案保留在磁碟上，不會自動修復，新的製作與改稿暫停。",
 	"documentWork.footnote": "成果由 TPA 自動歸檔：舊版保留，程式檢查與使用者認可分別記錄。檢查通過只說明實際涵蓋的內容。",
 	"documentWork.state.prepared": "已準備",
 	"documentWork.state.dispatching": "正在綁定",

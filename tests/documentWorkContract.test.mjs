@@ -83,7 +83,9 @@ test("准备记录不可变形态：改稿必须有基稿，范围与保留项�
 		requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 2 },
 		authorization: { kind: "revision_instruction", sourceTurnId: "turn_1" },
 		materials: [],
+		materialRoots: [{ rootId: "root_1", kind: "output_root", path: "C:/out", label: "out" }],
 		base: { versionId: "v0001_a", artifactId: "v0001_a:work/staging/prep/a.docx", relativePath: "work/staging/prep/a.docx", sha256: "a".repeat(64), bytes: 10, explicit: false, handEdited: false },
+		instruction: { sourceTurnId: "turn_1", text: "only section two", textDigest: "c".repeat(64) },
 		scope: { allow: ["section one"], preserve: ["section two"], wholeDocument: false },
 		stagingRelativeDir: "work/staging/prep_1",
 		outputRelativeDir: "work",
@@ -99,9 +101,11 @@ test("准备记录不可变形态：改稿必须有基稿，范围与保留项�
 });
 
 test("绑定状态与候选汇报解析有界且字段一致", () => {
-	const state = { schemaVersion: 1, sessionId: "session-1", workId: "work_1", attemptId: "attempt_1", preparationId: "prep_1", digest: "digest-1", phase: "reported", reportId: "report_1" };
+	const state = { schemaVersion: 1, sessionId: "session-1", nativeSessionId: "pi-native-1", workId: "work_1", attemptId: "attempt_1", preparationId: "prep_1", digest: "digest-1", phase: "reported", reportId: "report_1" };
 	assert.deepEqual(shared.parseBindingState(state)?.phase, "reported");
 	assert.equal(shared.parseBindingState({ ...state, phase: "approved" }), undefined);
+	// 原生会话 id 是身份判据，缺失即拒绝。
+	assert.equal(shared.parseBindingState({ ...state, nativeSessionId: undefined }), undefined);
 	assert.equal(extensionProtocol.parseBindingState({ ...state, schemaVersion: 3 }), undefined);
 
 	const report = {

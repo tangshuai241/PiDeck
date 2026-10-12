@@ -69,7 +69,7 @@ import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityD
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
-import type { DocumentArtifactCandidateReport, DocumentWorkBindingState } from "../../shared/types/documentWork";
+import type { DocumentArtifactCandidateReport, DocumentWorkBindingState, DocumentWorkRevisionIntent } from "../../shared/types/documentWork";
 import { isAlignmentActive, isAlignmentReadOnlyInputAllowed, PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
 import { latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
@@ -1193,10 +1193,27 @@ export class AgentManager {
 	 * 也不恢复任何执行授权。拿不到 sessionPath 时返回空结果而不是报错：
 	 * 补登记是尽力而为的核对路径。
 	 */
-	async readDocumentWorkHistory(agentId: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[] }> {
+	async readDocumentWorkHistory(agentId: string): Promise<{ bindings: DocumentWorkBindingState[]; reports: DocumentArtifactCandidateReport[]; intents: DocumentWorkRevisionIntent[] }> {
 		const sessionPath = this.agents.get(agentId)?.tab.sessionPath;
-		if (!sessionPath) return { bindings: [], reports: [] };
+		if (!sessionPath) return { bindings: [], reports: [], intents: [] };
 		return await this.sessionHistoryReader.readDocumentWorkEntries(sessionPath);
+	}
+
+	/**
+	 * 文稿授权用的一轮用户消息快照（角色 / 当前正文 / 指纹 / 是否最后一条用户消息）。
+	 * 只读转发到 SessionHistoryReader；调用方（文稿域）据此判定授权，不信任渲染层。
+	 */
+	async readUserTurnSnapshot(agentId: string, entryId: string): Promise<{ entryId: string; role: string; text: string; textDigest: string; isLatestUserTurn: boolean } | undefined> {
+		const sessionPath = this.agents.get(agentId)?.tab.sessionPath;
+		if (!sessionPath) return undefined;
+		return await this.sessionHistoryReader.readUserTurnSnapshot(sessionPath, entryId);
+	}
+
+	/** 会话项目目录与原生 Pi 会话身份：文稿绑定与材料根都要它。 */
+	readAgentRuntimeIdentity(agentId: string): { piSessionId?: string; sessionPath?: string; cwd?: string } | undefined {
+		const tab = this.agents.get(agentId)?.tab;
+		if (!tab) return undefined;
+		return { ...(tab.sessionId ? { piSessionId: tab.sessionId } : {}), ...(tab.sessionPath ? { sessionPath: tab.sessionPath } : {}), ...(tab.cwd ? { cwd: tab.cwd } : {}) };
 	}
 
 	/**

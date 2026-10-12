@@ -4871,6 +4871,8 @@ app
 			userDataDir: app.getPath("userData"),
 			host: agentManager,
 			coordinator: sessionRuntimeCoordinator,
+			// 检查 worker 与 core：打包态在 resources/document-work，开发态在仓库 resources/document-work。
+			inspectionPaths: [join(process.resourcesPath, "document-work"), join(app.getAppPath(), "resources", "document-work")],
 			chooseDirectory: async (title) => {
 				const result = mainWindow && !mainWindow.isDestroyed() ? await dialog.showOpenDialog(mainWindow, { title, properties: ["openDirectory", "createDirectory"] }) : { canceled: true, filePaths: [] as string[] };
 				return result.canceled ? undefined : result.filePaths[0];

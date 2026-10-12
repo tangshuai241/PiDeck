@@ -606,6 +606,7 @@ export const zhCN = {
 	"documentWork.accepted": "用户已认可",
 	"documentWork.rejected": "用户未认可",
 	"documentWork.operationFailed": "本轮没有归档成功（{code}）。已保留输入与中间文件，不会自动重试。",
+	"documentWork.corruptRecord": "文稿记录已损坏，只作只读显示；损坏文件保留在磁盘上，不会自动修复，新的制作与改稿暂停。",
 	"documentWork.footnote": "成果由 TPA 自动归档：旧版保留、程序检查与用户认可分别记录。检查通过只说明实际覆盖的内容。",
 	"documentWork.state.prepared": "已准备",
 	"documentWork.state.dispatching": "正在绑定",

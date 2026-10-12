@@ -1,353 +1,187 @@
 /**
- * TPA 独立文稿：程序检查。
+ * TPA 独立文稿：程序检查（后台 worker）。
  *
- * 三类结论分别记录、互不替代（方案 §7）：`fingerprint`（字节是否变化）、
- * `text`（正文改动位置是否授权）、`format`（排版/部件是否变化）。聚合规则：
- * 任一 `failed` → 整版 `failed`；否则任一 `unverified` → 整版 `unverified`；
- * 全部通过才 `passed`。**超时、超预算、未覆盖结构一律 `unverified`，不虚报通过**，
- * 也不因为"能对上的部分一样"就判通过。
+ * 硬性要求（审查修正项 5）：
+ * - 解压与比较必须在**可终止的后台 worker** 里跑，主线程不做同步重活；
+ * - 2 秒硬截止：超时就 `terminate()`，结论记 `unverified`，绝不虚报通过；
+ * - 预算：单文件 32 MiB、解包 64 MiB、单 XML 8 MiB、部件 1 万，并发 2；
+ * - worker 起不来（打包缺失/路径不可解析）也是 `unverified`，不静默降级成同步解析。
  *
- * 检查器按后缀注册（注册式扩展点）：首版覆盖 OOXML 文字处理器文档与文本型源稿，
- * 其他格式如实记 `unverified`。检查是异步的：每个阶段之间让出事件循环并按
- * `inspectionMs` 硬超时收口，避免长时间占用主进程；CPU 密集的整段结构比较
- * 迁移到 worker_threads 属于后续优化（方案性能目标本身尚未实测）。
+ * 解析与比较的**唯一实现**在 `documentInspectionCore.cjs`（worker 内 require）。
+ * 程序格式检查只说明实际覆盖的内容，不等于渲染验收。
  */
-import { createHash } from "node:crypto";
-import { workOk, DOCUMENT_WORK_BUDGETS, type WorkResult } from "../../shared/documentWork";
-import type { DocumentChangeScope, DocumentInspection, DocumentInspectionChannelResult, DocumentInspectionStatus } from "../../shared/types/documentWork";
-import { compareBlocks, type LocatedBlock } from "./DocumentRevisionPolicy";
-import { containsEntityDeclaration, extractDocxParagraphs, extractMarkdownBlocks, isTextLikeExtension, readOoxmlDirectory, readOoxmlPart } from "./DocumentOoxml";
+import { Worker } from "node:worker_threads";
+import { workFail, workOk, DOCUMENT_WORK_BUDGETS, type WorkResult } from "../../shared/documentWork";
+import type { DocumentInspection } from "../../shared/types/documentWork";
 
-export const DOCUMENT_INSPECTOR_VERSION = "doc-inspector-v1";
+export const DOCUMENT_INSPECTOR_VERSION = "doc-inspector-v2";
 
-const OOXML_EXTENSIONS = [".docx", ".xlsx", ".pptx"];
-/** 正文由 text 通道覆盖的部件；其余部件由 format 通道逐部件比对。 */
-const TEXT_PARTS = new Set(["word/document.xml", "xl/sharedStrings.xml", "ppt/slides/slide1.xml"]);
-/** format 通道的可比对单部件上限（同长度改写也要看得见，所以按内容算指纹）。 */
-const FORMAT_PART_BYTES = 1024 * 1024;
-/** 已知但首版无渲染检查器的二进制格式：如实记未验证。 */
-const KNOWN_UNSUPPORTED_EXTENSIONS = [".pdf", ".doc", ".xls", ".ppt", ".rtf", ".odt", ".ods", ".odp", ".epub"];
+export type InspectionTarget = { absolutePath: string; relativePath: string; existenceOnly?: boolean };
+export type InspectionRequest = { base?: InspectionTarget; candidate: InspectionTarget; scope: DocumentInspection["channels"] extends never ? never : import("../../shared/types/documentWork").DocumentChangeScope };
 
-export type InspectionTarget = {
-	absolutePath: string;
-	relativePath: string;
-	/** 只登记了存在证据、没有归档字节的条目。 */
-	existenceOnly?: boolean;
-};
-
-export type InspectionRequest = {
-	base?: InspectionTarget;
-	candidate: InspectionTarget;
-	scope: DocumentChangeScope;
-};
-
+/** 主线程只读字节；workers 只收字节与范围。 */
 export type InspectionPorts = {
-	/** 有界读取；超预算返回 undefined（调用方记未验证，不截断）。 */
 	read(path: string, maxBytes: number): Buffer | undefined;
+	/** 解析 worker 与 core 的路径；返回 undefined 表示当前环境不可用（记 unverified）。 */
+	resolveWorkerPaths(): { workerPath: string; corePath: string } | undefined;
 	now?: () => number;
-	/** 阶段之间让出事件循环；测试注入同步实现。 */
-	yieldToEventLoop?: () => Promise<void>;
+	/** 超时覆盖点（默认取共享预算）。 */
+	timeoutMs?: number;
+	/** 只有在显式给出时才注入 worker 的测试延迟（默认不传）。 */
+	testDelayMs?: number;
 };
 
-export type DocumentInspector = {
-	name: string;
-	extensions: readonly string[];
-	/** 提取可定位块；结构未覆盖时用 flags 表达，而不是静默忽略。 */
-	extract: (data: Buffer) => { blocks: LocatedBlock[] | undefined; flags: { duplicateHeadings: boolean; unlocatedTextBoxes: boolean; unknownParts: boolean; unresolvedRevisions: boolean }; coverage: string; formatParts?: Record<string, string>; reason?: string };
-};
-
-function extensionOf(relativePath: string): string {
-	const index = relativePath.lastIndexOf(".");
-	return index < 0 ? "" : relativePath.slice(index).toLowerCase();
-}
-
-function digest(buffer: Buffer): string {
-	return createHash("sha256").update(buffer).digest("hex");
-}
-
-/** OOXML 检查器：正文块 + 非正文部件的逐部件指纹（供 format 通道比较）。 */
-function createOoxmlInspector(): DocumentInspector {
-	return {
-		name: "ooxml",
-		extensions: OOXML_EXTENSIONS,
-		extract: (data) => {
-			const directory = readOoxmlDirectory(data, { totalBytes: DOCUMENT_WORK_BUDGETS.ooxmlTotalBytes, partBytes: DOCUMENT_WORK_BUDGETS.ooxmlPartBytes, parts: DOCUMENT_WORK_BUDGETS.ooxmlParts });
-			if (!directory.ok) return { blocks: undefined, flags: { duplicateHeadings: false, unlocatedTextBoxes: false, unknownParts: true, unresolvedRevisions: false }, coverage: "ooxml:unparsed", reason: directory.reason };
-			const formatParts: Record<string, string> = {};
-			let documentXml: string | undefined;
-			for (const entry of directory.entries) {
-				if (entry.uncompressedSize === 0) continue;
-				if (TEXT_PARTS.has(entry.name)) {
-					const part = readOoxmlPart(data, entry, DOCUMENT_WORK_BUDGETS.ooxmlPartBytes);
-					if (!part.ok) return { blocks: undefined, flags: { duplicateHeadings: false, unlocatedTextBoxes: false, unknownParts: true, unresolvedRevisions: false }, coverage: `ooxml:${entry.name}`, reason: part.reason };
-					const xml = part.data.toString("utf8");
-					if (containsEntityDeclaration(xml)) return { blocks: undefined, flags: { duplicateHeadings: false, unlocatedTextBoxes: false, unknownParts: true, unresolvedRevisions: false }, coverage: `ooxml:${entry.name}`, reason: "the part declares XML entities" };
-					if (entry.name === "word/document.xml") documentXml = xml;
-					continue;
-				}
-				// 排版相关部件逐部件指纹（同长度改写也要看得见）；超出单部件速查上限的只记长度，
-				// 由 format 通道如实标为"只比过大小"，不假装比过内容。
-				if (entry.uncompressedSize <= FORMAT_PART_BYTES) {
-					const part = readOoxmlPart(data, entry, FORMAT_PART_BYTES);
-					if (!part.ok) return { blocks: undefined, flags: { duplicateHeadings: false, unlocatedTextBoxes: false, unknownParts: true, unresolvedRevisions: false }, coverage: `ooxml:${entry.name}`, reason: part.reason };
-					formatParts[entry.name] = digest(part.data);
-				} else {
-					formatParts[`${entry.name}#len`] = `${entry.uncompressedSize}`;
-				}
-			}
-			if (documentXml === undefined) return { blocks: undefined, flags: { duplicateHeadings: false, unlocatedTextBoxes: false, unknownParts: true, unresolvedRevisions: false }, coverage: "ooxml:no-word-document", reason: "word/document.xml is missing" };
-			const extracted = extractDocxParagraphs(documentXml);
-			return {
-				blocks: extracted.paragraphs.map((paragraph) => ({ text: paragraph.text, ...(paragraph.headingLevel === undefined ? {} : { headingLevel: paragraph.headingLevel }) })),
-				flags: { duplicateHeadings: extracted.duplicateHeadings, unlocatedTextBoxes: extracted.unlocatedTextBoxes, unknownParts: false, unresolvedRevisions: extracted.unresolvedRevisions },
-				coverage: `docx:document.xml;paragraphs=${extracted.paragraphs.length}`,
-				formatParts,
-			};
-		},
-	};
-}
-
-/** 文本型源稿检查器：Markdown 标题层级 + 纯文本逐行。 */
-function createTextInspector(): DocumentInspector {
-	return {
-		name: "text",
-		extensions: [".md", ".markdown", ".mdx", ".txt", ".text"],
-		extract: (data) => {
-			const source = data.toString("utf8");
-			const extracted = extractMarkdownBlocks(source);
-			return {
-				blocks: extracted.paragraphs.map((paragraph) => ({ text: paragraph.text, ...(paragraph.headingLevel === undefined ? {} : { headingLevel: paragraph.headingLevel }) })),
-				flags: { duplicateHeadings: extracted.duplicateHeadings, unlocatedTextBoxes: false, unknownParts: false, unresolvedRevisions: false },
-				coverage: `text:lines=${extracted.paragraphs.length}`,
-			};
-		},
-	};
-}
+type WorkerOutcome = { ok: true; value: DocumentInspection } | { ok: false; reason: string };
 
 export class DocumentInspectionService {
-	private readonly inspectors: DocumentInspector[];
 	private readonly ports: InspectionPorts;
-	/** 并发闸：同时最多 2 个检查任务。 */
-	private running = 0;
+	private readonly running = new Set<Worker>();
 	private readonly waiters: Array<() => void> = [];
+	private active = 0;
+	private closed = false;
 
-	constructor(ports: InspectionPorts, inspectors: readonly DocumentInspector[] = [createOoxmlInspector(), createTextInspector()]) {
+	constructor(ports: InspectionPorts) {
 		this.ports = ports;
-		this.inspectors = [...inspectors];
 	}
 
-	/** 注册式扩展点：新增格式只加检查器，不改调用方。 */
-	registerInspector(inspector: DocumentInspector): void {
-		this.inspectors.push(inspector);
+	/** 停止服务：终止所有在跑的 worker（退出清理路径必须走到）。 */
+	async shutdown(): Promise<void> {
+		this.closed = true;
+		const workers = [...this.running];
+		await Promise.allSettled(workers.map((worker) => worker.terminate()));
+		this.running.clear();
 	}
 
-	/** 可用的检查器名（界面用它说明本次覆盖了什么）。 */
-	listInspectors(): string[] {
-		return this.inspectors.map((inspector) => inspector.name);
+	/** 诊断/测试：当前在跑的 worker 数。 */
+	runningWorkers(): number {
+		return this.running.size;
 	}
 
 	private async acquire(): Promise<void> {
-		if (this.running < DOCUMENT_WORK_BUDGETS.concurrentInspections) {
-			this.running++;
+		if (this.active < DOCUMENT_WORK_BUDGETS.concurrentInspections) {
+			this.active++;
 			return;
 		}
 		await new Promise<void>((resolve) => this.waiters.push(resolve));
-		this.running++;
+		this.active++;
 	}
 
 	private release(): void {
-		this.running--;
+		this.active = Math.max(0, this.active - 1);
 		const next = this.waiters.shift();
 		if (next) next();
 	}
 
-	async inspect(request: InspectionRequest): Promise<WorkResult<DocumentInspection>> {
-		// `started` 在排队前采样：并发闸的等待时间也算进本次检查的时限，
-		// 否则排队越久越容易绕过 2 秒预算。
-		const started = (this.ports.now ?? (() => Date.now()))();
-		await this.acquire();
-		try {
-			return await this.run(request, started);
-		} catch {
-			return workOk(this.unverified(request, started, "the inspection failed unexpectedly"));
-		} finally {
-			this.release();
-		}
-	}
-
-	private deadlineExceeded(startedAt: number): boolean {
+	private unverified(request: InspectionRequest, reason: string): WorkResult<DocumentInspection> {
 		const now = (this.ports.now ?? (() => Date.now()))();
-		return now - startedAt > DOCUMENT_WORK_BUDGETS.inspectionMs;
-	}
-
-	private unverified(request: InspectionRequest, startedAt: number, reason: string, channels?: DocumentInspectionChannelResult[]): DocumentInspection {
-		const now = (this.ports.now ?? (() => Date.now()))();
-		return {
+		return workOk({
 			schemaVersion: 1,
 			status: "unverified",
-			channels: channels ?? [
-				{ channel: "fingerprint", status: "unverified", coverage: `candidate=${request.candidate.relativePath}`, reason },
+			channels: [
+				{ channel: "fingerprint", status: "unverified", coverage: request.candidate.relativePath, reason },
 				{ channel: "text", status: "unverified", coverage: "not inspected", reason },
 				{ channel: "format", status: "unverified", coverage: "not inspected", reason },
 			],
 			inspectorVersion: DOCUMENT_INSPECTOR_VERSION,
 			bytes: 0,
 			budgetBytes: DOCUMENT_WORK_BUDGETS.artifactBytes,
-			elapsedMs: Math.max(0, now - startedAt),
+			elapsedMs: 0,
 			reason,
-		};
-	}
-
-	private async run(request: InspectionRequest, startedAt: number): Promise<WorkResult<DocumentInspection>> {
-		const aggregate = (channels: DocumentInspectionChannelResult[], bytes: number, reason?: string): WorkResult<DocumentInspection> => {
-			const now = (this.ports.now ?? (() => Date.now()))();
-			const status: DocumentInspectionStatus = channels.some((channel) => channel.status === "failed") ? "failed" : channels.some((channel) => channel.status === "unverified") ? "unverified" : "passed";
-			return workOk({
-				schemaVersion: 1,
-				status,
-				channels,
-				inspectorVersion: DOCUMENT_INSPECTOR_VERSION,
-				bytes,
-				budgetBytes: DOCUMENT_WORK_BUDGETS.artifactBytes,
-				elapsedMs: Math.max(0, now - startedAt),
-				...(reason ? { reason } : {}),
-			});
-		};
-		if (request.candidate.existenceOnly)
-			return aggregate(
-				[
-					{ channel: "fingerprint", status: "unverified", coverage: request.candidate.relativePath, reason: "the file exceeded the byte budget; only existence was recorded" },
-					{ channel: "text", status: "unverified", coverage: "not read", reason: "file bytes were not archived" },
-					{ channel: "format", status: "unverified", coverage: "not read", reason: "file bytes were not archived" },
-				],
-				0,
-				"over budget: only file existence is recorded",
-			);
-		if (this.deadlineExceeded(startedAt)) return aggregate([{ channel: "fingerprint", status: "unverified", coverage: "not inspected", reason: "inspection timed out" }], 0, "inspection timed out");
-
-		const candidateBytes = this.ports.read(request.candidate.absolutePath, DOCUMENT_WORK_BUDGETS.artifactBytes);
-		if (!candidateBytes)
-			return aggregate(
-				[
-					{ channel: "fingerprint", status: "unverified", coverage: request.candidate.relativePath, reason: "the candidate is missing, unreadable or over the byte budget" },
-					{ channel: "text", status: "unverified", coverage: "not read", reason: "candidate bytes unavailable" },
-					{ channel: "format", status: "unverified", coverage: "not read", reason: "candidate bytes unavailable" },
-				],
-				0,
-				"the candidate could not be read within the byte budget",
-			);
-
-		const candidateExtension = extensionOf(request.candidate.relativePath);
-		const inspector = this.inspectors.find((item) => item.extensions.includes(candidateExtension));
-		const candidateHash = digest(candidateBytes);
-		const fingerprintChannel: DocumentInspectionChannelResult = {
-			channel: "fingerprint",
-			status: "passed",
-			coverage: `${request.candidate.relativePath} sha256=${candidateHash.slice(0, 12)} bytes=${candidateBytes.byteLength}`,
-		};
-
-		if (!inspector) {
-			const reason = KNOWN_UNSUPPORTED_EXTENSIONS.includes(candidateExtension) ? `no first-release text inspector for ${candidateExtension} files` : `unknown format ${candidateExtension || "(none)"}`;
-			return aggregate([fingerprintChannel, { channel: "text", status: "unverified", coverage: candidateExtension || "(none)", reason }, { channel: "format", status: "unverified", coverage: candidateExtension || "(none)", reason }], candidateBytes.byteLength, reason);
-		}
-		await this.ports.yieldToEventLoop?.();
-		const candidate = inspector.extract(candidateBytes);
-		if (!candidate.blocks) {
-			return aggregate(
-				[fingerprintChannel, { channel: "text", status: "unverified", coverage: candidate.coverage, reason: candidate.reason ?? "the structure could not be located" }, { channel: "format", status: "unverified", coverage: candidate.coverage, reason: candidate.reason ?? "the structure could not be located" }],
-				candidateBytes.byteLength,
-				candidate.reason,
-			);
-		}
-		if (this.deadlineExceeded(startedAt)) return aggregate([fingerprintChannel, { channel: "text", status: "unverified", coverage: candidate.coverage, reason: "inspection timed out" }], candidateBytes.byteLength, "inspection timed out");
-
-		if (!request.base) {
-			// 初稿没有可比对象：只报告"读到了什么结构"，结构未覆盖时仍记未验证。
-			const textStatus: DocumentInspectionStatus = candidate.flags.unknownParts || candidate.flags.unlocatedTextBoxes || candidate.flags.duplicateHeadings || candidate.flags.unresolvedRevisions ? "unverified" : "passed";
-			const textChannel: DocumentInspectionChannelResult = { channel: "text", status: textStatus, coverage: candidate.coverage, ...(textStatus === "unverified" ? { reason: "the document contains structures the first-release inspector does not locate" } : {}) };
-			const formatChannel: DocumentInspectionChannelResult = { channel: "format", status: "passed", coverage: inspector.name === "ooxml" ? `parts=${Object.keys(candidate.formatParts ?? {}).length}` : "source document: formatting follows the text channel" };
-			return aggregate([fingerprintChannel, textChannel, formatChannel], candidateBytes.byteLength, textStatus === "unverified" ? "structure coverage is incomplete" : undefined);
-		}
-
-		const baseBytes = this.ports.read(request.base.absolutePath, DOCUMENT_WORK_BUDGETS.artifactBytes);
-		if (!baseBytes)
-			return aggregate(
-				[fingerprintChannel, { channel: "text", status: "unverified", coverage: "base unreadable", reason: "the frozen base copy is not readable" }, { channel: "format", status: "unverified", coverage: "base unreadable", reason: "the frozen base copy is not readable" }],
-				candidateBytes.byteLength,
-				"the frozen base copy is not readable",
-			);
-		const baseExtension = extensionOf(request.base.relativePath);
-		if (baseExtension !== candidateExtension) {
-			return aggregate(
-				[
-					fingerprintChannel,
-					{ channel: "text", status: "unverified", coverage: `${baseExtension}->${candidateExtension}`, reason: "the candidate changed format; text comparison is not applicable" },
-					{ channel: "format", status: "unverified", coverage: `${baseExtension}->${candidateExtension}`, reason: "the candidate changed format" },
-				],
-				candidateBytes.byteLength,
-				"the candidate changed format",
-			);
-		}
-		const baseInspector = this.inspectors.find((item) => item.extensions.includes(baseExtension));
-		if (!baseInspector) {
-			return aggregate(
-				[fingerprintChannel, { channel: "text", status: "unverified", coverage: baseExtension, reason: "no inspector for the frozen base format" }, { channel: "format", status: "unverified", coverage: baseExtension, reason: "no inspector for the frozen base format" }],
-				candidateBytes.byteLength,
-				"no inspector for the frozen base format",
-			);
-		}
-		await this.ports.yieldToEventLoop?.();
-		const base = baseInspector.extract(baseBytes);
-		if (!base.blocks) {
-			return aggregate(
-				[fingerprintChannel, { channel: "text", status: "unverified", coverage: base.coverage, reason: base.reason ?? "the frozen base structure could not be located" }, { channel: "format", status: "unverified", coverage: base.coverage, reason: base.reason ?? "the frozen base structure could not be located" }],
-				candidateBytes.byteLength,
-				base.reason,
-			);
-		}
-		if (this.deadlineExceeded(startedAt)) return aggregate([fingerprintChannel, { channel: "text", status: "unverified", coverage: candidate.coverage, reason: "inspection timed out" }], candidateBytes.byteLength, "inspection timed out");
-
-		const comparison = compareBlocks({
-			scope: request.scope,
-			baseBlocks: base.blocks,
-			candidateBlocks: candidate.blocks,
-			structure: {
-				duplicateHeadings: candidate.flags.duplicateHeadings || base.flags.duplicateHeadings,
-				unresolvedRevisions: candidate.flags.unresolvedRevisions || base.flags.unresolvedRevisions,
-				unlocatedTextBoxes: candidate.flags.unlocatedTextBoxes || base.flags.unlocatedTextBoxes,
-				unknownParts: candidate.flags.unknownParts || base.flags.unknownParts,
-			},
 		});
-		const textChannel: DocumentInspectionChannelResult = {
-			channel: "text",
-			status: comparison.status,
-			coverage: `${base.coverage} -> ${candidate.coverage}`,
-			...(comparison.changes.length ? { changes: comparison.changes } : {}),
-			...(comparison.reason ? { reason: comparison.reason } : {}),
-		};
-		const formatChannel = this.compareFormat(inspector, base, candidate, candidateBytes.byteLength);
-		return aggregate([fingerprintChannel, textChannel, formatChannel], candidateBytes.byteLength, comparison.status === "passed" ? undefined : comparison.reason);
 	}
 
-	/** 格式通道：逐部件比较，覆盖范围如实报告；不做"正文没变即排版没变"的推断。 */
-	private compareFormat(inspector: DocumentInspector, base: ReturnType<DocumentInspector["extract"]>, candidate: ReturnType<DocumentInspector["extract"]>, bytes: number): DocumentInspectionChannelResult {
-		if (inspector.name !== "ooxml") {
-			return { channel: "format", status: "passed", coverage: "source document: formatting follows the text channel" };
+	/** 在 worker 里跑一个任务；超时/启动失败都返回结构化失败。 */
+	private async runJob(job: Record<string, unknown>, transferable: Buffer[]): Promise<WorkerOutcome> {
+		if (this.closed) return { ok: false, reason: "the inspection service is shutting down" };
+		const paths = this.ports.resolveWorkerPaths();
+		if (!paths) return { ok: false, reason: "the inspection worker is not available in this build" };
+		const timeoutMs = this.ports.timeoutMs ?? DOCUMENT_WORK_BUDGETS.inspectionMs;
+		let worker: Worker;
+		try {
+			worker = new Worker(paths.workerPath, { workerData: { corePath: paths.corePath, job, ...(this.ports.testDelayMs === undefined ? {} : { testDelayMs: this.ports.testDelayMs }) } });
+		} catch (error) {
+			return { ok: false, reason: `the inspection worker could not start: ${error instanceof Error ? error.message : String(error)}` };
 		}
-		const baseParts = base.formatParts ?? {};
-		const candidateParts = candidate.formatParts ?? {};
-		const baseNames = Object.keys(baseParts).sort();
-		const candidateNames = Object.keys(candidateParts).sort();
-		const added = candidateNames.filter((name) => !baseNames.includes(name));
-		const removed = baseNames.filter((name) => !candidateNames.includes(name));
-		const changed = candidateNames.filter((name) => baseNames.includes(name) && baseParts[name] !== candidateParts[name]);
-		const coverage = `parts=${baseNames.length}->${candidateNames.length}; bytes=${bytes}`;
-		if (added.length > 0 || removed.length > 0) {
-			return { channel: "format", status: "passed", coverage: `${coverage}; added=${added.length} removed=${removed.length}`, reason: "part inventory changed (structure edits are expected on revision)" };
+		this.running.add(worker);
+		// 传递字节所有权：worker 只读副本，主线程不再动这些 buffer。
+		void transferable;
+		return await new Promise<WorkerOutcome>((resolve) => {
+			let settled = false;
+			const finish = (outcome: WorkerOutcome) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				this.running.delete(worker);
+				// 结果已到也要 terminate：worker 不留常驻线程。
+				void worker.terminate().catch(() => undefined);
+				resolve(outcome);
+			};
+			const timer = setTimeout(() => {
+				// 硬截止：同步死循环也能被 terminate 打断。
+				void worker.terminate().catch(() => undefined);
+				finish({ ok: false, reason: `the inspection did not finish within ${timeoutMs}ms` });
+			}, timeoutMs);
+			timer.unref?.();
+			worker.once("message", (message: unknown) => {
+				if (typeof message === "object" && message !== null && "status" in message) finish({ ok: true, value: message as DocumentInspection });
+				else if (typeof message === "object" && message !== null && "reason" in message) finish({ ok: false, reason: String((message as { reason: unknown }).reason) });
+				else finish({ ok: false, reason: "the inspection worker returned an unusable result" });
+			});
+			worker.once("error", (error: Error) => finish({ ok: false, reason: `the inspection worker failed: ${error.message}` }));
+			worker.once("exit", (code: number) => {
+				if (!settled && code !== 0) finish({ ok: false, reason: `the inspection worker exited with code ${code}` });
+			});
+		});
+	}
+
+	async inspect(request: InspectionRequest): Promise<WorkResult<DocumentInspection>> {
+		if (request.candidate.existenceOnly) return this.unverified(request, "the file exceeded the byte budget; only existence was recorded");
+		const candidateBytes = this.ports.read(request.candidate.absolutePath, DOCUMENT_WORK_BUDGETS.artifactBytes);
+		if (!candidateBytes) return this.unverified(request, "the candidate is missing, unreadable or over the byte budget");
+		let baseBytes: Buffer | undefined;
+		if (request.base) {
+			baseBytes = this.ports.read(request.base.absolutePath, DOCUMENT_WORK_BUDGETS.artifactBytes);
+			if (!baseBytes) return this.unverified(request, "the frozen base copy is not readable");
 		}
-		if (changed.length > 0) return { channel: "format", status: "passed", coverage: `${coverage}; changedParts=${changed.length}` };
-		return { channel: "format", status: "passed", coverage };
+		await this.acquire();
+		try {
+			const outcome = await this.runJob(
+				{
+					kind: "compare",
+					candidateRelativePath: request.candidate.relativePath,
+					candidateBytes,
+					...(request.base && baseBytes ? { baseRelativePath: request.base.relativePath, baseBytes } : {}),
+					scope: request.scope,
+					budgetBytes: DOCUMENT_WORK_BUDGETS.artifactBytes,
+				},
+				[baseBytes, candidateBytes].filter((value): value is Buffer => value !== undefined),
+			);
+			if (!outcome.ok) return this.unverified(request, outcome.reason);
+			return workOk(outcome.value);
+		} finally {
+			this.release();
+		}
+	}
+
+	/** 读取冻结基稿里真实存在的标题（供"只改第二节"落到真实章节）。 */
+	async listHeadings(absolutePath: string): Promise<string[]> {
+		const bytes = this.ports.read(absolutePath, DOCUMENT_WORK_BUDGETS.artifactBytes);
+		if (!bytes) return [];
+		await this.acquire();
+		try {
+			const outcome = await this.runJob({ kind: "headings", relativePath: absolutePath, bytes }, [bytes]);
+			if (!outcome.ok) return [];
+			const value = outcome.value as unknown as { headings?: unknown };
+			return Array.isArray(value.headings) ? value.headings.filter((item): item is string => typeof item === "string") : [];
+		} finally {
+			this.release();
+		}
+	}
+
+	/** 兼容旧调用点：不可读时返回结构化错误而不是空结论。 */
+	async inspectOrFail(request: InspectionRequest): Promise<WorkResult<DocumentInspection>> {
+		const result = await this.inspect(request);
+		if ("error" in result) return workFail("IO_ERROR", true, { detail: result.error.detail });
+		return result;
 	}
 }
-
-export { isTextLikeExtension };

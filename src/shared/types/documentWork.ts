@@ -14,6 +14,11 @@ export const DOCUMENT_WORK_SCHEMA_VERSION = 1;
 
 /** Pi 扩展发布隐藏状态的 customType（与对齐状态同级，不占可见历史序号）。 */
 export const DOCUMENT_WORK_STATE_TYPE = "tpa-document-work-state";
+/**
+ * 改稿意向的隐藏 customType：普通聊天里扩展只能报「候选」，授权与派发由主进程决定。
+ * 与状态分开是为了让「候选」永远不可能被当成「已授权」。
+ */
+export const DOCUMENT_WORK_INTENT_TYPE = "tpa-document-work-intent";
 /** Pi 扩展写入活动分支的私有快照 entry 类型（历史恢复补登记用）。 */
 export const DOCUMENT_WORK_SNAPSHOT_TYPE = "tpa-document-work-snapshot";
 /** 主进程经既有发送接口调用的注册命令名；只绑定上下文，不触发模型回合。 */
@@ -56,6 +61,10 @@ export const DOCUMENT_WORK_BUDGETS = {
 	bindAckMs: 20_000,
 	/** 等待运行时稳定的时限（毫秒）。 */
 	settleMs: 15 * 60_000,
+	/** 冻结进准备记录的用户指令正文上限（字符）；超出即要求澄清。 */
+	instructionChars: 4000,
+	/** 检查 worker 超时后的强杀等待（毫秒）。 */
+	workerTerminateMs: 1_000,
 } as const;
 
 /** 工作记录版本冲突时的当前版本；调用者必须用该版本重试。 */
@@ -154,8 +163,15 @@ export type DocumentWorkPreparation = {
 	requirementsRef: RequirementsReference;
 	authorization: AuthorizationReference;
 	materials: DocumentMaterialReference[];
+	/** 本轮允许读取材料的根；扩展只能在这些根内按 relativePath 解析。 */
+	materialRoots: DocumentMaterialRoot[];
 	base?: DocumentBaseSelection;
 	scope: DocumentChangeScope;
+	/**
+	 * 改稿轮冻结的用户指令：主进程从会话里那一轮真实用户消息读回并锁定正文，
+	 * 派发时只使用这份冻结文本；不进入 Pi 汇报，也不重复进模型上下文。
+	 */
+	instruction?: { sourceTurnId: string; text: string; textDigest: string };
 	/** 本轮 staging 相对路径（相对工作目录）；扩展只在该目录内制作。 */
 	stagingRelativeDir: string;
 	outputRelativeDir: string;
@@ -165,12 +181,26 @@ export type DocumentWorkPreparation = {
 
 export type DocumentMaterialReference = {
 	materialId: string;
-	/** 相对输出根的用户材料路径（只读）。 */
+	/**
+	 * 材料所在的已授权根（成果根或会话项目目录）。
+	 * 材料不限于成果目录：用户不必把文件搬进输出目录。
+	 */
+	rootId: string;
+	/** 相对该根的路径（只读）。 */
 	relativePath: string;
 	sha256: string;
 	bytes: number;
 	/** 默认 anydoc；非文档材料直接按文本读取。 */
 	converter: string;
+};
+
+/** 可被材料读取的根：全部来自用户已有的授权入口（成果目录选择 / 项目目录）。 */
+export type DocumentMaterialRoot = {
+	rootId: string;
+	/** 相对标识（项目根固定为 "project"）。 */
+	kind: "output_root" | "project_root";
+	path: string;
+	label: string;
 };
 
 export type DocumentInspectionStatus = "passed" | "failed" | "unverified";
@@ -292,11 +322,19 @@ export type DocumentWorkSnapshot = {
 	outputRootPath?: string;
 	/** 扩展当前绑定状态（来自 Pi 隐藏状态投影）。 */
 	binding?: DocumentWorkBindingState;
+	/**
+	 * 记录损坏（主档不可解析）。此时快照只作只读展示，任何新执行都被拒；
+	 * 损坏文件留在磁盘上，不自动修复也不当作缺失重建。
+	 */
+	corrupt?: { reason: string; repairedFromBackup?: boolean };
 };
 
 export type DocumentWorkBindingState = {
 	schemaVersion: 1;
+	/** 稳定会话 id（catalog SessionRecord.id）。 */
 	sessionId: string;
+	/** 原生 Pi 会话 id（pi session header 的 sessionId）；与稳定 id 不同是常态。 */
+	nativeSessionId: string;
 	workId: string;
 	attemptId: string;
 	preparationId: string;
@@ -321,6 +359,26 @@ export type DocumentArtifactCandidateReport = {
 	editableSources: string[];
 	summary: string;
 	risks: string[];
+};
+
+/**
+ * 普通聊天里的改稿意向（扩展 → 主进程的**候选**）。
+ *
+ * 扩展只能报「这一轮用户似乎要求改稿」，并且必须带上原生 entry 身份；
+ * 是否构成授权、要冻结什么范围、要不要派发，全部由主进程重新验证后决定。
+ */
+export type DocumentWorkRevisionIntent = {
+	schemaVersion: 1;
+	/** 稳定会话 id（扩展从绑定恢复而来，仅作路由提示）。 */
+	sessionId: string;
+	nativeSessionId: string;
+	workId: string;
+	/** 用户轮次的稳定原生 entry id。 */
+	sourceTurnId: string;
+	/** 该轮正文指纹（与主进程读回的不一致即作废）。 */
+	instructionDigest: string;
+	/** 供界面展示的有界摘要，不是授权依据。 */
+	summary: string;
 };
 
 /** `document-work:changed` 推送载荷。 */

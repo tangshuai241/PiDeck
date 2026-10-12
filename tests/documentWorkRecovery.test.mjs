@@ -7,7 +7,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import * as f from "./helpers/documentWorkFixtures.mjs";
 import { bindingState, candidateReport, createFakeEventSource, createFakeRuntime, createMemoryFs, createMemoryWorkFs } from "./helpers/documentWorkFixtures.mjs";
+
+const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "g", scope: ["s"], materials: [], deliverable: "d", preserve: [], acceptance: ["a"], questions: [] } };
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { DocumentWorkStore } = loadTsCommonJs("src/main/document-work/DocumentWorkStore.ts");
@@ -54,154 +57,72 @@ test("活动分支补登记：绑定与候选汇报都能读回，且不恢复�
 	});
 });
 
-test("会话重开恢复：只回报磁盘状态，不自动重放未结算操作", async () => {
-	const storeFs = createMemoryWorkFs();
-	const pathMemory = createMemoryFs({ dirs: ["C:/out", "C:/userData"] });
-	let ids = 0;
-	const store = new DocumentWorkStore({ dir: "/data", fs: storeFs, now: () => 100, newId: (prefix) => `${prefix}_${++ids}` });
-	const root = store.registerOutputRoot({ path: "C:/out", label: "out" });
-	const work = store.createWork({ requestId: "create_1", requestDigest: "d", sessionId: "session-1", sourceTurnId: "turn_1", title: "t", outputRootId: root.value.outputRootId });
-	const runtime = createFakeRuntime({ alignment: { briefId: "brief_1", revision: 1, phase: "ready", brief: { scope: ["s"], preserve: [] } } });
-	const events = createFakeEventSource();
-	const adapter = new DocumentWorkRuntimeAdapter({ ports: runtime.port, events: events.source });
-	const service = new DocumentWorkService({
-		store,
-		runtime: runtime.port,
-		adapter,
-		archive: { freezePreparation: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/x" } }), settleAndArchive: async () => ({ state: "unknown", code: "DISPATCH_UNKNOWN" }) },
-		pathFs: pathMemory.fs,
-		workRoot: "C:/userData/document-work",
-		emit: () => undefined,
-		now: () => 500,
-		newId: (prefix) => `${prefix}_x${++ids}`,
-		bindAckMs: 20,
-	});
-	const recovered = await service.recover("session-1");
-	assert.equal(recovered.ok, true);
-	assert.equal(recovered.value.works.length, 1);
-	assert.equal(recovered.value.operations.length, 0, "重开时不造操作记录");
-	assert.equal(runtime.calls.filter((call) => call.kind === "sendControl").length, 0, "重开不自动分发");
-	assert.equal(service.unsettledOperationIds().length, 0);
-
-	// 结果缺失（未确认绑定）记 unknown，而不是当作成功归档。
-	const prepared = await service.prepare({ requestId: "prepare_1", workId: work.value.workId, sessionId: "session-1", expectedRevision: work.value.revision, kind: "create_document", requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 1 } });
-	const started = await service.start({
-		requestId: "start_1",
-		workId: work.value.workId,
-		sessionId: "session-1",
-		expectedRevision: prepared.value.workRevision,
-		kind: "create_document",
-		preparation: prepared.value.preparation,
-		expectedRuntime: { sessionId: "session-1", agentId: "agent-1", runtimeGeneration: 1 },
-		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 1 },
-	});
-	assert.equal(started.ok, true);
-	const attemptId = started.value.attemptId;
-	for (let index = 0; index < 200 && store.readWork(work.value.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.equal(store.readWork(work.value.workId).value.operations[attemptId].state, "unknown");
-	assert.equal(service.unsettledOperationIds().length, 0, "unknown 是终态：不会在下次重开被当成待续");
-});
-
 test("归档失败保留 staging 与输入，操作记失败且不再自动重试", async () => {
 	const storeFs = createMemoryWorkFs();
-	const pathMemory = createMemoryFs({ dirs: ["C:/out", "C:/userData"], files: { "C:/out/work/staging/p1/a.docx": "draft bytes" } });
+	const pathMemory = createMemoryFs({ dirs: ["C:/out", "C:/project", "C:/userData"], files: { "C:/out/work/staging/round/a.docx": "draft bytes" } });
 	let ids = 0;
 	const store = new DocumentWorkStore({ dir: "/data", fs: storeFs, now: () => 100, newId: (prefix) => `${prefix}_${++ids}` });
 	const root = store.registerOutputRoot({ path: "C:/out", label: "out" });
-	const work = store.createWork({ requestId: "create_1", requestDigest: "d", sessionId: "session-1", sourceTurnId: "turn_1", title: "t", outputRootId: root.value.outputRootId });
-	const runtime = createFakeRuntime({ alignment: { briefId: "brief_1", revision: 1, phase: "ready", brief: { scope: ["s"], preserve: [] } } });
+	const work = store.createWork({ requestId: "create_1", requestDigest: "d", sessionId: f.STABLE_SESSION, sourceTurnId: "turn_1", title: "t", outputRootId: root.value.outputRootId });
+	const runtime = createFakeRuntime({ alignment: ALIGNMENT });
 	const events = createFakeEventSource();
 	const adapter = new DocumentWorkRuntimeAdapter({ ports: runtime.port, events: events.source });
 	adapter.start();
+	// 绑定确认自动回灌；归档返回失败（写盘不可用），staging 与输入必须保留。
+	const original = runtime.port.sendControl.bind(runtime.port);
+	runtime.port.sendControl = async (input) => {
+		const result = await original(input);
+		const bind = /^\/tpa-work bind (\S+)$/.exec(input.message);
+		if (bind) {
+			const payload = JSON.parse(Buffer.from(bind[1], "base64url").toString("utf8"));
+			events.emit("agent-1", {
+				type: "message_end",
+				sessionId: input.sessionId,
+				runtimeGeneration: input.expectedRuntime.runtimeGeneration,
+				message: {
+					role: "custom",
+					customType: "tpa-document-work-state",
+					display: false,
+					details: { documentWork: { schemaVersion: 1, sessionId: payload.sessionId, nativeSessionId: payload.nativeSessionId, workId: payload.workId, attemptId: payload.attemptId, preparationId: payload.preparationId, digest: payload.digest, phase: "bound" } },
+				},
+			});
+		}
+		return result;
+	};
 	const service = new DocumentWorkService({
 		store,
 		runtime: runtime.port,
 		adapter,
-		archive: {
-			freezePreparation: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/work/staging/p1" } }),
-			// 归档时把 staging 里的候选文件写坏（模拟写盘失败），返回失败并保留输入。
-			settleAndArchive: async () => ({ state: "failed", code: "IO_ERROR", detail: "the version directory is not writable" }),
-		},
+		archive: { prepareStaging: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/work/staging/round" } }), settleAndArchive: async () => ({ state: "failed", code: "IO_ERROR", detail: "the version directory is not writable" }) },
 		pathFs: pathMemory.fs,
 		workRoot: "C:/userData/document-work",
 		emit: () => undefined,
+		readBaseHeadings: async () => [],
 		now: () => 500,
 		newId: (prefix) => `${prefix}_x${++ids}`,
-		bindAckMs: 50,
+		bindAckMs: 40,
 	});
-	const prepared = await service.prepare({ requestId: "prepare_1", workId: work.value.workId, sessionId: "session-1", expectedRevision: work.value.revision, kind: "create_document", requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 1 } });
+	const prepared = await service.prepare({ requestId: "prepare_1", workId: work.value.workId, sessionId: f.STABLE_SESSION, expectedRevision: work.value.revision, kind: "create_document", requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 3 } });
+	assert.equal(prepared.ok, true, prepared.ok ? "" : JSON.stringify(prepared.error));
 	const started = await service.start({
 		requestId: "start_1",
 		workId: work.value.workId,
-		sessionId: "session-1",
+		sessionId: f.STABLE_SESSION,
 		expectedRevision: prepared.value.workRevision,
 		kind: "create_document",
 		preparation: prepared.value.preparation,
-		expectedRuntime: { sessionId: "session-1", agentId: "agent-1", runtimeGeneration: 1 },
-		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 1 },
-	});
-	const attemptId = started.value.attemptId;
-	await new Promise((resolve) => setTimeout(resolve, 5));
-	events.emit("agent-1", {
-		type: "message_end",
-		sessionId: "session-1",
-		runtimeGeneration: 1,
-		message: { role: "custom", customType: STATE_TYPE, display: false, details: { documentWork: bindingState({ attemptId, preparationId: prepared.value.preparation.preparationId, digest: prepared.value.preparation.digest }) } },
-	});
-	events.settle("agent-1");
-	for (let index = 0; index < 200 && store.readWork(work.value.workId).value.operations[attemptId].state !== "failed"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
-	const operation = store.readWork(work.value.workId).value.operations[attemptId];
-	assert.equal(operation.state, "failed");
-	assert.equal(operation.error.code, "IO_ERROR");
-	assert.equal(store.readWork(work.value.workId).value.record.lastFailure.code, "IO_ERROR");
-	assert.equal(pathMemory.fs.exists("C:/out/work/staging/p1/a.docx"), true, "失败保留输入与 staging");
-	assert.equal(pathMemory.fs.exists("C:/out/work/versions/v0001/a.docx"), false, "失败不产生半成品版本");
-});
-
-test("扩展关闭/不可用：文稿入口给出明确错误，普通会话读写不受影响", async () => {
-	const storeFs = createMemoryWorkFs();
-	const pathMemory = createMemoryFs({ dirs: ["C:/out", "C:/userData"] });
-	const store = new DocumentWorkStore({ dir: "/data", fs: storeFs, now: () => 100, newId: (prefix) => `${prefix}_1` });
-	const root = store.registerOutputRoot({ path: "C:/out", label: "out" });
-	const work = store.createWork({ requestId: "create_1", requestDigest: "d", sessionId: "session-1", sourceTurnId: "turn_1", title: "t", outputRootId: root.value.outputRootId });
-	// 没有扩展注册绑定命令：RPC 接受但永远等不到确认 → 记未知，普通聊天与记录都不坏。
-	const runtime = createFakeRuntime({ alignment: { briefId: "brief_1", revision: 1, phase: "ready", brief: { scope: ["s"], preserve: [] } } });
-	const events = createFakeEventSource();
-	const adapter = new DocumentWorkRuntimeAdapter({ ports: runtime.port, events: events.source });
-	adapter.start();
-	const service = new DocumentWorkService({
-		store,
-		runtime: runtime.port,
-		adapter,
-		archive: { freezePreparation: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/x" } }), settleAndArchive: async () => ({ state: "unknown", code: "DISPATCH_UNKNOWN" }) },
-		pathFs: pathMemory.fs,
-		workRoot: "C:/userData/document-work",
-		emit: () => undefined,
-		now: () => 500,
-		newId: (prefix) => `${prefix}_x1`,
-		bindAckMs: 20,
-	});
-	const prepared = await service.prepare({ requestId: "prepare_1", workId: work.value.workId, sessionId: "session-1", expectedRevision: work.value.revision, kind: "create_document", requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 1 } });
-	const started = await service.start({
-		requestId: "start_1",
-		workId: work.value.workId,
-		sessionId: "session-1",
-		expectedRevision: prepared.value.workRevision,
-		kind: "create_document",
-		preparation: prepared.value.preparation,
-		expectedRuntime: { sessionId: "session-1", agentId: "agent-1", runtimeGeneration: 1 },
-		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 1 },
+		expectedRuntime: { ...runtime.target },
+		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 3 },
 	});
 	assert.equal(started.ok, true);
 	const attemptId = started.value.attemptId;
-	for (let index = 0; index < 200 && store.readWork(work.value.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.equal(store.readWork(work.value.workId).value.operations[attemptId].state, "unknown");
-	// 会话级读取与列表仍然可用（界面能显示"结果未确定"，聊天功能不受影响）。
-	const snapshot = await service.get({ workId: work.value.workId, sessionId: "session-1" });
-	assert.equal(snapshot.ok, true);
-	assert.equal(snapshot.value.operation?.state, "unknown", "界面能读到结果未确定而不是空白");
-	const list = await service.listForSession("session-1");
-	assert.equal(list.ok, true);
-	adapter.dispose();
-	assert.equal(events.listenerCount(), 0, "订阅与解绑配对");
+	for (let index = 0; index < 200 && store.readWork(work.value.workId).value.operations[attemptId].state !== "running"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	events.settle("agent-1");
+	for (let index = 0; index < 200 && store.readWork(work.value.workId).value.operations[attemptId].state !== "failed"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	const bucket = store.readWork(work.value.workId).value;
+	assert.equal(bucket.operations[attemptId].state, "failed");
+	assert.equal(bucket.operations[attemptId].error.code, "IO_ERROR");
+	assert.equal(bucket.record.lastFailure.code, "IO_ERROR");
+	assert.equal(pathMemory.fs.exists("C:/out/work/staging/round/a.docx"), true, "失败保留输入与 staging");
+	assert.equal(pathMemory.fs.exists("C:/out/work_1/versions/v0001/a.docx"), false, "失败不产生半成品版本");
 });

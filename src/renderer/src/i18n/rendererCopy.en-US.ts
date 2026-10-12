@@ -606,6 +606,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"documentWork.accepted": "Accepted by the user",
 	"documentWork.rejected": "Rejected by the user",
 	"documentWork.operationFailed": "This round was not archived ({code}). Its inputs and staging files are kept and nothing is replayed automatically.",
+	"documentWork.corruptRecord": "The document work record is damaged and shown read-only. The damaged file is kept on disk, nothing is repaired automatically, and new rounds are stopped.",
 	"documentWork.footnote": "TPA archives every version automatically: older versions are kept, and program inspection, model reports and user acceptance are recorded separately. A pass only covers what was actually inspected.",
 	"documentWork.state.prepared": "Prepared",
 	"documentWork.state.dispatching": "Binding",
