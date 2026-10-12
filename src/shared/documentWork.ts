@@ -356,7 +356,17 @@ export function sanitizeWorkTitle(value: unknown, fallback: string): string {
 
 /** 工作目录名只由程序生成的 workId 派生并叠加可读标题，拒绝用户输入直接进路径。 */
 export function buildWorkFolder(workId: string, title: string): string {
-	const safeTitle = sanitizeWorkTitle(title, "").replace(/\s+/g, "-").slice(0, 40);
+	// 顺序不可颠倒：先按共享标题策略归一（含 40 字截断），再做「生成目录名」这一层的清理。
+	// 真机证据（windows-physical-folder-counterexample.json）：截断点正落在「桥梁监测安排.docx」的点上，
+	// 同一件工作下出现两个物理目录 —— 带点的那个是 Node 的 namespaced fs 按原名建的（里面只有空 staging），
+	// 不带点、装着 36873 字节 DOCX 的是原生 Pi 的 Python 用普通 Win32 路径写的：普通 Win32 会把结尾
+	// 点/空格归一掉，namespaced 路径不会，于是两端各写一边、宿主认不到成果。
+	// 因此生成目录名时去掉结尾点/空格（两端就会落到同一个名字）；清空则只剩 workId。
+	// 同一套规则在所有平台生效，不做平台分支，也不针对某种工具打补丁。
+	const safeTitle = sanitizeWorkTitle(title, "")
+		.replace(/\s+/g, "-")
+		.slice(0, 40)
+		.replace(/[. ]+$/, "");
 	return safeTitle ? `${workId}-${safeTitle}` : workId;
 }
 
