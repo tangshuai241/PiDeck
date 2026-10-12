@@ -32,7 +32,7 @@ function currentFailure(failure: AlignmentControlFailure | undefined, runtime: S
  * 返回 false 表示本轮不进入执行——对齐卡只负责说明原因，不替文稿域做决定。
  */
 export type AlignmentApprovalBridge = {
-	beforeApprove: (state: AlignmentState) => Promise<boolean>;
+	beforeApprove: (state: AlignmentState) => Promise<"handled" | "proceed" | "blocked">;
 };
 
 /** Session-scoped owner shared by composer mode controls and the single timeline confirmation surface. */
@@ -180,16 +180,27 @@ export function useSessionAlignmentControls(sessionId: string, backend: AgentBac
 			showNotice(t("alignment.busy"));
 			return;
 		}
-		// 文稿轮次先把准备与操作记录落盘，再走原本的批准入口；绑定失败就不放行执行。
+		// 文稿轮次：主进程先落准备与操作记录，成功时由**它**发出唯一一次批准；
+		// 前端只在 plain 分支发原生批准，避免同一次点击产生两次 approve。
 		const bridge = approvalBridge;
 		if (!bridge || !current) {
 			void dispatch([command], "normal");
 			return;
 		}
 		void (async () => {
-			const allowed = await bridge.beforeApprove(current);
-			if (allowed && sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) void dispatch([command], "normal");
-			else if (allowed) showNotice(t("alignment.runtimeChanged"));
+			const outcome = await bridge.beforeApprove(current);
+			if (outcome === "blocked") return;
+			if (outcome === "handled") {
+				// 只同步"已交给文稿轮次"的可见状态：退出对齐模式、清掉待定与错误。
+				if (sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) {
+					store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
+					store.set(pendingAtom, false);
+					store.set(errorAtom, undefined);
+				}
+				return;
+			}
+			if (sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) void dispatch([command], "normal");
+			else showNotice(t("alignment.runtimeChanged"));
 		})();
 	}, [backend, state, runtimeAtom, presentationNow, dispatch, store, approvalBridge, sessionId, targetNow]);
 	const resume = useCallback(() => {

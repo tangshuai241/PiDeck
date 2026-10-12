@@ -22,6 +22,7 @@ import { DocumentArchiveService } from "./DocumentArchiveService";
 import { DocumentInspectionService } from "./DocumentInspectionService";
 import { type DocumentPathFsPort } from "./DocumentPathGuard";
 import { DocumentWorkRuntimeAdapter, type DocumentWorkAlignmentSnapshot, type DocumentWorkRuntimePort } from "./DocumentWorkRuntimeAdapter";
+import { DocumentWorkRuntimeLease } from "./DocumentWorkRuntimeLease";
 import { DocumentWorkService } from "./DocumentWorkService";
 import { DocumentWorkStore } from "./DocumentWorkStore";
 
@@ -210,6 +211,8 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 	};
 
 	const adapter = new DocumentWorkRuntimeAdapter({ ports: runtime, events: deps.host });
+	// 同一运行时上只允许一件文稿工作：租约覆盖占用 → 绑定 → 运行 → 结算。
+	const lease = new DocumentWorkRuntimeLease();
 	const archive = new DocumentArchiveService({ store, pathFs: nodeDocumentPathFs, workRoot, inspection });
 	const service = new DocumentWorkService({
 		store,
@@ -220,6 +223,7 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 		workRoot,
 		emit: deps.broadcast,
 		readBaseHeadings: (absolutePath) => inspection.listHeadings(absolutePath),
+		lease,
 	});
 	adapter.start();
 	// 普通聊天的改稿意向只作**候选**：主进程在这里重新验证、等稳定点、再决定是否派发。
@@ -239,6 +243,7 @@ export function createDocumentWork(deps: DocumentWorkAssemblyDeps): DocumentWork
 			adapter.dispose();
 			await inspection.shutdown();
 			await service.shutdown();
+			lease.releaseAll();
 		},
 	};
 }

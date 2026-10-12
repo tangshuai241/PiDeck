@@ -398,3 +398,22 @@ node scripts/generate-extensions-manifest.mjs --check
 6. **档案损坏与幂等**：主档损坏时**不自动修复、不重建**，`.bak` 只作只读展示，损坏文件原样保留且写入与新执行被拒；`prepare/start/cancel` 全程持按 workId 的互斥锁，重复确认只发一次 approve 与实际 prompt，未知分发不重放。
 
 仍属未验收：真实模型端到端（初稿 → 改稿 → 重开）、完整 Electron 交互与安装包分发、Word 局部修改保真度、方案 §7 的性能目标（p95）未实测。
+
+## 14. 第二轮审查修正（实现 B · 2026-10-12）
+
+1. **普通 Plan 不被文稿流程阻断**：新增纯策略 `src/shared/documentWorkTarget.ts`（renderer 与主进程共用），
+   `classifyDocumentTarget`/`shouldRouteRoundToDocumentWork`/`shouldBlockDocumentApproval` 只从权威要求单的
+   goal/deliverable 判断"本轮是否正式文稿"。普通开发（重构代码、修 bug、解释材料）在需求模式下也
+   **0 个文稿 create/prepare/start、不要求成果目录**，原生 approve 一次；`resolveCreateAuthorization` 在主进程侧
+   用同一判据再挡一次，renderer 标志无法自证文稿授权。
+2. **批准只发一次**：`beforeApprove` 改为三态 `handled | proceed | blocked`。文稿轮次的 `/align approve`
+   只由主进程的 dispatcher 发出，前端在 `handled` 分支只同步"退出对齐模式 + 清 pending/error"，
+   不再发原生批准；普通开发走 `proceed`（原生一次）；失败走 `blocked`（两边都不发）。
+3. **扩展批准闸只约束进行中的同轮次**：`roundActive()` 增加回合结束（agent_end）判定；
+   归档/取消/失败后保留文稿关联只用于读与改稿意向，不再注入旧制作指令、不再阻断同会话后续的
+   普通 Plan 确认；绑定载荷损坏也不再永久阻断批准。
+4. **同一运行时排他租约**：新增 `src/main/document-work/DocumentWorkRuntimeLease.ts`，
+   以运行时身份（sessionId + agentId + generation + 原生会话 id）为键，覆盖"占用 → 绑定 → 运行 → 权威结算"。
+   两件不同工作在同一运行时并发确认时，后到的一件在**发出绑定之前**就被拒（`RUNTIME_BUSY`）；
+   不同运行时仍可并行；取消与终态释放租约且只释放自己那一份；未知分发的重放保护仍来自 requestId 台账与终态。
+   锁顺序固定：先 workId 互斥，再运行时租约（同步 Map，无 await，不成环）。

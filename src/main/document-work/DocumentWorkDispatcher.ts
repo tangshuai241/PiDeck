@@ -15,6 +15,7 @@ import type { DocumentWorkChangedEvent, DocumentWorkOperation, DocumentWorkPrepa
 import type { ArchiveOutcome, DocumentArchiveService } from "./DocumentArchiveService";
 import type { DocumentWorkStore } from "./DocumentWorkStore";
 import { finishOperation, updateOperation } from "./DocumentWorkLedger";
+import type { DocumentWorkRuntimeLease } from "./DocumentWorkRuntimeLease";
 import { runtimeStillMatches, type DocumentWorkRuntimeAdapter, type DocumentWorkRuntimePort, type DocumentWorkRuntimeTarget } from "./DocumentWorkRuntimeAdapter";
 
 export type DocumentWorkDispatcherDeps = {
@@ -23,6 +24,8 @@ export type DocumentWorkDispatcherDeps = {
 	adapter: DocumentWorkRuntimeAdapter;
 	archive: DocumentArchiveService;
 	emit: (event: DocumentWorkChangedEvent) => void;
+	/** 运行时租约：结算（含 failed/interrupted/unknown）时释放。 */
+	lease: DocumentWorkRuntimeLease;
 	now?: () => number;
 	/** 绑定确认等待时限覆盖点（默认取共享预算）；测试用它避免真的等 20 秒。 */
 	bindAckMs?: number;
@@ -47,12 +50,15 @@ export class DocumentWorkDispatcher {
 		} catch {
 			outcome = { state: "failed", code: "IO_ERROR", detail: "the archive step failed unexpectedly" };
 		}
-		this.finish(operation.workId, operation.attemptId, outcome);
+		this.finish(operation.workId, operation.attemptId, outcome, target);
 	}
 
-	private finish(workId: string, attemptId: string, outcome: ArchiveOutcome): void {
+	private finish(workId: string, attemptId: string, outcome: ArchiveOutcome, target?: DocumentWorkRuntimeTarget): void {
 		const event = finishOperation(this.deps.store, workId, attemptId, outcome, this.now);
 		if (event) this.deps.emit(event);
+		// 结算即释放租约（unknown 也是终态）：重放保护来自 requestId 台账与终态，
+		// 租约只负责"同时只有一件工作在使用这个运行时"。
+		if (target) this.deps.lease.release({ target, attemptId });
 	}
 
 	private update(workId: string, attemptId: string, patch: Partial<DocumentWorkOperation>): void {
@@ -105,49 +111,49 @@ export class DocumentWorkDispatcher {
 	private async bind(operation: DocumentWorkOperation, preparation: DocumentWorkPreparation, target: DocumentWorkRuntimeTarget): Promise<boolean> {
 		const workRead = this.deps.store.readWork(operation.workId);
 		if ("error" in workRead) {
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "WORK_NOT_FOUND", detail: "the work record disappeared" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "WORK_NOT_FOUND", detail: "the work record disappeared" }, target);
 			return false;
 		}
 		if (!target.piSessionId) {
 			// 拿不到原生身份就不绑定：扩展无法核对，绑定只会被拒，属于运行时不完整。
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "EXTENSION_UNAVAILABLE", detail: "the native pi session identity is not available for this runtime" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "EXTENSION_UNAVAILABLE", detail: "the native pi session identity is not available for this runtime" }, target);
 			return false;
 		}
 		const encoded = encodeWorkBinding(this.buildBindPayload(operation, preparation, target));
 		if (utf8ByteLength(encoded) > DOCUMENT_WORK_BUDGETS.bindPayloadBytes * 2) {
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "INVALID_INPUT", detail: "the binding payload exceeds the byte budget" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "INVALID_INPUT", detail: "the binding payload exceeds the byte budget" }, target);
 			return false;
 		}
 		if (!(await runtimeStillMatches(this.deps.runtime, target))) {
-			this.finish(operation.workId, operation.attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "the runtime changed before the binding was sent" });
+			this.finish(operation.workId, operation.attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "the runtime changed before the binding was sent" }, target);
 			return false;
 		}
 		const sent = await this.deps.runtime.sendControl({ sessionId: target.sessionId, requestId: `${operation.requestId}_bind`, message: `/${DOCUMENT_WORK_COMMAND} bind ${encoded}`, expectedRuntime: target });
 		if (!sent.accepted) {
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "RUNTIME_BUSY", detail: sent.error ?? "the binding command was rejected" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "RUNTIME_BUSY", detail: sent.error ?? "the binding command was rejected" }, target);
 			return false;
 		}
 		const confirmation = await this.deps.adapter.awaitBinding({ target, attemptId: operation.attemptId, preparationId: preparation.preparationId, digest: preparation.digest, timeoutMs: this.deps.bindAckMs ?? DOCUMENT_WORK_BUDGETS.bindAckMs });
 		// 等待确认期间被换绑：这可以证明（而不是猜）本轮没有落在当前运行时上，记中断。
 		if (!(await runtimeStillMatches(this.deps.runtime, target))) {
-			this.finish(operation.workId, operation.attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "the runtime changed while waiting for the binding confirmation" });
+			this.finish(operation.workId, operation.attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "the runtime changed while waiting for the binding confirmation" }, target);
 			return false;
 		}
 		if (!confirmation.ok) {
 			// 命令已被接受但没等到确认：可能已执行也可能没有，记未知且不重放。
-			this.finish(operation.workId, operation.attemptId, { state: "unknown", code: "DISPATCH_UNKNOWN", detail: confirmation.reason });
+			this.finish(operation.workId, operation.attemptId, { state: "unknown", code: "DISPATCH_UNKNOWN", detail: confirmation.reason }, target);
 			return false;
 		}
 		this.update(operation.workId, operation.attemptId, { state: "running" });
 		this.deps.emit({ workId: operation.workId, sessionId: target.sessionId, revision: 0, attemptId: operation.attemptId, changeKind: "running" });
 		const runMessage = this.runMessage(preparation);
 		if (!runMessage) {
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "APPROVAL_REQUIRED", detail: "the round could not be dispatched from the recorded authorization" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "APPROVAL_REQUIRED", detail: "the round could not be dispatched from the recorded authorization" }, target);
 			return false;
 		}
 		const run = await this.deps.runtime.sendControl({ sessionId: target.sessionId, requestId: `${operation.requestId}_run`, message: runMessage, expectedRuntime: target });
 		if (!run.accepted) {
-			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "RUNTIME_BUSY", detail: run.error ?? "the execution prompt was rejected" });
+			this.finish(operation.workId, operation.attemptId, { state: "failed", code: "RUNTIME_BUSY", detail: run.error ?? "the execution prompt was rejected" }, target);
 			return false;
 		}
 		return true;

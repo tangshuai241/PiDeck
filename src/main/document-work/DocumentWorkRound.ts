@@ -14,6 +14,7 @@
  * 全篇 scope。
  */
 import { createHash } from "node:crypto";
+import { classifyDocumentTarget } from "../../shared/documentWorkTarget";
 import { DOCUMENT_WORK_BUDGETS, isBoundedText, isNonNegativeInteger, isSafeRelativePath, isWorkId, normalizeChangeScope, workFail, workOk, type WorkResult } from "../../shared/documentWork";
 import type { AuthorizationReference, DocumentChangeScope, DocumentMaterialReference, DocumentMaterialRoot, RequirementsReference, DocumentWorkKind } from "../../shared/types/documentWork";
 import { deriveInstructionScope } from "./DocumentRevisionPolicy";
@@ -191,6 +192,10 @@ export function resolveCreateAuthorization(input: { requirementsRef: Requirement
 	if (alignment.revision !== input.requirementsRef.revision) return workFail("PREPARATION_STALE", true, { detail: "the requirements changed after this confirmation" });
 	if (alignment.phase !== "ready" && alignment.phase !== "approved") return workFail("APPROVAL_REQUIRED", true, { detail: "the confirmation sheet is not in a state that allows execution" });
 	if (alignment.hasOpenQuestions) return workFail("APPROVAL_REQUIRED", true, { detail: "the confirmation sheet still has unanswered questions" });
+	// 主进程侧的同一份判据：普通项目开发（重构代码/修 bug/解释材料）不建文稿、不冻结基稿、
+	// 不要求成果目录——即使渲染层误路由，这里也会拒绝，而不是靠一个 renderer 布尔值通车。
+	const target = classifyDocumentTarget({ goal: alignment.brief?.goal, deliverable: alignment.brief?.deliverable, materials: alignment.brief?.materials });
+	if (target.kind !== "document") return workFail("APPROVAL_REQUIRED", false, { detail: `this round does not produce a formal document (${target.reason})` });
 	// 初稿没有可比对象：范围只是说明，不参与正文授权判定；要求单里的"必须保留"照常冻结。
 	// 因此这里不套用"整篇授权与保留块互斥"的改稿规则。
 	const briefPreserve = [...(alignment.brief?.preserve ?? [])].map((item) => item.trim()).filter((item) => item.length > 0);

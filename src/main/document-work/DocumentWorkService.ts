@@ -28,6 +28,7 @@ import type { DocumentWorkBucketState } from "./DocumentWorkStoreCodec";
 /** withWork 成功结果的别名，避免在方法签名里重复展开条件类型。 */
 type WorkBucketStateResult = { ok: true; value: DocumentWorkBucketState };
 import { KeyedMutex } from "./KeyedMutex";
+import { DocumentWorkRuntimeLease } from "./DocumentWorkRuntimeLease";
 import { finishOperation } from "./DocumentWorkLedger";
 import { DocumentWorkDispatcher } from "./DocumentWorkDispatcher";
 import { selectBaseVersion } from "./DocumentRevisionPolicy";
@@ -48,6 +49,8 @@ export type DocumentWorkServiceDeps = {
 	newId?: (prefix: string) => string;
 	bindAckMs?: number;
 	settleMs?: number;
+	/** 运行时租约（装配层与测试可注入；默认自建）。 */
+	lease?: DocumentWorkRuntimeLease;
 };
 
 function digestOf(value: unknown): string {
@@ -60,6 +63,8 @@ export class DocumentWorkService {
 	private readonly newId: (prefix: string) => string;
 	private readonly dispatcher: DocumentWorkDispatcher;
 	private readonly mutex = new KeyedMutex();
+	/** 同一运行时上的排他所有权：占用 → 绑定 → 运行 → 结算。 */
+	private readonly lease: DocumentWorkRuntimeLease;
 	private readonly inFlight = new Map<string, Promise<void>>();
 	/** 已经处理过的改稿意向（workId:turnId），同一轮绝不派发第二次。 */
 	private readonly handledIntents = new Set<string>();
@@ -68,7 +73,8 @@ export class DocumentWorkService {
 		this.deps = deps;
 		this.now = deps.now ?? (() => Date.now());
 		this.newId = deps.newId ?? ((prefix) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`);
-		this.dispatcher = new DocumentWorkDispatcher({ store: deps.store, runtime: deps.runtime, adapter: deps.adapter, archive: deps.archive, emit: deps.emit, now: this.now, ...(deps.bindAckMs === undefined ? {} : { bindAckMs: deps.bindAckMs }) });
+		this.lease = deps.lease ?? new DocumentWorkRuntimeLease({ now: this.now });
+		this.dispatcher = new DocumentWorkDispatcher({ store: deps.store, runtime: deps.runtime, adapter: deps.adapter, archive: deps.archive, emit: deps.emit, lease: this.lease, now: this.now, ...(deps.bindAckMs === undefined ? {} : { bindAckMs: deps.bindAckMs }) });
 	}
 
 	/** 停止服务时等未完成的编排自行收口；磁盘记录与未结算操作保持不变。 */
@@ -76,6 +82,8 @@ export class DocumentWorkService {
 		const pending = [...this.inFlight.values()];
 		this.inFlight.clear();
 		await Promise.allSettled(pending);
+		// 退出清理与申请配对：不留下占着运行时的租约。
+		this.lease.releaseAll();
 	}
 
 	private track(attemptId: string, task: Promise<void>): void {
@@ -305,6 +313,10 @@ export class DocumentWorkService {
 			const active = read.value.operations[record.activeOperationId];
 			if (active && !this.isTerminal(active.state)) return workFail("RUNTIME_BUSY", true, { detail: "this work already has a run in flight" });
 		}
+		// 同一运行时上只允许一件文稿工作：占用发生在**任何 RPC 之前**，所以两件不同工作
+		// 并发确认时，后到的那件在绑定之前就被拒（不会互相覆盖绑定）。
+		const lease = this.lease.acquire({ target, workId: value.workId, attemptId: value.attemptId });
+		if (!lease.ok) return workFail("RUNTIME_BUSY", true, { detail: `another document round (${lease.holder.workId}) already owns this runtime` });
 		const now = this.now();
 		const operation: DocumentWorkOperation = {
 			schemaVersion: DOCUMENT_WORK_SCHEMA_VERSION,
@@ -455,6 +467,7 @@ export class DocumentWorkService {
 		await this.deps.runtime.abort({ sessionId: read.value.record.sessionId, agentId: current.agentId, runtimeGeneration: current.runtimeGeneration, ...(current.piSessionId ? { piSessionId: current.piSessionId } : {}) });
 		const event = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "cancelled by the user for this attempt only" }, this.now);
 		if (event) this.deps.emit(event);
+		this.lease.releaseWork(workId);
 		const after = this.deps.store.readWork(workId);
 		return "error" in after ? after : workOk(after.value.operations[attemptId]);
 	}

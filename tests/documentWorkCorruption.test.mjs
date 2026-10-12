@@ -16,7 +16,7 @@ const { DocumentWorkStore } = loadTsCommonJs("src/main/document-work/DocumentWor
 const { DocumentWorkService } = loadTsCommonJs("src/main/document-work/DocumentWorkService.ts");
 const { DocumentWorkRuntimeAdapter } = loadTsCommonJs("src/main/document-work/DocumentWorkRuntimeAdapter.ts");
 
-const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "g", scope: ["s"], materials: [], deliverable: "d", preserve: [], acceptance: ["a"], questions: [] } };
+const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "写一份季度复盘报告", scope: ["s"], materials: [], deliverable: "报告.docx", preserve: [], acceptance: ["a"], questions: [] } };
 
 function harness(options = {}) {
 	const storeFs = createMemoryWorkFs();

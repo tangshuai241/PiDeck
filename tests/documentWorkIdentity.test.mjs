@@ -17,7 +17,11 @@ import { createFakeEventSource, createFakeRuntime, createMemoryFs, createMemoryW
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const require = createRequire(import.meta.url);
-const extension = loadTsCommonJs("resources/extensions/pi-deck-document-work.ts", { stubs: { typebox: require("typebox") } }).default;
+/** 与扩展同源的模块图：extension 的 import 会被缓存到同一实例。 */
+const protocolBridge = loadTsCommonJs("resources/extensions/pi-deck-document-work-binding.ts");
+// 扩展与闸模块必须共用**同一个**加载器实例（下面的 stub 把扩展的 import 指向它），
+// 否则扩展注册到 A 实例、测试在 B 实例上查询，永远查不到。
+const extension = loadTsCommonJs("resources/extensions/pi-deck-document-work.ts", { stubs: { typebox: require("typebox"), "./pi-deck-document-work-binding": protocolBridge } }).default;
 const { DocumentWorkStore } = loadTsCommonJs("src/main/document-work/DocumentWorkStore.ts");
 const { DocumentWorkService } = loadTsCommonJs("src/main/document-work/DocumentWorkService.ts");
 const { DocumentWorkRuntimeAdapter } = loadTsCommonJs("src/main/document-work/DocumentWorkRuntimeAdapter.ts");
@@ -302,4 +306,36 @@ function canonical(value) {
 
 function bindingPayload(overrides = {}) {
 	return Buffer.from(canonical({ ...bindingStateForExtension(), ...overrides }), "utf8").toString("base64url");
+}
+
+test("审批闸只约束进行中的同轮次：归档后的旧 binding 不阻断后续普通 Plan 确认", async () => {
+	const harnessA = extensionHarness();
+	// 进行中的文稿轮次（brief_1 revision 3）：只约束它自己那一份确认单。
+	await harnessA.command(`bind ${bindingPayload({ briefId: "brief_1", briefRevision: 3 })}`);
+	const gate = sharedGate();
+	assert.equal(gate.refuse("brief_1", 1), "Document work work_1 is bound to confirmation brief_1 revision 3; approve that exact revision or cancel this round.");
+	assert.match(gate.refuse("brief_2", 1), /bound to another confirmation sheet/);
+	assert.equal(gate.refuse("brief_1", 3), undefined);
+
+	// 轮次结算（agent_end 正常结束 + 汇报）：binding 保留用于读/改稿意向，但不再约束批准。
+	harnessA.fire("agent_end", { messages: [{ role: "assistant", stopReason: "end_turn" }] });
+	assert.equal(sharedGate().refuse("brief_2", 1), undefined, "归档后不得阻断同一会话的普通 Plan 确认");
+	assert.equal(sharedGate().refuse("brief_1", 1), undefined);
+});
+
+test("绑定载荷损坏不会永久阻断普通批准", async () => {
+	const harnessB = extensionHarness();
+	await harnessB.command("bind not-a-valid-payload");
+	// 没有进行中的轮次：闸必须放行（文稿侧会在分发阶段如实失败，用户的普通任务照常执行）。
+	assert.equal(sharedGate().refuse("brief_2", 1), undefined);
+});
+
+/**
+ * 取出扩展当前注册的批准闸。
+ *
+ * 关键：扩展与闸模块必须由**同一个加载器实例**加载，否则扩展注册到 A 实例的闸，
+ * 测试却在 B 实例上查询，永远查不到（这正是"不能只测 helper 返回值"的意义）。
+ */
+function sharedGate() {
+	return { refuse: (briefId, revision) => protocolBridge.documentWorkApprovalRefusal(briefId, revision) };
 }

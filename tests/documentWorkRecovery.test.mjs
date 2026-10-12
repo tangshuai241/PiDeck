@@ -10,7 +10,7 @@ import test from "node:test";
 import * as f from "./helpers/documentWorkFixtures.mjs";
 import { bindingState, candidateReport, createFakeEventSource, createFakeRuntime, createMemoryFs, createMemoryWorkFs } from "./helpers/documentWorkFixtures.mjs";
 
-const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "g", scope: ["s"], materials: [], deliverable: "d", preserve: [], acceptance: ["a"], questions: [] } };
+const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "写一份季度复盘报告", scope: ["s"], materials: [], deliverable: "报告.docx", preserve: [], acceptance: ["a"], questions: [] } };
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { DocumentWorkStore } = loadTsCommonJs("src/main/document-work/DocumentWorkStore.ts");

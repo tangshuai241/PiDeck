@@ -1,7 +1,8 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useCallback, useEffect, useRef } from "react";
 import type { AgentBackend, AlignmentState, SessionRuntimeTarget } from "../../../shared/types";
-import type { DocumentWorkOutputRoot, DocumentWorkSnapshot } from "../../../shared/types/documentWork";
+import { shouldBlockDocumentApproval, shouldRouteRoundToDocumentWork } from "../../../shared/documentWorkTarget";
+import type { DocumentWorkOutputRoot, DocumentWorkRecord, DocumentWorkSnapshot } from "../../../shared/types/documentWork";
 import { documentWorkViewAtomFamily, emptyDocumentWorkView } from "../atoms/document-work-atoms";
 import { alignmentSubmissionAtomFamily } from "../atoms/alignment-atoms";
 import { sessionComposerModeBySessionIdAtomFamily } from "../atoms/composer-atoms";
@@ -25,16 +26,28 @@ import { showNotice } from "../utils/notice";
  * 输出根只经系统目录选择器授权；图标/文案全部走 i18n；订阅在卸载时退订。
  */
 export type SessionDocumentWorkControls = {
+	/** 文稿能力可用（pi 后端）；**不代表本轮是文稿轮次**。 */
 	available: boolean;
+	/** 本轮是否被判定为正式文稿（由权威要求单推导）。 */
+	documentRound: boolean;
 	snapshot: DocumentWorkSnapshot | undefined;
 	outputRoots: DocumentWorkOutputRoot[];
 	pending: boolean;
 	error: string | undefined;
 	chooseOutputRoot: () => void;
 	cancel: () => void;
-	/** 对齐批准前的准备 + 分发；返回 false 表示本轮不能进入执行。 */
-	beforeApprove: (state: AlignmentState) => Promise<boolean>;
+	/**
+	 * 对齐批准前的准备 + 分发。
+	 *
+	 * 三态（避免双重批准）：
+	 * - `handled`：本轮文稿轮次已由**主进程**发出唯一一次批准，调用方不要再发原生 approve；
+	 * - `proceed`：普通开发，走原生 approve（一次）；
+	 * - `blocked`：本轮不能执行（缺成果目录/授权不符/运行时变化），调用方什么也不发。
+	 */
+	beforeApprove: (state: AlignmentState) => Promise<DocumentApprovalOutcome>;
 };
+
+export type DocumentApprovalOutcome = "handled" | "proceed" | "blocked";
 
 export type DocumentWorkApprovalBridge = Pick<SessionDocumentWorkControls, "beforeApprove">;
 
@@ -73,6 +86,10 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 
 	const available = backend === "pi";
 	const workId = view.snapshot?.work.workId;
+	// 路由判据只来自权威要求单（不是 renderer 标志）：普通编码/解释/读材料一律走原生流程。
+	const alignmentBrief = useAtomValue(runtimeAtom)?.state?.alignment?.brief;
+	const roundRoute = shouldRouteRoundToDocumentWork({ backend, mode: useAtomValue(modeAtom), brief: alignmentBrief });
+	const documentRound = roundRoute.route === "document";
 
 	const refresh = useCallback(async () => {
 		if (!available) return;
@@ -108,14 +125,16 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		return unsubscribe;
 	}, [available, sessionId, setView, refresh]);
 
-	/** 首次实际提交：需求模式下第一条真实消息落地即建记录；空模式与非需求模式都不建。 */
+	/**
+	 * 建记录：**只有本轮被判定为正式文稿**时才建。
+	 *
+	 * 普通项目开发（重构代码/修 bug/解释材料）即使在需求模式里也 0 个 create；
+	 * 要求单还没发布（模型还在澄清）时也无从判断，按普通处理——模糊不强制归档。
+	 */
 	useEffect(() => {
-		if (!available || view.loading || workId || creatingRef.current) return;
+		if (!available || !documentRound || view.loading || workId || creatingRef.current) return;
 		const submission = store.get(submissionAtom);
-		const mode = store.get(modeAtom);
-		if (!submission || mode !== "alignment") return;
-		const alignment = store.get(runtimeAtom)?.state?.alignment;
-		if (!alignment?.briefId) return;
+		if (!submission) return;
 		creatingRef.current = true;
 		void (async () => {
 			const created = await desktopApi.documentWork
@@ -131,7 +150,26 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 			creatingRef.current = false;
 			if (created && created.ok) await refresh();
 		})();
-	}, [available, view.loading, workId, store, submissionAtom, modeAtom, runtimeAtom, sessionId, refresh]);
+	}, [available, documentRound, view.loading, workId, store, submissionAtom, sessionId, refresh]);
+
+	/** 建记录（幂等）：批准前发现"本轮是文稿但还没记录"时补建。 */
+	const ensureWork = useCallback(async (): Promise<DocumentWorkRecord | undefined> => {
+		const existing = store.get(viewAtom).snapshot?.work;
+		if (existing) return existing;
+		const created = await desktopApi.documentWork
+			.create({
+				requestId: `create_${sessionId}_${Date.now().toString(36)}`,
+				sessionId,
+				sourceTurnId: `turn_${sessionId.slice(0, 24)}`,
+				title: t("documentWork.defaultTitle"),
+				outputRootId: "",
+			})
+			.catch(() => undefined);
+		if (!created || !created.ok) return undefined;
+		const snapshot = await desktopApi.documentWork.get({ workId: created.value.workId, sessionId }).catch(() => undefined);
+		if (snapshot && snapshot.ok) setView((value) => ({ ...value, loading: false, snapshot: snapshot.value }));
+		return created.value;
+	}, [sessionId, setView, store, viewAtom]);
 
 	const chooseOutputRoot = useCallback(() => {
 		void (async () => {
@@ -175,21 +213,31 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		})();
 	}, [refresh, runtimeAtom, sessionId, store, viewAtom]);
 
-	/** 批准前的准备 + 分发：任何一步不通过都不放行执行。 */
+	/**
+	 * 批准前的准备 + 分发。
+	 *
+	 * 只有"本轮确定是正式文稿"才介入：普通开发直接放行，原生 approve 正常且只发一次，
+	 * 既不建记录、不 prepare/start，也不要求成果目录。
+	 */
 	const beforeApprove = useCallback(
-		async (state: AlignmentState): Promise<boolean> => {
-			if (!available) return true;
+		async (state: AlignmentState): Promise<DocumentApprovalOutcome> => {
+			if (!available) return "proceed";
+			const brief = state.brief ?? alignmentBrief;
+			const route = shouldRouteRoundToDocumentWork({ backend, mode: "alignment", brief });
+			// 普通开发/解释/读材料：一行都不碰文稿，原生批准照发一次。
+			if (route.route !== "document") return "proceed";
 			const current = store.get(viewAtom);
-			const work = current.snapshot?.work;
-			if (!work) return true;
-			if (!work.outputRootId) {
+			const work = current.snapshot?.work ?? (await ensureWork());
+			if (!work) return "proceed";
+			const gate = shouldBlockDocumentApproval({ route: "document", hasWork: true, hasOutputRoot: Boolean(work.outputRootId) });
+			if (gate.block) {
 				showNotice(t("documentWork.needOutputFolder"));
-				return false;
+				return "blocked";
 			}
 			const runtime = store.get(runtimeAtom);
 			if (!runtime?.agentId) {
 				showNotice(t("documentWork.error.runtimeChanged"));
-				return false;
+				return "blocked";
 			}
 			const target: SessionRuntimeTarget = { sessionId, agentId: runtime.agentId, runtimeGeneration: runtime.runtimeGeneration };
 			setView((value) => ({ ...value, pending: true, error: undefined }));
@@ -207,7 +255,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 				const message = prepared ? failureCopy(prepared.error) : t("documentWork.error.generic", { code: "IPC" });
 				setView((value) => ({ ...value, pending: false, error: message }));
 				showNotice(message);
-				return false;
+				return "blocked";
 			}
 			const started = await desktopApi.documentWork
 				.start({
@@ -225,16 +273,18 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 				const message = started ? failureCopy(started.error) : t("documentWork.error.generic", { code: "IPC" });
 				setView((value) => ({ ...value, pending: false, error: message }));
 				showNotice(message);
-				return false;
+				return "blocked";
 			}
 			setView((value) => ({ ...value, pending: false }));
-			return true;
+			// 主进程已经在 `start` 里发出了唯一一次 `/align approve`：调用方只同步状态，不再发原生批准。
+			return "handled";
 		},
-		[available, runtimeAtom, sessionId, setView, store, viewAtom],
+		[available, alignmentBrief, backend, ensureWork, runtimeAtom, sessionId, setView, store, viewAtom],
 	);
 
 	return {
 		available,
+		documentRound,
 		snapshot: view.snapshot,
 		outputRoots: view.outputRoots,
 		pending: view.pending,

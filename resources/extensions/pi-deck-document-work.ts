@@ -37,12 +37,18 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	let phase: DocumentWorkBindingState["phase"] = "bound";
 	let lastReport: DocumentArtifactCandidateReport | undefined;
 	let invalidBindWarning: string | undefined;
+	/** 本轮回合是否已经结束（agent_end）：结束后不再算"进行中"，也就不再约束批准。 */
+	let roundFinished = false;
 	/** 已经报过意向的用户轮次，避免同一轮重复上报。 */
 	const reportedIntents = new Set<string>();
 
-	/** 一轮正在进行（绑定已确认但还没结算）；只有这时才注入上下文、才允许汇报。 */
+	/**
+	 * 一轮正在进行（绑定已确认、回合未结束）；只有这时才注入上下文、才允许汇报、
+	 * 才让批准闸约束确认单。回合一旦结束（agent_end，含中断），闸就放开——
+	 * 归档由主进程按 settled 判据决定，扩展的"回合结束"不等于归档完成。
+	 */
 	function roundActive(): boolean {
-		return Boolean(binding) && (phase === "bound" || phase === "running");
+		return Boolean(binding) && (phase === "bound" || phase === "running") && !roundFinished;
 	}
 
 	function activeNativeSession(): string | undefined {
@@ -82,6 +88,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		binding = undefined;
 		lastReport = undefined;
 		phase = "bound";
+		roundFinished = true;
 		invalidBindWarning = undefined;
 		reportedIntents.clear();
 		const nativeSessionId = ctx.sessionManager.getSessionId();
@@ -101,11 +108,19 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		phase = "reported";
 	}
 
-	/** 对齐批准闸：绑定生效期间批准必须指向同一份确认单。 */
+	/**
+	 * 对齐批准闸：**只有进行中的文稿轮次**才约束批准，而且只约束"它自己那一份确认单"。
+	 *
+	 * 关键边界（审查修正项 1）：归档/取消/失败之后保留文稿关联只用于读与改稿意向，
+	 * 绝不注入旧制作指令、也不阻断同一会话里后来的普通 Plan/编码确认。
+	 * 绑定载荷损坏过（invalidBindWarning）同样不阻断：那时没有进行中的轮次，
+	 * 文稿侧会在分发阶段如实失败，而用户的普通任务必须照常执行。
+	 */
 	setDocumentWorkApprovalGate({
 		refuse: (briefId: string, revision: number) => {
-			if (!binding) return invalidBindWarning;
+			if (!binding || !roundActive()) return undefined;
 			const bound = binding.briefId;
+			// 改稿轮的绑定没有 briefId：它不约束任何确认单。
 			if (!bound) return undefined;
 			if (bound !== briefId) return `Document work ${binding.workId} is bound to another confirmation sheet; approve that one or cancel this round.`;
 			if (binding.briefRevision !== undefined && binding.briefRevision !== revision) return `Document work ${binding.workId} is bound to confirmation ${bound} revision ${binding.briefRevision}; approve that exact revision or cancel this round.`;
@@ -178,6 +193,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				phase = "running";
+				roundFinished = false;
 				publish(ctx);
 				pi.sendMessage({ customType: EXECUTE_TYPE, content: `${buildWorkContext(current)}\n\nThe user asked for this change in an earlier message (frozen by the desktop app):\n${current.instruction.text}`, display: false, details: { workId: current.workId, attemptId: current.attemptId, sourceTurnId: current.instruction.sourceTurnId } }, { triggerTurn: true });
 				return;
@@ -201,6 +217,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 			binding = decoded;
 			lastReport = undefined;
 			phase = "bound";
+			roundFinished = false;
 			invalidBindWarning = undefined;
 			publish(ctx);
 		},
@@ -306,6 +323,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
+		// 回合结束：此后不再算"进行中"（不注入旧制作指令、不阻断其他确认单）。
+		roundFinished = true;
 		if (!binding || binding.nativeSessionId !== ctx.sessionManager.getSessionId()) return;
 		const last = [...event.messages].reverse().find((message) => message.role === "assistant");
 		if (last && (last.stopReason === "aborted" || last.stopReason === "error")) {
@@ -327,6 +346,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		binding = undefined;
 		lastReport = undefined;
 		phase = "bound";
+		roundFinished = true;
 		invalidBindWarning = undefined;
 		reportedIntents.clear();
 	});
