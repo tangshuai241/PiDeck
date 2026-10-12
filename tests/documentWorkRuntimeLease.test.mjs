@@ -15,7 +15,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const { DocumentWorkStore } = loadTsCommonJs("src/main/document-work/DocumentWorkStore.ts");
 const { DocumentWorkService } = loadTsCommonJs("src/main/document-work/DocumentWorkService.ts");
 const { DocumentWorkRuntimeAdapter } = loadTsCommonJs("src/main/document-work/DocumentWorkRuntimeAdapter.ts");
-const { DocumentWorkRuntimeLease } = loadTsCommonJs("src/main/document-work/DocumentWorkRuntimeLease.ts");
+const { DocumentWorkRuntimeLease, DocumentWorkRuntimeLease: DocumentWorkLease } = loadTsCommonJs("src/main/document-work/DocumentWorkRuntimeLease.ts");
 
 const ALIGNMENT = { briefId: "brief_1", revision: 3, phase: "ready", hasOpenQuestions: false, brief: { goal: "写一份报告", scope: ["s"], materials: [], deliverable: "报告.docx", preserve: [], acceptance: ["a"], questions: [] } };
 
@@ -55,7 +55,7 @@ function harness(options = {}) {
 		lease,
 	});
 	const createWork = (sessionId, requestId) => store.createWork({ requestId, requestDigest: `d_${requestId}`, sessionId, sourceTurnId: "turn_1", title: "t", outputRootId: root.value.outputRootId });
-	return { store, service, runtime, events, adapter, lease, root, second, createWork, pathMemory };
+	return { store, service, runtime, events, adapter, lease, root, second, createWork, pathMemory, storeFs };
 }
 
 async function prepareAndStart(h, work, requestId, target) {
@@ -273,4 +273,137 @@ test("取消未知占用必须先核对身份：跨会话/错误 agent/generatio
 	const workB = h.createWork(STABLE_SESSION, "create_b").value;
 	const next = await prepareAndStart(h, workB, "B", { ...h.runtime.target });
 	assert.equal(next.ok, true, next.ok ? "" : JSON.stringify(next.error));
+});
+
+test("取消写接口的 CAS 与幂等契约：非法/过期 revision 无副作用，正确请求一次 abort，重放取持久回执", async () => {
+	const h = harness({ bindAckMs: 20 });
+	const workA = h.createWork(STABLE_SESSION, "create_a").value;
+	const started = await prepareAndStart(h, workA, "A", { ...h.runtime.target });
+	const attemptId = started.value.attemptId;
+	for (let index = 0; index < 200 && h.store.readWork(workA.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(h.store.readWork(workA.workId).value.operations[attemptId].state, "unknown");
+	const revisionNow = () => h.store.readWork(workA.workId).value.record.revision;
+	const blocking = () => h.store.blockingUnknownOperation({ sessionId: STABLE_SESSION, target: { agentId: "agent-1", runtimeGeneration: 1 } });
+	const aborts = () => h.runtime.calls.filter((call) => call.kind === "abort").length;
+	const base = { workId: workA.workId, attemptId, expectedRuntime: { ...h.runtime.target, piSessionId: NATIVE_SESSION } };
+	assert.equal(blocking()?.attemptId, attemptId);
+
+	// 1) 非法 expectedRevision：INVALID_INPUT，没有 abort，也没有解除未知占用。
+	for (const [label, bad] of [
+		["missing", undefined],
+		["negative", -1],
+		["fractional", 1.5],
+		["string", "1"],
+	]) {
+		const rejected = await h.service.cancel({ ...base, requestId: `cancel_bad_${label}`, expectedRevision: bad });
+		assert.equal(rejected.ok, false, label);
+		assert.equal(rejected.error.code, "INVALID_INPUT", label);
+	}
+	assert.equal(aborts(), 0, "非法 revision 不得 abort");
+	assert.equal(blocking()?.attemptId, attemptId, "非法 revision 不得解除未知占用");
+
+	// 2) 过期 expectedRevision：REVISION_CONFLICT + currentRevision，同样无副作用。
+	const stale = await h.service.cancel({ ...base, requestId: "cancel_stale", expectedRevision: revisionNow() + 5 });
+	assert.equal(stale.ok, false);
+	assert.equal(stale.error.code, "REVISION_CONFLICT");
+	assert.equal(stale.error.currentRevision, revisionNow());
+	assert.equal(aborts(), 0, "过期 revision 不得 abort");
+	assert.equal(blocking()?.attemptId, attemptId, "过期 revision 不得解除未知占用");
+
+	// 3) 正确请求：清理未知占用。未知意味着"无法证明那一轮是否在跑"，
+	// 因此显式清理**不** abort（没有可证明在跑的东西），只解除保守占用。
+	const ok = await h.service.cancel({ ...base, requestId: "cancel_ok", expectedRevision: revisionNow() });
+	assert.equal(ok.ok, true, ok.ok ? "" : JSON.stringify(ok.error));
+	assert.equal(ok.value.state, "interrupted");
+	assert.equal(aborts(), 0, "未知清理不 abort");
+	assert.equal(blocking(), undefined);
+
+	// 4) 同 requestId 同载荷重放：返回持久原回执，不再 abort（revision 已被推进也不影响）。
+	const replay = await h.service.cancel({ ...base, requestId: "cancel_ok", expectedRevision: revisionNow() });
+	assert.equal(replay.ok, true);
+	assert.equal(replay.value.attemptId, attemptId);
+	assert.equal(replay.value.state, "interrupted");
+	assert.equal(aborts(), 0, "重放不得二次 abort");
+
+	// 5) 同 requestId 异载荷：IDEMPOTENCY_CONFLICT。
+	const conflict = await h.service.cancel({ ...base, requestId: "cancel_ok", attemptId: "attempt_other", expectedRevision: revisionNow() });
+	assert.equal(conflict.ok, false);
+	assert.equal(conflict.error.code, "IDEMPOTENCY_CONFLICT");
+	assert.equal(aborts(), 0);
+
+	// 6) 重启台账恢复：新 store/service 读同一份磁盘，同 requestId 仍取回原回执且不 abort。
+	const restartedStore = new DocumentWorkStore({ dir: "/data", fs: h.storeFs, now: () => 900, newId: (prefix) => `${prefix}_restart` });
+	const restartedAdapter = new DocumentWorkRuntimeAdapter({ ports: h.runtime.port, events: createFakeEventSource().source });
+	const restarted = new DocumentWorkService({
+		store: restartedStore,
+		runtime: h.runtime.port,
+		adapter: restartedAdapter,
+		archive: { prepareStaging: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/work/staging/round" } }), settleAndArchive: async () => ({ state: "unknown", code: "DISPATCH_UNKNOWN" }) },
+		pathFs: h.pathMemory.fs,
+		workRoot: "C:/userData/document-work",
+		emit: () => undefined,
+		readBaseHeadings: async () => [],
+		now: () => 900,
+		newId: (prefix) => `${prefix}_restart`,
+		bindAckMs: 20,
+		lease: new DocumentWorkLease({ now: () => 900 }),
+	});
+	const replayedAfterRestart = await restarted.cancel({ ...base, requestId: "cancel_ok", expectedRevision: revisionNow() });
+	assert.equal(replayedAfterRestart.ok, true, replayedAfterRestart.ok ? "" : JSON.stringify(replayedAfterRestart.error));
+	assert.equal(replayedAfterRestart.value.attemptId, attemptId);
+	assert.equal(replayedAfterRestart.value.state, "interrupted");
+	assert.equal(aborts(), 0, "重启后的重放仍不得 abort");
+});
+
+test("取消进行中的 attempt：abort 恰好一次，重放与过期版本都不会再次 abort", async () => {
+	// settleAndArchive 挂住不返回：让操作停在 running，才能观察真实 abort 行为。
+	const h = harness({ bindAckMs: 60, settle: () => new Promise(() => undefined) });
+	// 绑定确认自动回灌：操作进入 running（与真实生产一致）。
+	const original = h.runtime.port.sendControl.bind(h.runtime.port);
+	h.runtime.port.sendControl = async (input) => {
+		const result = await original(input);
+		const bind = /^\/tpa-work bind (\S+)$/.exec(input.message);
+		if (bind) {
+			const payload = JSON.parse(Buffer.from(bind[1], "base64url").toString("utf8"));
+			h.events.emit("agent-1", {
+				type: "message_end",
+				sessionId: input.sessionId,
+				runtimeGeneration: input.expectedRuntime.runtimeGeneration,
+				message: {
+					role: "custom",
+					customType: "tpa-document-work-state",
+					display: false,
+					details: { documentWork: { schemaVersion: 1, sessionId: payload.sessionId, nativeSessionId: payload.nativeSessionId, workId: payload.workId, attemptId: payload.attemptId, preparationId: payload.preparationId, digest: payload.digest, phase: "bound" } },
+				},
+			});
+		}
+		return result;
+	};
+	const workA = h.createWork(STABLE_SESSION, "create_a").value;
+	const started = await prepareAndStart(h, workA, "A", { ...h.runtime.target });
+	const attemptId = started.value.attemptId;
+	for (let index = 0; index < 200 && h.store.readWork(workA.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(h.store.readWork(workA.workId).value.operations[attemptId].state, "running");
+	const revisionNow = () => h.store.readWork(workA.workId).value.record.revision;
+	const aborts = () => h.runtime.calls.filter((call) => call.kind === "abort").length;
+	const base = { workId: workA.workId, attemptId, expectedRuntime: { ...h.runtime.target, piSessionId: NATIVE_SESSION } };
+
+	// 过期版本：REVISION_CONFLICT 且不 abort。
+	const stale = await h.service.cancel({ ...base, requestId: "cancel_stale_running", expectedRevision: revisionNow() + 1 });
+	assert.equal(stale.ok, false);
+	assert.equal(stale.error.code, "REVISION_CONFLICT");
+	assert.equal(aborts(), 0);
+
+	// 正确请求：一次 abort。
+	const ok = await h.service.cancel({ ...base, requestId: "cancel_ok_running", expectedRevision: revisionNow() });
+	assert.equal(ok.ok, true, ok.ok ? "" : JSON.stringify(ok.error));
+	assert.equal(ok.value.state, "interrupted");
+	assert.equal(aborts(), 1);
+
+	// 重放：取回原回执，不再 abort。
+	const replay = await h.service.cancel({ ...base, requestId: "cancel_ok_running", expectedRevision: revisionNow() });
+	assert.equal(replay.ok, true);
+	assert.equal(replay.value.attemptId, attemptId);
+	assert.equal(aborts(), 1, "重放不得二次 abort");
+	assert.equal(h.store.readWork(workA.workId).value.record.requests.cancel_ok_running?.state, "interrupted", "取消请求进了持久台账");
 });

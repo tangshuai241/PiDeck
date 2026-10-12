@@ -390,47 +390,47 @@ node scripts/generate-extensions-manifest.mjs --check
 
 主协调者独立审阅后指出六类缺口，本轮逐条修正并补了行为验证：
 
-1. **会话身份**：绑定载荷同时携带稳定 catalog 会话 id 与**原生 Pi 会话 id**，扩展只用后者校验（新草稿两者不同，旧实现会拒绝所有绑定）；主进程侧 `readAgentRuntimeIdentity` 取原生身份，恢复按原生 id 匹配，换代/旧 runtime 迟到消息被标 stale。联合测试用真实扩展 handler + 真实 service/adapter，覆盖恢复、restart 与迟到拒绝。
-2. **授权与当前范围**：首次制作只认**当前**对齐确认单（版本不符→失效、用户指令/未决问题→拒绝）；改稿授权要求该轮是**最后一条真实用户消息**且正文指纹与读回正文一致，角色必须是 user，否定句/提问/assistant 文本/旧轮/编辑后正文一律不授权；范围由**本轮指令**推导（"只改第二节"落到冻结基稿里真实存在的章节），不再沿用上一轮的全篇 scope。
-3. **普通聊天改稿入口**：扩展在普通聊天里只报 `tpa-document-work-intent` **候选**；主进程重新验证、等该回合权威稳定且同 runtime 后准备、bind 并只派发一次 `/tpa-work revise`，扩展用主进程冻结的指令正文触发回合。联合测试证明真的产出并归档了新版本。
-4. **Windows anydoc**：解析器把 npm `.cmd` shim 还原成 `node + 真实 JS 入口`（完全不经 shell），不再接受无扩展名的 bash shim；固定 argv、`shell:false`、同步 spawn 失败/非零退出/超时都结算；真实进程测试覆盖带空格路径与真机 `anydoc --version`。材料根扩到成果目录 + 会话项目目录。
-5. **检查器 worker**：解析与比较移到可终止的 `worker_threads` worker（`resources/document-work/*.cjs`，随包分发），2 秒硬截止用 `terminate()` 真打断，并发 2；页眉页脚正文、编号、表格、修订、文本框、重复标题、异常 ZIP/XML、超预算一律 `unverified`；同长度格式变化由逐块格式指纹（真实哈希）与整篇格式哈希证据支撑。程序格式检查不等于渲染验收。
-6. **档案损坏与幂等**：主档损坏时**不自动修复、不重建**，`.bak` 只作只读展示，损坏文件原样保留且写入与新执行被拒；`prepare/start/cancel` 全程持按 workId 的互斥锁，重复确认只发一次 approve 与实际 prompt，未知分发不重放。
+1. 会话身份：绑定载荷同时携带稳定 catalog 会话 id 与原生 Pi 会话 id，扩展只用后者校验（新草稿两者不同，旧实现会拒绝所有绑定）；主进程侧 `readAgentRuntimeIdentity` 取原生身份，恢复按原生 id 匹配，换代/旧 runtime 迟到消息被标 stale。联合测试用真实扩展 handler + 真实 service/adapter，覆盖恢复、restart 与迟到拒绝。
+2. 授权与当前范围：首次制作只认当前对齐确认单（版本不符→失效、用户指令/未决问题→拒绝）；改稿授权要求该轮是最后一条真实用户消息且正文指纹与读回正文一致，角色必须是 user，否定句/提问/assistant 文本/旧轮/编辑后正文一律不授权；范围由本轮指令推导（"只改第二节"落到冻结基稿里真实存在的章节），不再沿用上一轮的全篇 scope。
+3. 普通聊天改稿入口：扩展在普通聊天里只报 `tpa-document-work-intent` 候选；主进程重新验证、等该回合权威稳定且同 runtime 后准备、bind 并只派发一次 `/tpa-work revise`，扩展用主进程冻结的指令正文触发回合。联合测试证明真的产出并归档了新版本。
+4. Windows anydoc：解析器把 npm `.cmd` shim 还原成 `node + 真实 JS 入口`（完全不经 shell），不再接受无扩展名的 bash shim；固定 argv、`shell:false`、同步 spawn 失败/非零退出/超时都结算；真实进程测试覆盖带空格路径与真机 `anydoc --version`。材料根扩到成果目录 + 会话项目目录。
+5. 检查器 worker：解析与比较移到可终止的 `worker_threads` worker（`resources/document-work/*.cjs`，随包分发），2 秒硬截止用 `terminate()` 真打断，并发 2；页眉页脚正文、编号、表格、修订、文本框、重复标题、异常 ZIP/XML、超预算一律 `unverified`；同长度格式变化由逐块格式指纹（真实哈希）与整篇格式哈希证据支撑。程序格式检查不等于渲染验收。
+6. 档案损坏与幂等：主档损坏时不自动修复、不重建，`.bak` 只作只读展示，损坏文件原样保留且写入与新执行被拒；`prepare/start/cancel` 全程持按 workId 的互斥锁，重复确认只发一次 approve 与实际 prompt，未知分发不重放。
 
 仍属未验收：真实模型端到端（初稿 → 改稿 → 重开）、完整 Electron 交互与安装包分发、Word 局部修改保真度、方案 §7 的性能目标（p95）未实测。
 
 ## 14. 第二轮审查修正（实现 B · 2026-10-12）
 
-1. **普通 Plan 不被文稿流程阻断**：新增纯策略 `src/shared/documentWorkTarget.ts`（renderer 与主进程共用），
+1. 普通 Plan 不被文稿流程阻断：新增纯策略 `src/shared/documentWorkTarget.ts`（renderer 与主进程共用），
    `classifyDocumentTarget`/`shouldRouteRoundToDocumentWork`/`shouldBlockDocumentApproval` 只从权威要求单的
    goal/deliverable 判断"本轮是否正式文稿"。普通开发（重构代码、修 bug、解释材料）在需求模式下也
-   **0 个文稿 create/prepare/start、不要求成果目录**，原生 approve 一次；`resolveCreateAuthorization` 在主进程侧
+   0 个文稿 create/prepare/start、不要求成果目录，原生 approve 一次；`resolveCreateAuthorization` 在主进程侧
    用同一判据再挡一次，renderer 标志无法自证文稿授权。
-2. **批准只发一次**：`beforeApprove` 改为三态 `handled | proceed | blocked`。文稿轮次的 `/align approve`
+2. 批准只发一次：`beforeApprove` 改为三态 `handled | proceed | blocked`。文稿轮次的 `/align approve`
    只由主进程的 dispatcher 发出，前端在 `handled` 分支只同步"退出对齐模式 + 清 pending/error"，
    不再发原生批准；普通开发走 `proceed`（原生一次）；失败走 `blocked`（两边都不发）。
-3. **扩展批准闸只约束进行中的同轮次**：`roundActive()` 增加回合结束（agent_end）判定；
+3. 扩展批准闸只约束进行中的同轮次：`roundActive()` 增加回合结束（agent_end）判定；
    归档/取消/失败后保留文稿关联只用于读与改稿意向，不再注入旧制作指令、不再阻断同会话后续的
    普通 Plan 确认；绑定载荷损坏也不再永久阻断批准。
-4. **同一运行时排他租约**：新增 `src/main/document-work/DocumentWorkRuntimeLease.ts`，
+4. 同一运行时排他租约：新增 `src/main/document-work/DocumentWorkRuntimeLease.ts`，
    以运行时身份（sessionId + agentId + generation + 原生会话 id）为键，覆盖"占用 → 绑定 → 运行 → 权威结算"。
-   两件不同工作在同一运行时并发确认时，后到的一件在**发出绑定之前**就被拒（`RUNTIME_BUSY`）；
+   两件不同工作在同一运行时并发确认时，后到的一件在发出绑定之前就被拒（`RUNTIME_BUSY`）；
    不同运行时仍可并行；取消与终态释放租约且只释放自己那一份；未知分发的重放保护仍来自 requestId 台账与终态。
    锁顺序固定：先 workId 互斥，再运行时租约（同步 Map，无 await，不成环）。
 
 ## 15. 第三轮审查修正（实现 B · 批准回执与未知运行时占用）
 
-1. **建记录失败必须拦下**：`beforeApprove` 已确定本轮是正式文稿后，`ensureWork` 失败（存档不可写/校验失败）
+1. 建记录失败必须拦下：`beforeApprove` 已确定本轮是正式文稿后，`ensureWork` 失败（存档不可写/校验失败）
    改为返回 `blocked` 并给出明确错误，绝不退回原生 approve 绕过归档与检查；普通 coding 仍 `proceed`。
-2. **批准 fence 冻结**：`useSessionAlignmentControls.approve` 在 `await` 文稿桥**之前**冻结运行时三元组与
+2. 批准 fence 冻结：`useSessionAlignmentControls.approve` 在 `await` 文稿桥之前冻结运行时三元组与
    确认单版本，`await` 之后只与冻结快照比较。换代时旧点击不再改动新运行时的模式/pending/error，
    也不会把旧确认单发给新运行时。
-3. **`handled` 不等于已批准**：`start` 只表示主进程收取了本轮操作（后台可能仍在等绑定确认）。
-   前端在 `handled` 分支等待**同一 frozen briefId+revision+runtime** 的 `approved/complete` 回执
+3. `handled` 不等于已批准：`start` 只表示主进程收取了本轮操作（后台可能仍在等绑定确认）。
+   前端在 `handled` 分支等待同一 frozen briefId+revision+runtime 的 `approved/complete` 回执
    （复用 `waitForAlignmentAcknowledgement`）才切换 UI；超时/失败/换代保留实际状态与输入。
    唯一 approve owner 仍是主进程，桥不额外发批准。
-4. **未知分发保守占用运行时**：`unknown` 不再自动释放同运行时。`DocumentWorkStore.blockingUnknownOperation`
-   是**持久化**判定（重启后仍生效）：同一会话里存在结果未知且 runtime 三代组相同的操作时，
+4. 未知分发保守占用运行时：`unknown` 不再自动释放同运行时。`DocumentWorkStore.blockingUnknownOperation`
+   是持久化判定（重启后仍生效）：同一会话里存在结果未知且 runtime 三代组相同的操作时，
    新的文稿 attempt（含另一件工作的新 requestId）一律 `DISPATCH_UNKNOWN` 拒绝；解除方式只有
    用户显式取消（`unknown → interrupted`）或会话换绑到新运行时。租约与 workId 互斥顺序不变，清理成对。
 
@@ -439,6 +439,22 @@ node scripts/generate-extensions-manifest.mjs --check
 `cancel` 的 `unknown` 清理分支原先在身份核对之前执行：错误会话/agent/世代（乃至另一个会话）能解除
 别人的未知占用。现在顺序固定为：形态校验（`INVALID_INPUT`）→ 会话归属（跨会话 `WORK_NOT_FOUND`）
 → attempt 归属（未知 attempt `WORK_NOT_FOUND`）→ 三代组一致（不符 `RUNTIME_CHANGED`）→ 才是清理。
-清理本身只表示"解除这条保守占用、让运行时可以被重新使用"，**不**表示旧派发没有执行过；
+清理本身只表示"解除这条保守占用、让运行时可以被重新使用"，不表示旧派发没有执行过；
 那一轮的副作用仍然未知，既不会重放也不会补记。同运行时的保守占用由持久化判定
 （`blockingUnknownOperation`）持有，内存租约只表达"同一时刻只有一件工作在绑定/运行"。
+
+### 15.2 取消写接口的 CAS 与幂等契约（B5）
+
+`cancel` 是写接口，必须遵守方案里的 `WorkMutation` 契约，现在顺序固定为：
+
+1. 字段校验：`expectedRevision` 必须是非负安全整数（缺失/负数/小数/字符串一律 `INVALID_INPUT`），
+   `expectedRuntime` 必须携带完整三代组；
+2. 幂等重放：同 `requestId` 与同载荷先在持久台账里取回原回执（成功与失败回执都可重放），
+   因此不会因为 revision 被自己推进过而失败，也不会 abort 第二次；同 ID 异载荷 `IDEMPOTENCY_CONFLICT`；
+3. 归属校验：会话归属（跨会话 `WORK_NOT_FOUND`）→ attempt 归属（`WORK_NOT_FOUND`）→ 三代组一致（`RUNTIME_CHANGED`）；
+4. 版本校验：`expectedRevision` 与工作记录不符即 `REVISION_CONFLICT`（带 `currentRevision`），
+   既不 abort，也不解除未知占用；
+5. 副作用：`unknown` 清理（不 abort，只解除保守占用）或进行中的 `abort` + `interrupted`；
+   取消请求本身写进索引台账与工作记录的 `requests`，重启后仍可按 requestId 重放。
+
+审查记录收口在 15.1 / 15.2 两节，不再保留中间轮次的临时状态描述。

@@ -32,7 +32,15 @@ const CHANGE_KIND: Record<ArchiveOutcome["state"], DocumentWorkChangedEvent["cha
  * 结算：只改操作与记录，不再调用模型；失败保留 staging 与输入。
  * 返回本次跃迁对应的推送事件（记录读取失败时为 undefined）。
  */
-export function finishOperation(store: DocumentWorkStore, workId: string, attemptId: string, outcome: ArchiveOutcome, now: () => number): DocumentWorkChangedEvent | undefined {
+export function finishOperation(
+	store: DocumentWorkStore,
+	workId: string,
+	attemptId: string,
+	outcome: ArchiveOutcome,
+	now: () => number,
+	/** 额外登记的 requestId（取消请求）：让同 requestId 的重放能取回同一份回执，而不是按新请求再执行一次。 */
+	alias?: { requestId: string; requestDigest: string },
+): DocumentWorkChangedEvent | undefined {
 	const read = store.readWork(workId);
 	if ("error" in read) return undefined;
 	const applied = store.withWork(workId, read.value.revision, (bucket) => {
@@ -46,7 +54,12 @@ export function finishOperation(store: DocumentWorkStore, workId: string, attemp
 			...(error ? { error } : {}),
 			...("versionId" in outcome && outcome.versionId ? { versionId: outcome.versionId } : {}),
 		};
-		const requests = { ...bucket.record.requests, [operation.requestId]: { attemptId, requestDigest: operation.requestDigest, state: outcome.state } };
+		const requests = {
+			...bucket.record.requests,
+			// 操作自己的 requestId（重复确认/未知重放保护）与调用方追加的别名请求（取消请求）都进台账。
+			[operation.requestId]: { attemptId, requestDigest: operation.requestDigest, state: outcome.state },
+			...(alias ? { [alias.requestId]: { attemptId, requestDigest: alias.requestDigest, state: outcome.state } } : {}),
+		};
 		const versions = "versionId" in outcome && outcome.versionId && !bucket.record.versions.includes(outcome.versionId) ? [...bucket.record.versions, outcome.versionId] : bucket.record.versions;
 		const nextRecord = { ...bucket.record, requests, versions };
 		if (bucket.record.activeOperationId === attemptId) delete nextRecord.activeOperationId;

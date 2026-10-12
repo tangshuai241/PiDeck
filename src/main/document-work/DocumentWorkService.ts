@@ -457,12 +457,26 @@ export class DocumentWorkService {
 	private async cancelLocked(value: Record<string, unknown>): Promise<WorkResult<DocumentWorkOperation>> {
 		const workId = value.workId as string;
 		const attemptId = value.attemptId as string;
+		const requestId = value.requestId as string;
+		const expectedRevision = value.expectedRevision;
+		// 写接口的 WorkMutation 契约：expectedRevision 必须是非负安全整数，否则连读都不读。
+		if (!Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) return workFail("INVALID_INPUT", false, { detail: "expectedRevision must be a non-negative safe integer" });
 		const expected = value.expectedRuntime;
 		if (typeof expected !== "object" || expected === null) return workFail("INVALID_INPUT", false, { detail: "expectedRuntime is required" });
 		const triple = expected as Record<string, unknown>;
 		if (typeof triple.sessionId !== "string" || typeof triple.agentId !== "string" || !Number.isSafeInteger(triple.runtimeGeneration)) return workFail("INVALID_INPUT", false, { detail: "expectedRuntime must carry the full runtime triple" });
 		const read = this.deps.store.readWork(workId);
 		if ("error" in read) return read;
+		// 幂等：同 requestId 先返回**持久化的原回执**（在版本校验之前），
+		// 超时重放不会因为 revision 被自己推进过而失败，也不会 abort 第二次。
+		const requestDigest = digestOf({ kind: "cancel", workId, attemptId, runtime: { sessionId: triple.sessionId, agentId: triple.agentId, runtimeGeneration: triple.runtimeGeneration } });
+		const previous = this.deps.store.lookupRequest(requestId, requestDigest);
+		if (previous && "conflict" in previous) return workFail("IDEMPOTENCY_CONFLICT", false, { detail: "requestId was used with a different cancellation payload" });
+		if (previous) {
+			const previousAttemptId = read.value.record.requests[requestId]?.attemptId;
+			const receipt = previousAttemptId ? read.value.operations[previousAttemptId] : undefined;
+			if (receipt) return workOk(receipt);
+		}
 		// 会话归属：expectedRuntime 必须指向这条工作记录所属的会话，跨会话一律拒绝。
 		if (read.value.record.sessionId !== triple.sessionId) return workFail("WORK_NOT_FOUND", false, { detail: "this work does not belong to the runtime's session" });
 		const operation = read.value.operations[attemptId];
@@ -471,12 +485,16 @@ export class DocumentWorkService {
 		// 这一步必须在下面的 `unknown` 清理**之前**，否则错误 agent/generation（乃至别的会话）
 		// 就能解除别人的未知占用——未知占用是"无法证明没执行过"的保守状态，不能被任意身份清掉。
 		if (operation.runtime.agentId !== triple.agentId || operation.runtime.runtimeGeneration !== triple.runtimeGeneration) return workFail("RUNTIME_CHANGED", true, { detail: "the cancellation targets a different runtime than this attempt was dispatched to" });
+		// 版本校验：过期的取消请求不能 abort，也不能解除未知占用（先版本，再副作用）。
+		if (read.value.revision !== expectedRevision) return workFail("REVISION_CONFLICT", true, { currentRevision: read.value.revision, detail: "the work record advanced; retry with the current revision" });
 		if (this.isTerminal(operation.state) && operation.state !== "unknown") return workOk(operation);
 		// `unknown` 是唯一"终态但可显式清理"的状态：它是保守占用（阻止同运行时的新 attempt）。
 		// 用户显式清理只表示"解除这条保守占用、让运行时可以被重新使用"，
 		// **不**表示旧派发没有执行过——那一轮的副作用仍然未知，不会有任何重放或补记。
 		if (operation.state === "unknown") {
-			const cleared = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "DISPATCH_UNKNOWN", detail: "the user cleared an unknown outcome for this attempt" }, this.now);
+			const cleared = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "DISPATCH_UNKNOWN", detail: "the user cleared an unknown outcome for this attempt" }, this.now, { requestId, requestDigest });
+			// 索引级台账：让同 requestId 的重放（含重启后）能按 requestId 找到回执。
+			this.deps.store.recordRequest({ requestId, requestDigest, workId, kind: "operation" });
 			if (cleared) this.deps.emit(cleared);
 			this.lease.releaseWork(workId);
 			const afterClear = this.deps.store.readWork(workId);
@@ -487,7 +505,8 @@ export class DocumentWorkService {
 		if (!current || current.agentId !== operation.runtime.agentId || current.runtimeGeneration !== operation.runtime.runtimeGeneration) return workFail("RUNTIME_CHANGED", true, { detail: "the runtime for this attempt is gone; the run cannot be cancelled scoped" });
 		if (current.agentId !== triple.agentId || current.runtimeGeneration !== triple.runtimeGeneration) return workFail("RUNTIME_CHANGED", true, { detail: "the cancellation targets a stale runtime" });
 		await this.deps.runtime.abort({ sessionId: read.value.record.sessionId, agentId: current.agentId, runtimeGeneration: current.runtimeGeneration, ...(current.piSessionId ? { piSessionId: current.piSessionId } : {}) });
-		const event = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "cancelled by the user for this attempt only" }, this.now);
+		const event = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "RUNTIME_CHANGED", detail: "cancelled by the user for this attempt only" }, this.now, { requestId, requestDigest });
+		this.deps.store.recordRequest({ requestId, requestDigest, workId, kind: "operation" });
 		if (event) this.deps.emit(event);
 		this.lease.releaseWork(workId);
 		const after = this.deps.store.readWork(workId);
