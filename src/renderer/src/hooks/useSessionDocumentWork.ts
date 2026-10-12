@@ -307,15 +307,19 @@ ${alignment.brief.goal}`.slice(0, 2000),
 				const reason = error instanceof Error ? error.message : "notAcknowledged";
 				const message = reason === "runtimeChanged" ? t("alignment.runtimeChanged") : t("alignment.notAcknowledged");
 				showNotice(message);
-				// 不切模式、不触碰新 runtime 状态；错误要显式暴露而不是吞掉。
-				store.set(errorAtom, { code: "DISPATCH_UNKNOWN", retryable: true });
+				// 换代之后这一轮已经不是当前 runtime 的了：不写 errorAtom，也不改模式，
+				// 否则会用旧等待的结论覆盖新 runtime 自己的状态。错误仍要显式暴露，不吞。
+				if (stillCurrent()) store.set(errorAtom, { code: "DISPATCH_UNKNOWN", retryable: true });
 				return "aborted";
 			}
 			if (store.get(sessionComposerModeBySessionIdAtomFamily(sessionId)) === "alignment") store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
 			return "documentWorkDispatched";
 		} finally {
-			store.set(phaseAtom, "idle");
-			void refresh();
+			// 同一道 ownership 护栏：换代后旧一轮不得重置 phase（那是新 runtime 的状态）。
+			if (stillCurrent()) {
+				store.set(phaseAtom, "idle");
+				void refresh();
+			}
 		}
 	}, [enabled, sessionId, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, messagesAtom, refresh, targetNow]);
 

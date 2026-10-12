@@ -117,6 +117,11 @@ function harness({ initialRuntime = runtime(), view = WORK_VIEW, projectApproved
 		started,
 		alignmentNotAcknowledged,
 		setView: (next) => store.set(familyAtoms.get("view:s1"), next),
+		setPhase: (next) => store.set(familyAtoms.get("phase:s1"), next),
+		readPhase: () => store.get(familyAtoms.get("phase:s1")),
+		setError: (next) => store.set(familyAtoms.get("error:s1"), next),
+		readError: () => store.get(familyAtoms.get("error:s1")),
+		setRuntime: (next) => store.set(runtimes, { s1: next }),
 		setAlignment: (next) => store.set(runtimes, { s1: { ...store.get(runtimes).s1, state: { alignment: next } } }),
 		readAlignment: () => store.get(runtimes).s1?.state?.alignment,
 		mode: () => store.get(keyAtom("mode:s1", "normal")),
@@ -186,6 +191,25 @@ test("超时未收到权威回执：不切模式，错误显式暴露", async ()
 	assert.equal(h.mode(), "alignment", "没有权威回执就不能切模式");
 	assert.equal(h.notices.includes("alignment.notAcknowledged"), true);
 	assert.equal(h.mode() !== "normal", true);
+});
+
+test("等待期换代：旧等待的错误与 phase 不得覆盖新 runtime 自己的状态", async () => {
+	const h = harness();
+	const controls = h.render();
+	// 新 runtime 已经开始了自己的一轮：先占住 phase 与 error。
+	const bumped = { ...runtime(2), status: "running", state: { alignment: snapshot(2, "clarifying") } };
+	const waiting = controls.prepareAndStartForApproval();
+	await setImmediate();
+	h.setRuntime(bumped);
+	h.setPhase("starting");
+	h.setError({ code: "RUNTIME_BUSY", retryable: true });
+	const outcome = await waiting;
+	assert.equal(outcome, "aborted");
+	// 旧等待的 catch/finally 都不许碰新 runtime 的状态。
+	assert.equal(h.readPhase(), "starting", "旧等待不得把新 runtime 的 phase 重置成 idle");
+	assert.deepEqual(JSON.parse(JSON.stringify(h.readError())), { code: "RUNTIME_BUSY", retryable: true }, "旧等待不得写入自己的错误覆盖新 runtime");
+	assert.equal(h.mode(), "alignment");
+	assert.equal(h.notices.includes("alignment.runtimeChanged"), true, "换代要显式告知而不是静默");
 });
 
 test("回执来自不同的 brief：不算批准", async () => {
