@@ -6,7 +6,7 @@ import type { AnnouncementState } from "../shared/types/announcement";
 import type { HostPluginContext, HostPluginDesktopApi } from "../shared/types/hostPlugin";
 import type { PiDeckMcpDesktopApi } from "../shared/types/piDeckMcp";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
-import type { DocumentWorkChangedEvent, DocumentWorkOperation, DocumentWorkPrepareInput, DocumentWorkStartInput, DocumentWorkView, PreparedWork, WorkResult as DocumentWorkResult } from "../shared/types/documentWork";
+import type { AutoReviseResult, DocumentWorkChangedEvent, DocumentWorkOperation, DocumentWorkPrepareInput, DocumentWorkStartInput, DocumentWorkView, PreparedWork, WorkResult as DocumentWorkResult } from "../shared/types/documentWork";
 import type { ModelTraceRecord } from "../shared/types/bridge";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { DshHomeSharingState } from "../shared/types/dshHome";
@@ -1672,7 +1672,7 @@ const api = {
 		/** 持久操作并分发：授权在主进程复核，渲染层不能自证批准。 */
 		start: (input: DocumentWorkStartInput) => ipcRenderer.invoke(ipcChannels.documentWorkStart, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
 		/** 明确改稿自动接续：主进程读真实用户当前轮后决定是否接续。 */
-		autoRevise: (input: { sessionId: string; requestId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkAutoRevise, input) as Promise<DocumentWorkResult<{ engaged: boolean }>>,
+		autoRevise: (input: { sessionId: string; requestId: string; sourceTurnId?: string }) => ipcRenderer.invoke(ipcChannels.documentWorkAutoRevise, input) as Promise<DocumentWorkResult<AutoReviseResult>>,
 		/** 查询原请求的分发/运行/检查结果；未知结果不重新制作。 */
 		operation: (input: { workId: string; requestId: string; sessionId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkOperation, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
 		/** 只取消本轮；不影响其他会话或轮次。 */

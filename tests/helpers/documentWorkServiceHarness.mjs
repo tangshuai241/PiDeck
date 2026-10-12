@@ -79,6 +79,11 @@ function createHarness(options = {}) {
 					: undefined,
 		dispatch: async (input) => {
 			state.dispatched.push(input.message);
+			// 真实 pi 会把普通 prompt 落成 role:user（含宿主自己写的改稿提示）。
+			// 默认关闭以免影响既有夹具；需要验证「机器轮不算人类授权」的用例显式打开。
+			if (options.persistDispatchedPrompts && !input.message.startsWith("/")) {
+				state.messages.push({ id: `host-msg-${state.dispatched.length}`, role: "user", text: input.message, agentId: AGENT_ID, timestamp: Date.now() });
+			}
 			// 宿主可以结构化拒绝：真机上对齐输入守卫/扩展缺位就是这样把 accepted 置 false 的。
 			if (input.message.startsWith("/tpa-work bind ") && state.bindRejection) return { accepted: false, unknown: false, ...state.bindRejection };
 			if (input.message.startsWith("/align approve") && state.approveRejection) return { accepted: false, unknown: false, ...state.approveRejection };
@@ -153,6 +158,24 @@ function createHarness(options = {}) {
 		async operationPhase(workId, requestId) {
 			const result = await domain.service.getOperation(workId, requestId, SESSION_ID);
 			return result.ok ? result.value.phase : "missing";
+		},
+		/**
+		 * 改稿轮的正式派发（新契约）：提示词装在扩展 `execute` 载荷里，
+		 * 由扩展以自定义消息触发一轮——不再是 role:user 轮，因此不能用正文前缀去数。
+		 */
+		revisionExecutes() {
+			return state.dispatched.filter((message) => message.startsWith("/tpa-work execute "));
+		},
+		revisionPrompts() {
+			return harness.revisionExecutes().map((message) => {
+				const payload = shared.decodeBindingPayload(message.slice("/tpa-work execute ".length));
+				if (!payload) return "";
+				// 指令现在由扩展从冻结 scope 现场派生（载荷只带绑定），这里按同形规则复现期望文本。
+				const scope = payload.scope ?? { summary: "", sections: [], preserve: [] };
+				const sections = scope.sections?.length ? `\n声明要改的块：${scope.sections.join("、")}` : "";
+				const preserve = scope.preserve?.length ? `\n必须保留（逐块比较，改动会被判为未授权）：${scope.preserve.join("、")}` : "";
+				return `改稿要求：${scope.summary ?? ""}${sections}${preserve}\n只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
+			});
 		},
 		/** 扩展看到的绑定载荷：attemptId 与 staging 路径都以此为准，与真实扩展一致。 */
 		bindingPayload() {

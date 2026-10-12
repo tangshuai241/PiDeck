@@ -255,8 +255,8 @@ test("显式改稿轮：Pi 正忙时不插队，本轮结束后同一 runtime �
 
 		// 本轮稳定结束后：绑定 + 一次实际改稿提示。
 		harness.runtime.settle();
-		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
-		const revisionPrompts = harness.state.dispatched.filter((message) => message.startsWith("改稿要求："));
+		await waitFor(() => harness.revisionExecutes().length > 0);
+		const revisionPrompts = harness.revisionPrompts();
 		assert.equal(revisionPrompts.length, 1, "只允许一次实际改稿提示");
 		assert.match(revisionPrompts[0], /改稿要求/, "提示必须说明这是改稿轮");
 

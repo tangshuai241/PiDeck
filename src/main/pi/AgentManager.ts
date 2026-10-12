@@ -70,7 +70,7 @@ import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from 
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
 import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
-import { documentWorkBindingIdentity, isAlignmentActive, isAlignmentReadOnlyInputAllowed, isDocumentWorkMetadataCommandName, PI_DECK_ALIGNMENT_MODE_MARKER, parseDocumentWorkMetadataControl } from "../../shared/alignment";
+import { documentWorkBindingIdentity, isAlignmentActive, isAlignmentReadOnlyInputAllowed, isDocumentWorkMetadataCommandName, PI_DECK_ALIGNMENT_MODE_MARKER, parseDocumentWorkExecutionCommand, parseDocumentWorkMetadataControl } from "../../shared/alignment";
 import { latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
@@ -1914,7 +1914,9 @@ export class AgentManager {
 		// 派发的链路（绑定 → 批准 → 释放）。只允许精确语法，并在转发前逐项核对当前 runtime 身份；
 		// 语法不符、扩展不在或身份不对都必须结构化拒绝——绝不能把载荷当成普通模型提示交出去。
 		if (isDocumentWorkMetadataCommandName(input.message)) {
-			const control = parseDocumentWorkMetadataControl(input.message);
+			// 元数据控制（bind/release/unbind/status）与执行命令（execute）分开分类：
+			// 前者是零执行权限的元数据，后者会触发一个模型回合，只能走同一条身份闸门。
+			const control = parseDocumentWorkMetadataControl(input.message) ?? parseDocumentWorkExecutionCommand(input.message);
 			if (!control) return { accepted: false, error: this.translate("mainAgent.documentWorkInvalidCommand"), reason: "invalid_input" };
 			const expectedIdentity = this.alignmentIdentity(runtime);
 			// 绑定身份用 pi 原生会话 id 校验（稳定 SessionRecord.id 与它不同），两套身份快照都要冻结。
@@ -1931,7 +1933,7 @@ export class AgentManager {
 				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged"), reason: "runtime_changed" };
 			}
 			if (!loaded) return { accepted: false, error: this.translate("mainAgent.documentWorkUnavailable"), reason: "extension_unavailable" };
-			if (control.action === "bind") {
+			if ("payload" in control) {
 				const identity = documentWorkBindingIdentity(control.payload);
 				// 载荷声明的两套会话身份必须就是当前 runtime：别的会话的载荷不进这条会话。
 				if (!identity || identity.sessionId !== expectedIdentity.sessionId || identity.nativeSessionId !== expectedNativeSessionId) {

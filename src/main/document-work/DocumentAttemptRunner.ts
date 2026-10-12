@@ -17,6 +17,7 @@ import { encodeBindingPayload, workFailure, workSuccess, type WorkResult } from 
 import type { DocumentArtifactVersion, DocumentWorkChangedEvent, DocumentWorkExtensionState, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord, WorkErrorCode } from "../../shared/types/documentWork";
 import type { DocumentWorkDispatchOutcome } from "./DocumentWorkRuntimeAdapter";
 import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
+import { hashTurnText } from "./documentWorkTurn";
 import type { ArtifactStoreFailure, DocumentArtifactStore } from "./DocumentArtifactStore";
 import type { DocumentInspectionService } from "./DocumentInspectionService";
 import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
@@ -156,8 +157,16 @@ export class DocumentAttemptRunner {
 			await this.deps.store.saveOperation(bound);
 			this.emit(record, "running", bound.attemptId);
 			// 绑定之后才派发实际改稿要求：这一次提示就是产出新版本的那一轮。
-			const revisionPrompt = buildRevisionPrompt(preparation);
-			const dispatched = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrevise_${operation.requestId}`, message: revisionPrompt, expectedRuntime: operation.runtime });
+			// 指令由扩展的 `execute` 从**冻结绑定**现场派生（载荷只带绑定，不带自由文本），
+			// 以自定义消息（custom_message）发出并触发一轮，因此在原生会话里
+			// **不是** role:user 轮——结算/重挂载/重启都不会被 `latestUserTurn` 当成
+			// 新的人类授权（避免 v2→v3 无限改稿）。
+			const executePayload = this.buildBindingPayload(record, preparation, operation);
+			if (!executePayload) {
+				await this.failOperation(operation, "RUNTIME_CHANGED", "binding_payload_unavailable");
+				return;
+			}
+			const dispatched = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrevise_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} execute ${executePayload}`, expectedRuntime: operation.runtime });
 			if (!dispatched.accepted) {
 				await this.failOperation(bound, documentWorkDispatchFailureCode(dispatched), dispatched.error);
 				return;
@@ -347,10 +356,10 @@ export class DocumentAttemptRunner {
 	}
 
 	/** 绑定载荷：只放本轮真实解析出的路径与身份，不放正文。 */
-	private buildBindingPayload(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): string | undefined {
+	private buildBindingPayloadObject(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): Record<string, unknown> | undefined {
 		// 原生会话 id 是扩展校验绑定的唯一依据：缺它就发不出可确认的绑定，宁可失败也不发半截载荷。
 		if (!preparation.nativeSessionId) return undefined;
-		const payload = {
+		return {
 			schemaVersion: 1,
 			workId: record.workId,
 			attemptId: operation.attemptId,
@@ -368,7 +377,11 @@ export class DocumentAttemptRunner {
 			scope: preparation.scope,
 			requirements: { summary: preparation.requirementsSummary },
 		};
-		return encodeBindingPayload(payload);
+	}
+
+	private buildBindingPayload(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): string | undefined {
+		const payload = this.buildBindingPayloadObject(record, preparation, operation);
+		return payload ? encodeBindingPayload(payload) : undefined;
 	}
 
 	private emit(record: DocumentWorkRecord, changeKind: DocumentWorkChangedEvent["changeKind"], attemptId?: string): void {

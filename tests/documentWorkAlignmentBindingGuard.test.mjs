@@ -246,6 +246,8 @@ test("语法不符的元数据控制、未知斜杠与执行命令：对齐期�
 			["回车换行后接绑定", `/tpa-work\r\nbind ${shared.encodeBindingPayload(bindingPayload())}`, "alignment_blocked"],
 			["NBSP 分隔", "/tpa-work\u00a0status", "alignment_blocked"],
 			["动作后多余 token", "/tpa-work status extra", "alignment_blocked"],
+			// 执行触发不是元数据：对齐期间必须仍然被策略挡下（只放行 bind/release/unbind/status）。
+			["执行命令", "/tpa-work execute AAAA", "alignment_blocked"],
 			["别的会话的载荷", bindCommand({ nativeSessionId: "pi-native-other" }), "invalid_input"],
 			["稳定会话 id 不符", bindCommand({ sessionId: "another-session" }), "invalid_input"],
 			["载荷缺摘要", bindCommand({ digest: "" }), "invalid_input"],
@@ -273,6 +275,45 @@ test("对齐期间非斜杠文本仍然放行（用户答问行为不变）", as
 		assert.equal(harness.transport.prompts().length, 1);
 	} finally {
 		harness.close();
+	}
+});
+
+test("改稿执行命令：真宿主守卫放行一次、扩展缺位时结构化拒绝且绝不转发", async () => {
+	const binding = {
+		schemaVersion: 1,
+		workId: "dw_3e297d1cdc7b4481b7b78d3c",
+		attemptId: "at_dc62c11fac92421dbcc1b90d",
+		preparationId: "pr_dc62c11fac92421dbcc1b90d",
+		digest: "a".repeat(64),
+		sessionId: SESSION_ID,
+		nativeSessionId: NATIVE_SESSION,
+		kind: "revise_document",
+		workDirectory: "C:\\out\\dw_3e297d1cdc7b4481b7b78d3c",
+		stagingDirectory: "C:\\out\\dw_3e297d1cdc7b4481b7b78d3c\\staging\\at_dc62c11fac92421dbcc1b90d",
+		materialCacheDirectory: "C:\\userData\\material-cache",
+		materials: [],
+		scope: { summary: "把第二节改短", sections: [], preserve: [] },
+		requirements: { summary: "把第二节改短" },
+	};
+	const command = `/tpa-work execute ${shared.encodeBindingPayload(binding)}`;
+	// 普通（非对齐）模式 + 扩展在位：真 AgentManager 守卫必须原样放行一次。
+	const withExtension = await createHarness({ hydration: false });
+	try {
+		const result = await withExtension.send(command, "dwexecute_1");
+		assert.equal(result.accepted, true, JSON.stringify(result));
+		assert.deepEqual(withExtension.transport.prompts(), [command]);
+	} finally {
+		withExtension.close();
+	}
+	// 扩展缺位：结构化拒绝，绝不把载荷当普通提示交给模型。
+	const withoutExtension = await createHarness({ hydration: false, extensionCommands: [] });
+	try {
+		const result = await withoutExtension.send(command, "dwexecute_2");
+		assert.equal(result.accepted, false);
+		assert.equal(result.reason, "extension_unavailable");
+		assert.equal(withoutExtension.transport.prompts().length, 0);
+	} finally {
+		withoutExtension.close();
 	}
 });
 
@@ -356,8 +397,10 @@ test("没有对齐在途时：普通命令与文本照旧转发，文稿元数�
 test("共享策略与守卫同一口径：只有精确元数据控制能过对齐输入守卫", () => {
 	const allowed = [bindCommand(), "/tpa-work release", "/tpa-work unbind", "/tpa-work status", "普通文本", "/align approve brief-live 3"];
 	for (const message of allowed) assert.equal(alignmentPolicy.isAlignmentReadOnlyInputAllowed(message), true, message);
-	const blocked = ["/tpa-work", "/tpa-work bind", "/tpa-work bind a b", "/tpa-work status extra", "/tpa-work unknown", "/tpa-work\nstatus", "/tpa-work\u00a0status", "!ls", "/plan"];
+	const blocked = ["/tpa-work", "/tpa-work bind", "/tpa-work bind a b", "/tpa-work status extra", "/tpa-work unknown", "/tpa-work\nstatus", "/tpa-work\u00a0status", "/tpa-work execute AAAA", "!ls", "/plan"];
 	for (const message of blocked) assert.equal(alignmentPolicy.isAlignmentReadOnlyInputAllowed(message), false, message);
+	// execute 是执行触发，不是元数据控制：解析器不得把它当成可放行的控制命令。
+	assert.equal(alignmentPolicy.parseDocumentWorkMetadataControl("/tpa-work execute AAAA"), undefined);
 	// 命令名检测要宽于严格语法：换行/NBSP/多余 token 都必须先被认成「文稿命令」，再由严格解析拒掉。
 	for (const message of ["/tpa-work", "/tpa-work\nstatus", "/tpa-work\r\nbind x", "/tpa-work\u00a0status", "/tpa-work status extra", "/tpa-work\tstatus"]) {
 		assert.equal(alignmentPolicy.isDocumentWorkMetadataCommandName(message), true, message);

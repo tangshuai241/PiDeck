@@ -307,6 +307,12 @@ export type DocumentWorkRecord = {
 	 * 又说了一遍同样的改稿要求属于新授权——按 hash 会永久挡住那句话。
 	 */
 	consumedRevisionTurnIds: string[];
+	/**
+	 * 宿主自己派发的改稿提示所占的轮标识（稳定 ChatMessage.id）。
+	 * 这些轮是机器写的：重新挂载/重启后不得被当成新的人类授权再开一轮（否则会无限改稿）。
+	 * 按轮标识而不是正文：用户在新的一轮里又写了同样的要求属于新授权，仍然有效。
+	 */
+	hostDispatchedTurnIds?: string[];
 	createdAt: number;
 	updatedAt: number;
 };
@@ -340,6 +346,18 @@ export type DocumentWorkChangedEvent = {
 };
 
 /** 渲染层可见的有界工作快照：不放正文、不放绝对路径之外的隐私。 */
+/**
+ * 普通聊天改稿的接续判定结果。
+ *
+ * `reason` 是给渲染层区分「还没到」与「就是不接续」的唯一依据：
+ * - 暂时性（`turn_not_arrived` / `runtime_unavailable`）：快照/回显还在途中，等下一次真实状态变化可以重试；
+ * - 其余都是终局（不接续），同一轮不再重试。
+ * 判定与授权始终在主进程；渲染层只报告「哪一轮」，不提供任何授权布尔值。
+ */
+export type AutoReviseReason = "no_work" | "no_user_turn" | "no_passed_version" | "not_explicit" | "consumed" | "host_dispatched" | "active_operation" | "turn_not_arrived" | "runtime_unavailable";
+
+export type AutoReviseResult = { engaged: boolean; reason?: AutoReviseReason };
+
 export type DocumentWorkView = {
 	workId: string;
 	sessionId: string;

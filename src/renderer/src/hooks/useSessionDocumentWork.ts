@@ -343,31 +343,64 @@ ${alignment.brief.goal}`.slice(0, 2000),
 	/**
 	 * 普通聊天的明确改稿：判定与接续全在主进程。
 	 *
-	 * 渲染层只报告「有新用户消息」，不提供任何授权布尔值；主进程读真实用户当前轮，
+	 * 渲染层只报告「哪一轮有新用户消息」，不提供任何授权布尔值；主进程读真实用户当前轮，
 	 * 用保守策略判断是不是明确改稿要求（改哪里 + 改什么，且没有「别改先解释」语境）。
+	 * 返回 `{ engaged, settled }`：`settled` 为假代表这一轮只是「还没到」（快照/回显在途），
+	 * 触发点要在下一次真实状态变化时重试，不能永久丢掉这一轮。
 	 */
-	const requestAutoRevise = useCallback(async (): Promise<boolean> => {
-		if (!enabled) return false;
-		const result = await desktopApi.documentWork.autoRevise({ sessionId, requestId: crypto.randomUUID() });
-		if (!result.ok) return false;
-		if (result.value.engaged) void refresh();
-		return result.value.engaged;
-	}, [enabled, sessionId, refresh]);
+	const requestAutoRevise = useCallback(
+		async (sourceTurnId: string): Promise<{ engaged: boolean; settled: boolean }> => {
+			if (!enabled) return { engaged: false, settled: true };
+			const result = await desktopApi.documentWork.autoRevise({ sessionId, requestId: crypto.randomUUID(), sourceTurnId });
+			if (!result.ok) {
+				// 真的接续失败要说出来（本地化、不带 id）：用户不该靠再确认一次才发现没开始。
+				store.set(errorAtom, failureOf(result));
+				showNotice(noticeForFailure(failureOf(result)));
+				return { engaged: false, settled: true };
+			}
+			if (result.value.engaged) void refresh();
+			// 只有这两类是暂时性的：快照还没有这一轮，或运行时快照此刻不可用。
+			const transient = result.value.reason === "turn_not_arrived" || result.value.reason === "runtime_unavailable";
+			return { engaged: result.value.engaged, settled: !transient };
+		},
+		[enabled, sessionId, store, errorAtom, refresh],
+	);
 
 	/**
 	 * 改稿轮触发点：用户开启改稿后发送的下一条消息就是本轮改稿要求。
 	 * 用「最新用户消息 id 变化」判定，不解析文字内容，也不依赖模型自我声明。
+	 *
+	 * 真机缺陷（live-acceptance/ordinary-scope-revision.json）：模型如实声明了改稿意图、
+	 * 宿主也记下了意图，却没有任何 bind / 改稿提示 / 准备 / 回执。原因是触发点把轮标识
+	 * 在确认正文之前就烧掉了：乐观消息可能先以「稳定 id + 空正文」到达；即便正文到了，
+	 * 主进程那一读也可能还没看到这一轮，于是按旧轮判定「不够明确」，而这一轮此后再无机会。
+	 *
+	 * 现在的规则：
+	 * - 空正文不算一轮，不落定（等正文到达再触发）；
+	 * - 同一轮只发起一次进行中的请求（pending），避免重复渲染叠加；
+	 * - 主进程说终局（不接续/已消费）才把这一轮落定；说「还没到」就保持待办，
+	 *   等下一次真实状态变化（消息/视图/runtime）再试一次——不加定时器、不轮询。
 	 */
-	const lastRevisionTurnRef = useRef<string | undefined>(undefined);
+	const revisionTurnRef = useRef<{ turnId?: string; pending: boolean; settled: Set<string> }>({ pending: false, settled: new Set<string>() });
 	useEffect(() => {
 		if (!enabled || !view?.revisionReady) return;
 		const latest = latestUserMessageId(messages);
-		if (!latest || latest === lastRevisionTurnRef.current) return;
-		lastRevisionTurnRef.current = latest;
+		if (!latest) return;
+		const state = revisionTurnRef.current;
+		if (state.settled.has(latest)) return;
 		const turn = messages?.find((message) => message.id === latest);
+		// 正文未到（乐观消息先到）不算一轮：绝不在这里烧掉轮标识。
 		if (!turn?.text.trim()) return;
-		void requestAutoRevise();
-	}, [enabled, view?.revisionReady, messages, requestAutoRevise]);
+		if (state.pending && state.turnId === latest) return;
+		state.turnId = latest;
+		state.pending = true;
+		void (async () => {
+			const outcome = await requestAutoRevise(latest);
+			state.pending = false;
+			if (outcome.settled) state.settled.add(latest);
+			if (state.turnId === latest) state.turnId = undefined;
+		})();
+	}, [enabled, view?.revisionReady, view?.revision, messages, requestAutoRevise]);
 
 	/** 取消只针对本轮：attemptId 与 runtime 三元组都必须匹配。 */
 	const cancelActive = useCallback(async (): Promise<void> => {

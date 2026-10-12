@@ -181,7 +181,9 @@ export function parseDocumentWorkRecord(value: unknown): DocumentWorkRecord | un
 	if (!sourceTurnIds || !operationRequestIds || !versionIds || !consumedRevisionTurns) return undefined;
 	// 旧记录没有轮标识字段：默认空数组（历史 hash 无法反推 id，不能拿它顶替）。
 	const consumedRevisionTurnIds = value.consumedRevisionTurnIds === undefined ? [] : parseIdList(value.consumedRevisionTurnIds, 256, 200);
-	if (!consumedRevisionTurnIds) return undefined;
+	// 旧记录没有宿主自造轮字段：默认空数组（历史提示词无法反推 id）。
+	const hostDispatchedTurnIds = value.hostDispatchedTurnIds === undefined ? [] : parseIdList(value.hostDispatchedTurnIds, 256, 200);
+	if (!consumedRevisionTurnIds || !hostDispatchedTurnIds) return undefined;
 	if (!isNonNegativeInteger(value.createdAt) || !isNonNegativeInteger(value.updatedAt)) return undefined;
 	return {
 		schemaVersion: 1,
@@ -199,6 +201,7 @@ export function parseDocumentWorkRecord(value: unknown): DocumentWorkRecord | un
 		versionIds,
 		consumedRevisionTurns,
 		consumedRevisionTurnIds,
+		hostDispatchedTurnIds,
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt,
 	};

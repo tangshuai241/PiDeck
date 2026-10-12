@@ -17,6 +17,8 @@ import { atom, createStore } from "jotai/vanilla";
 import { loadTsCommonJs } from "./loadTsCommonJs.mjs";
 
 const ROOT = process.cwd();
+/** 测试内全局唯一的 requestId 计数：真实 crypto.randomUUID 每次都是新的。 */
+let harnessRequestIdCounter = 0;
 
 /** 依赖比较：与 React 一致，逐位 Object.is；deps 为 undefined 表示每次都执行。 */
 function sameDeps(before, next) {
@@ -105,6 +107,9 @@ function createHookRuntime() {
  * `runtime` / `messages` 由测试显式推进：初始可以为空（模拟「hook 挂载早于 runtime 与用户消息到达」）。
  */
 export function createDocumentWorkHarness(options = {}) {
+	// 会话 id 可覆盖：与真实文稿域（service harness 的稳定 SessionRecord.id）接线时必须同一身份。
+	const sessionId = options.sessionId ?? "s1";
+	const bySession = (value) => ({ [sessionId]: value });
 	const store = createStore();
 	const hookRuntime = createHookRuntime();
 	const composerMode = new Map();
@@ -115,13 +120,15 @@ export function createDocumentWorkHarness(options = {}) {
 		return composerMode.get(key);
 	};
 	const calls = { list: 0, create: [], chooseOutputRoot: 0, prepare: [], start: [], autoRevise: [] };
+	// 计数器放在模块级：同一个测试里多次挂载（重载/多消费者）也不能复用 requestId。
+	void harnessRequestIdCounter;
 	const notices = [];
 	const workState = { views: options.initialViews ?? [] };
 
 	/** 本轮 useAtomValue 读过的 atom：effect 改写它们时要像 React 一样再渲染一轮。 */
 	let tracked = [];
-	const runtimesAtom = atom({ s1: options.runtime ?? undefined });
-	const messagesAtom = atom({ s1: { messages: options.messages ?? [] } });
+	const runtimesAtom = atom(bySession(options.runtime ?? undefined));
+	const messagesAtom = atom(bySession({ messages: options.messages ?? [] }));
 
 	const reactStub = {
 		useEffect: (fn, deps) => hookRuntime.useEffect(fn, deps),
@@ -155,7 +162,9 @@ export function createDocumentWorkHarness(options = {}) {
 		// 生产里 setTimeout/clearTimeout 由浏览器提供；vm 沙箱默认注入，这里显式再给一次，
 		// 保证真实确认等待器（alignmentAcknowledgement 用 globalThis 定时器）不会因环境缺失
 		// 直接抛 TypeError 被误判成「本轮失败」。生产代码不得 import node:timers。
-		globals: { crypto: { randomUUID: () => `req-${calls.create.length + calls.prepare.length + 1}` }, setTimeout, clearTimeout },
+		// 每次调用给一个新 requestId：真实 crypto.randomUUID 就是唯一的，
+		// 固定 id 会让「重试同一轮」被主进程按同请求不同摘要判成 IDEMPOTENCY_CONFLICT。
+		globals: { crypto: { randomUUID: () => `req-${(harnessRequestIdCounter += 1)}` }, setTimeout, clearTimeout },
 		stubs: {
 			jotai: { atom, useStore: () => store, useAtomValue: trackAtom },
 			"jotai/utils": {
@@ -180,40 +189,44 @@ export function createDocumentWorkHarness(options = {}) {
 			"../utils/documentWorkHash": { hashUserTurnText: async () => "hash-1" },
 			"../desktopApi": {
 				desktopApi: {
-					documentWork: {
-						list: async () => {
-							calls.list += 1;
-							return workState.views;
+					documentWork: Object.assign(
+						{
+							list: async () => {
+								calls.list += 1;
+								return workState.views;
+							},
+							onChanged: () => () => {},
+							create: async (input) => {
+								calls.create.push(input);
+								// 需要真实验证「渲染层编码出的入参能否过公开 IPC 边界」时，把这条调用接到生产 handler 上。
+								if (options.createImpl) return options.createImpl(input);
+								const created = { workId: "dw_1", sessionId: input.sessionId, revision: 1, title: input.title ?? "文稿工作", outputRootLabel: "文稿", requirementsSummary: "", active: null, versions: [], revisionReady: false };
+								workState.views = [created];
+								return { ok: true, value: created };
+							},
+							chooseOutputRoot: async () => {
+								calls.chooseOutputRoot += 1;
+								return { ok: true, value: { outputRootId: "or_1", label: "文稿", path: "C:/out" } };
+							},
+							chooseMaterials: async () => ({ ok: true, value: { paths: [], count: 0 } }),
+							registerMaterials: async () => ({ ok: true, value: { paths: [], count: 0 } }),
+							prepare: async (input) => {
+								calls.prepare.push(input);
+								return { ok: true, value: { workId: input.workId, workRevision: input.expectedRevision + 1, preparation: { preparationId: "pr_1", digest: "a".repeat(64) }, summary: "s" } };
+							},
+							start: async (input) => {
+								calls.start.push(input);
+								return { ok: true, value: { attemptId: "at_1", phase: "running", authorizationState: "pending" } };
+							},
+							autoRevise: async (input) => {
+								calls.autoRevise.push(input);
+								return { ok: true, value: { engaged: false } };
+							},
+							cancel: async () => ({ ok: true, value: { attemptId: "at_1" } }),
 						},
-						onChanged: () => () => {},
-						create: async (input) => {
-							calls.create.push(input);
-							// 需要真实验证「渲染层编码出的入参能否过公开 IPC 边界」时，把这条调用接到生产 handler 上。
-							if (options.createImpl) return options.createImpl(input);
-							const created = { workId: "dw_1", sessionId: input.sessionId, revision: 1, title: input.title ?? "文稿工作", outputRootLabel: "文稿", requirementsSummary: "", active: null, versions: [], revisionReady: false };
-							workState.views = [created];
-							return { ok: true, value: created };
-						},
-						chooseOutputRoot: async () => {
-							calls.chooseOutputRoot += 1;
-							return { ok: true, value: { outputRootId: "or_1", label: "文稿", path: "C:/out" } };
-						},
-						chooseMaterials: async () => ({ ok: true, value: { paths: [], count: 0 } }),
-						registerMaterials: async () => ({ ok: true, value: { paths: [], count: 0 } }),
-						prepare: async (input) => {
-							calls.prepare.push(input);
-							return { ok: true, value: { workId: input.workId, workRevision: input.expectedRevision + 1, preparation: { preparationId: "pr_1", digest: "a".repeat(64) }, summary: "s" } };
-						},
-						start: async (input) => {
-							calls.start.push(input);
-							return { ok: true, value: { attemptId: "at_1", phase: "running", authorizationState: "pending" } };
-						},
-						autoRevise: async (input) => {
-							calls.autoRevise.push(input);
-							return { ok: true, value: { engaged: false } };
-						},
-						cancel: async () => ({ ok: true, value: { attemptId: "at_1" } }),
-					},
+						// 真实链路接线：覆盖项直接替换同名方法（例如把 autoRevise 接到生产 IPC handler）。
+						options.documentWorkApi ?? {},
+					),
 				},
 			},
 			"../i18n": { t: (key) => key.replace("documentWork.", "") },
@@ -228,7 +241,7 @@ export function createDocumentWorkHarness(options = {}) {
 		let snapshot;
 		for (let pass = 0; pass < 6; pass++) {
 			tracked = [];
-			latest = hookRuntime.runPass(() => module.useSessionDocumentWork("s1", options.backend ?? "pi"));
+			latest = hookRuntime.runPass(() => module.useSessionDocumentWork(sessionId, options.backend ?? "pi"));
 			const next = tracked.map((target) => store.get(target));
 			if (snapshot && next.length === snapshot.length && next.every((value, index) => Object.is(value, snapshot[index]))) break;
 			snapshot = next;
@@ -247,17 +260,17 @@ export function createDocumentWorkHarness(options = {}) {
 			return latest;
 		},
 		/** runtime 到达/更新：模拟 RPC 事件推进（新对象身份，值变化）。 */
-		setRuntime: (next) => store.set(runtimesAtom, { s1: next }),
+		setRuntime: (next) => store.set(runtimesAtom, bySession(next)),
 		/** 会话消息更新（同一数组实例不触发变化，必须换新数组，与真实 atom 更新一致）。 */
-		setMessages: (next) => store.set(messagesAtom, { s1: { messages: next } }),
+		setMessages: (next) => store.set(messagesAtom, bySession({ messages: next })),
 		unmount: () => hookRuntime.unmount(),
 		/** 只推进对齐快照（保留 runtime 三元组），模拟 Pi 的 RPC 状态更新。 */
 		setAlignment: (alignment) => {
 			const current = store.get(runtimesAtom).s1;
-			store.set(runtimesAtom, { s1: { ...(current ?? { agentId: "a1", runtimeGeneration: 1, status: "idle", state: {} }), state: { ...(current?.state ?? {}), alignment } } });
+			store.set(runtimesAtom, bySession({ ...(current ?? { agentId: "a1", runtimeGeneration: 1, status: "idle", state: {} }), state: { ...(current?.state ?? {}), alignment } }));
 		},
-		mode: () => store.get(modeAtomFor("s1")),
-		setMode: (value) => store.set(modeAtomFor("s1"), value),
+		mode: () => store.get(modeAtomFor(sessionId)),
+		setMode: (value) => store.set(modeAtomFor(sessionId), value),
 		/** 冲掉一个宏任务：等异步的 IPC 桩（例如 list 返回工作快照）落地后再渲染。 */
 		notices,
 		flush: () => new Promise((resolve) => setImmediate(resolve)),

@@ -17,7 +17,21 @@
  */
 import { randomUUID } from "node:crypto";
 import { buildWorkFolder, kindForRequirements, sameRequirements, sameRuntimeTriple, sanitizeWorkTitle, stableStringify, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
-import type { AuthorizationReference, DocumentWorkChangedEvent, DocumentWorkExtensionState, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord, DocumentWorkView, PreparedWork, RequirementsReference, SessionRuntimeTriple, StartWorkInput, WorkMutation } from "../../shared/types/documentWork";
+import type {
+	AutoReviseResult,
+	AuthorizationReference,
+	DocumentWorkChangedEvent,
+	DocumentWorkExtensionState,
+	DocumentWorkOperation,
+	DocumentWorkPreparation,
+	DocumentWorkRecord,
+	DocumentWorkView,
+	PreparedWork,
+	RequirementsReference,
+	SessionRuntimeTriple,
+	StartWorkInput,
+	WorkMutation,
+} from "../../shared/types/documentWork";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { isDocumentWorkIntent, isExplicitRevisionRequest } from "../../shared/documentIntentPolicy";
 import type { DocumentArtifactStore } from "./DocumentArtifactStore";
@@ -74,6 +88,8 @@ const MATERIAL_ALLOWLIST_TTL_MS = 30 * 60_000;
 export class DocumentWorkService {
 	private readonly byteBudget: number;
 	private readonly materialAllowlist = new Map<string, { path: string; expiresAt: number }[]>();
+	/** 会话级改稿串行门：两个 UI 消费者同时报告同一轮时只允许一次判定/接续。 */
+	private readonly revisionGate = new Map<string, Promise<void>>();
 	private readonly alignmentBySession = new Map<string, AlignmentState>();
 	private readonly attempts: DocumentAttemptRunner;
 	private readonly transaction: DocumentWorkTransaction;
@@ -354,6 +370,7 @@ export class DocumentWorkService {
 		const latest = await this.queries.latestUserTurn(record.sessionId);
 		if (!latest || latest.sourceTurnId !== authorization.sourceTurnId || latest.hash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "instruction_mismatch");
 		// 按轮标识判重放：同一轮不能被消费两次（含重新挂载后），但新轮里再说一遍同样的要求是新的授权。
+		if ((record.hostDispatchedTurnIds ?? []).includes(authorization.sourceTurnId)) return workFailure("APPROVAL_REQUIRED", "host_dispatched_turn");
 		if (record.consumedRevisionTurnIds.includes(authorization.sourceTurnId)) return workFailure("APPROVAL_REQUIRED", "instruction_replayed");
 		if (preparation.requirements.kind !== "user_instruction" || preparation.requirements.sourceTurnHash !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "requirements_mismatch");
 		// 授权只对应「用户明确提出的那次改稿要求」：准备里声明的范围必须就是授权的那段文字。
@@ -413,20 +430,49 @@ export class DocumentWorkService {
 	 * 保守策略：只有既出现改稿动词又指名要改的块、且没有「别改先解释」类语境时才接续；
 	 * 已消费过的轮（含崩溃前已开始的）不再自动执行，避免重新挂载后重复跑历史消息。
 	 */
-	async autoRevise(sessionId: string, requestId: string): Promise<WorkResult<{ engaged: boolean }>> {
+	async autoRevise(sessionId: string, requestId: string, sourceTurnId?: string): Promise<WorkResult<AutoReviseResult>> {
+		// 判定与接续串行化：两个 UI 消费者（时间线 / 对齐卡）可能同时报告同一轮，
+		// 并发各读一遍记录就会各自准备一轮、各自派发一次改稿提示。
+		// 这里用会话级串行门（不动事务与回执语义）：后到者一定看到前者的消费/活动操作。
+		return this.withRevisionGate(sessionId, () => this.autoReviseExclusive(sessionId, requestId, sourceTurnId));
+	}
+
+	/** 同一会话的改稿判定串行门：只排队，不缓存结论（重试必须重新判定）。 */
+	private async withRevisionGate<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+		const previous = this.revisionGate.get(sessionId) ?? Promise.resolve();
+		const chain = previous.then(task, task);
+		// 排队用的句柄吞掉结果与异常：它只负责「顺序」，不改变调用方拿到的结果。
+		const settled = chain.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.revisionGate.set(sessionId, settled);
+		try {
+			return await chain;
+		} finally {
+			if (this.revisionGate.get(sessionId) === settled) this.revisionGate.delete(sessionId);
+		}
+	}
+
+	private async autoReviseExclusive(sessionId: string, requestId: string, sourceTurnId?: string): Promise<WorkResult<AutoReviseResult>> {
 		const views = await this.queries.listForSession(sessionId);
 		const work = views[0];
-		if (!work) return workSuccess({ engaged: false });
+		if (!work) return workSuccess({ engaged: false, reason: "no_work" });
 		const turn = await this.queries.latestUserTurn(sessionId);
-		if (!turn) return workSuccess({ engaged: false });
-		if (!work.versions.some((version) => version.inspection === "passed")) return workSuccess({ engaged: false });
-		if (!isExplicitRevisionRequest(turn.text)) return workSuccess({ engaged: false });
+		// 渲染层报的是它刚看到的那一轮：主进程自己的快照还没跟上时必须说「还没到」，
+		// 而不是拿旧轮的文字去判定「不够明确」——那会让这一轮永久失去机会。
+		if (!turn) return workSuccess({ engaged: false, reason: "runtime_unavailable" });
+		if (sourceTurnId !== undefined && turn.sourceTurnId !== sourceTurnId) return workSuccess({ engaged: false, reason: "turn_not_arrived" });
 		const record = await this.deps.store.getRecord(work.workId);
-		if (!record) return workSuccess({ engaged: false });
-		if (record.consumedRevisionTurnIds.includes(turn.sourceTurnId)) return workSuccess({ engaged: false });
+		if (!record) return workSuccess({ engaged: false, reason: "no_work" });
+		// 宿主自己派发的改稿提示不是人类授权：重新挂载后不得据此再开一轮（否则会无限改稿）。
+		if ((record.hostDispatchedTurnIds ?? []).includes(turn.sourceTurnId)) return workSuccess({ engaged: false, reason: "host_dispatched" });
+		if (!work.versions.some((version) => version.inspection === "passed")) return workSuccess({ engaged: false, reason: "no_passed_version" });
+		if (!isExplicitRevisionRequest(turn.text)) return workSuccess({ engaged: false, reason: "not_explicit" });
+		if (record.consumedRevisionTurnIds.includes(turn.sourceTurnId)) return workSuccess({ engaged: false, reason: "consumed" });
 		if (record.activeRequestId) {
 			const active = await this.deps.store.getOperation(record.workId, record.activeRequestId);
-			if (active && active.phase !== "archived" && active.phase !== "failed" && active.phase !== "interrupted") return workSuccess({ engaged: false });
+			if (active && active.phase !== "archived" && active.phase !== "failed" && active.phase !== "interrupted") return workSuccess({ engaged: false, reason: "active_operation" });
 		}
 		const prepared = await this.prepare({
 			requestId: `${requestId}_p`,
@@ -439,9 +485,10 @@ export class DocumentWorkService {
 			instructionScope: { instruction: turn.text },
 			materialPaths: [],
 		});
-		if (!prepared.ok) return workFailure<{ engaged: boolean }>(prepared.error.code, prepared.error.detail);
+		if (!prepared.ok) return workFailure<AutoReviseResult>(prepared.error.code, prepared.error.detail);
 		const runtime = await this.deps.runtime.snapshot(sessionId);
-		if (!runtime) return workFailure<{ engaged: boolean }>("RUNTIME_CHANGED");
+		// 快照这一刻不可用同样是暂时性的：渲染层会在下一次状态变化时重试，而不是把这一轮丢掉。
+		if (!runtime) return workSuccess<AutoReviseResult>({ engaged: false, reason: "runtime_unavailable" });
 		const started = await this.start({
 			requestId: `${requestId}_s`,
 			workId: work.workId,
@@ -450,7 +497,7 @@ export class DocumentWorkService {
 			expectedRuntime: runtime.target,
 			authorization: { kind: "revision_instruction", sourceTurnId: turn.sourceTurnId, sourceTurnHash: turn.hash },
 		});
-		return started.ok ? workSuccess({ engaged: true }) : workFailure<{ engaged: boolean }>(started.error.code, started.error.detail);
+		return started.ok ? workSuccess<AutoReviseResult>({ engaged: true }) : workFailure<AutoReviseResult>(started.error.code, started.error.detail);
 	}
 
 	/** 退出路径：先标记取消，再等所有结算协程收敛。 */

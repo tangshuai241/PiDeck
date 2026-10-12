@@ -13,6 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import {
 	DOCUMENT_WORK_BINDING_ENTRY_TYPE,
+	DOCUMENT_WORK_EXECUTION_TYPE,
 	DOCUMENT_WORK_REPORT_ENTRY_TYPE,
 	DOCUMENT_WORK_REPORT_MAX_FILES,
 	DOCUMENT_WORK_REVISION_INTENT_TYPE,
@@ -66,6 +67,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	const materialStatus = new Map<string, DocumentWorkExtensionState["materials"][number]>();
 	/** 本轮是否还在制作：结算完成后只保留后台身份，不再注入制作上下文。 */
 	let attemptLive = false;
+	/** 已经触发过执行的那一次尝试：同一绑定只允许执行一次（重复/释放/重启都不再开一轮）。 */
+	let executedAttemptId: string | undefined;
 
 	function publish(phase: DocumentWorkExtensionState["phase"], extra?: { report?: DocumentWorkExtensionState["report"]; reason?: DocumentWorkExtensionState["reason"] }): void {
 		if (!binding) return;
@@ -92,6 +95,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		binding = next;
 		sessionId = next.nativeSessionId;
 		attemptLive = true;
+		executedAttemptId = undefined;
 		materialStatus.clear();
 		// 旧尝试的候选不继承：新绑定只用新汇报。
 		reportCache = undefined;
@@ -105,6 +109,20 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	function contextText(current: DocumentWorkBinding): string {
 		const materials = current.materials.map((material) => `${material.materialId} (${material.label})`).join(", ") || "none";
 		return `This session is executing TPA document work ${current.workId} (attempt ${current.attemptId}, ${current.kind}).\nWrite every deliverable inside this attempt's staging directory: ${current.stagingDirectory}\nRead declared materials with tpa_read_material and their materialId; never invent a path. Materials: ${materials}.\n${current.base ? `The frozen base copy for this round is ${current.base.path} (version ${current.base.versionId}). Modify that copy locally; never rebuild an existing Word document from Markdown and never overwrite the original file.` : "This round creates a new document."}\nScope: ${current.scope.summary || "as confirmed"}${current.scope.sections.length ? `; sections: ${current.scope.sections.join(", ")}` : ""}${current.scope.preserve.length ? `; preserve: ${current.scope.preserve.join(", ")}` : ""}.\nWhen the deliverables are written, call tpa_artifact_report once with staging-relative paths. Reporting is a candidate record only: the desktop verifies, inspects and archives it, and the user decides acceptance. Do not claim the work is archived, verified or accepted.`;
+	}
+
+	/**
+	 * 本轮正式改稿指令：只由**冻结绑定**里的 scope/base 现场派生，
+	 * 不接受调用方自由文本——编码载荷是通道，不是授权，也不是可随意改写的指示。
+	 * 与主进程 `buildRevisionPrompt(preparation)` 同形（契约测试逐字比对）。
+	 */
+	function revisionInstruction(current: DocumentWorkBinding): string {
+		const sections = current.scope.sections.length ? `
+声明要改的块：${current.scope.sections.join("、")}` : "";
+		const preserve = current.scope.preserve.length ? `
+必须保留（逐块比较，改动会被判为未授权）：${current.scope.preserve.join("、")}` : "";
+		return `改稿要求：${current.scope.summary}${sections}${preserve}
+只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
 	}
 
 	/** 只有「本轮仍在制作」才产出上下文；结算/释放后连旧消息一起去掉。 */
@@ -241,7 +259,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("tpa-work", {
-		description: "TPA document work binding: bind <base64url payload> | release | status | unbind",
+		description: "TPA document work binding: bind <base64url payload> | execute <base64url payload> | release | status | unbind",
 		handler: async (args, ctx) => {
 			ensureSession(ctx);
 			const [action, ...rest] = args.trim().split(/\s+/);
@@ -264,10 +282,55 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 				}
 				return;
 			}
+			if (action === "execute") {
+				// 本轮正式执行只能由宿主在「扩展已确认绑定 + 主进程复核过人类轮」之后触发。
+				// 载荷只是通道（不是授权）：逐项必须与**当前仍在制作的绑定**完全一致，
+				// 而且一次绑定只能执行一次——release 后、重复请求、重启恢复的旧绑定都不许
+				// 再开一轮。提示词现场从冻结 scope 派生，以自定义消息出发并触发一轮，
+				// 因此它在原生会话里**不是** role:user 轮（v2→v3 无限改稿的结构性防线）。
+				const raw = decodeBindingCommandArgument(rest.join(""));
+				if (!raw) {
+					ctx.ui.notify("TPA execution rejected: the payload is not a valid bounded binding.", "warning");
+					return;
+				}
+				if (raw.nativeSessionId !== ctx.sessionManager.getSessionId()) {
+					ctx.ui.notify("TPA execution rejected: the payload belongs to another session.", "warning");
+					return;
+				}
+				if (raw.kind !== "revise_document") {
+					ctx.ui.notify("TPA execution rejected: only a revision round can be executed this way.", "warning");
+					return;
+				}
+				if (
+					!binding ||
+					!attemptLive ||
+					binding.workId !== raw.workId ||
+					binding.attemptId !== raw.attemptId ||
+					binding.preparationId !== raw.preparationId ||
+					binding.digest !== raw.digest ||
+					binding.sessionId !== raw.sessionId ||
+					executedAttemptId === raw.attemptId
+				) {
+					ctx.ui.notify("TPA execution rejected: no matching live binding for this attempt.", "warning");
+					return;
+				}
+				executedAttemptId = raw.attemptId;
+				pi.sendMessage(
+					{
+						customType: DOCUMENT_WORK_EXECUTION_TYPE,
+						content: revisionInstruction(binding),
+						display: false,
+						details: { workId: binding.workId, attemptId: binding.attemptId, preparationId: binding.preparationId, digest: binding.digest },
+					},
+					{ triggerTurn: true },
+				);
+				return;
+			}
 			if (action === "release") {
 				// 结算已完成：绑定身份留着做后台归属，但不再注入「本轮要制作」的上下文，
-				// 否则下一轮普通聊天还会被上一轮的执行要求污染。
+				// 否则下一轮普通聊天还会被上一轮的执行要求污染；执行权同时收回。
 				attemptLive = false;
+				executedAttemptId = undefined;
 				return;
 			}
 			if (action === "unbind") {
@@ -307,6 +370,23 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 				continue;
 			}
 			if (message.customType === DOCUMENT_WORK_STATE_TYPE || message.customType === DOCUMENT_WORK_REVISION_INTENT_TYPE) continue;
+			if (message.customType === DOCUMENT_WORK_EXECUTION_TYPE) {
+				// 执行提示只在「本轮仍在制作且完整四元组都匹配」时进入请求；release 之后
+				// 它不得继续留在上下文里驱动下一轮普通聊天。
+				const details = message.details;
+				if (
+					binding &&
+					attemptLive &&
+					isRecord(details) &&
+					details.workId === binding.workId &&
+					details.attemptId === binding.attemptId &&
+					details.preparationId === binding.preparationId &&
+					details.digest === binding.digest
+				) {
+					messages.push(message);
+				}
+				continue;
+			}
 			if (message.customType === CONTEXT_TYPE) {
 				if (!kept && isCurrentContextMessage(message)) {
 					kept = true;

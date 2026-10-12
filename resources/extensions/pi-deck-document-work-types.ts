@@ -11,6 +11,8 @@ export const DOCUMENT_WORK_SCHEMA_VERSION = 1;
 export const DOCUMENT_WORK_STATE_TYPE = "pi-deck-document-work-state";
 export const DOCUMENT_WORK_REVISION_INTENT_TYPE = "pi-deck-document-revision-intent";
 export const DOCUMENT_WORK_BINDING_ENTRY_TYPE = "tpa-document-work-binding";
+/** 宿主授权后的本轮执行提示（自定义消息，不是 role:user 轮）：只有本扩展能触发这一轮。 */
+export const DOCUMENT_WORK_EXECUTION_TYPE = "pi-deck-document-work-execution";
 export const DOCUMENT_WORK_REPORT_ENTRY_TYPE = "tpa-document-work-report";
 export const DOCUMENT_WORK_BIND_COMMAND = "/tpa-work";
 export const DOCUMENT_WORK_BIND_PAYLOAD_MAX_BYTES = 64 * 1024;

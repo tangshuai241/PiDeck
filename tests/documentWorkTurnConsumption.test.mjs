@@ -36,7 +36,7 @@ test("新轮里重复同一句改稿要求属于新授权，可以再次开工",
 		const firstTurn = await harness.domain.service.autoRevise(SESSION_ID, "auto-1");
 		assert.equal(firstTurn.ok, true, JSON.stringify(firstTurn));
 		assert.equal(firstTurn.value.engaged, true, "明确改稿要求必须自动接续");
-		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
+		await waitFor(() => harness.revisionExecutes().length > 0);
 		await harness.finishRound(`${CREATE_ROUND}\n## 第三节 结论\n\n新结论\n`);
 		assert.equal((await harness.terminal(view.workId, "auto-1_s")).phase, "archived");
 
@@ -47,8 +47,8 @@ test("新轮里重复同一句改稿要求属于新授权，可以再次开工",
 		harness.runtime.settle();
 		assert.equal(secondTurn.ok, true, JSON.stringify(secondTurn));
 		assert.equal(secondTurn.value.engaged, true, "新轮里的相同文字必须被当成新授权");
-		await waitFor(() => harness.state.dispatched.filter((message) => message.startsWith("改稿要求：")).length === 2, 3_000);
-		const prompts = harness.state.dispatched.filter((message) => message.startsWith("改稿要求："));
+		await waitFor(() => harness.revisionExecutes().length === 2, 3_000);
+		const prompts = harness.revisionPrompts();
 		assert.equal(prompts.length, 2, `两轮各派发一次改稿提示，实际 ${prompts.length}`);
 	} finally {
 		await harness.cleanup();
@@ -68,7 +68,7 @@ test("同一轮不能消费两次：重启后同一历史轮不再自动执行",
 		const first = await harness.domain.service.autoRevise(SESSION_ID, "auto-1");
 		assert.equal(first.value.engaged, true);
 		harness.runtime.settle();
-		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
+		await waitFor(() => harness.revisionExecutes().length > 0);
 		// 让这一轮正常结算，避免用「在途」状态去检验轮消费。
 		await harness.finishRound(`${CREATE_ROUND}
 # 第三节 结论

@@ -261,3 +261,115 @@ test("会话恢复按 pi 原生会话 id 认领绑定，稳定目录 id 不同�
 	// 旧状态消息仍按原稳定会话 id 归属（不得被改写成新会话的绑定）。
 	assert.equal(reopened.state()?.sessionId, STABLE_SESSION, "旧会话的绑定状态不得改挂到新会话");
 });
+
+const EXECUTION_TYPE = "pi-deck-document-work-execution";
+const executionMessages = (list) => list.filter((text) => text.includes("改稿要求"));
+/** 改稿轮的绑定：execute 只允许 revise_document 且必须与当前活动绑定逐项一致。 */
+const revisionBinding = (overrides = {}) => binding({ kind: "revise_document", ...overrides });
+
+/** 宿主授权的执行载荷：只有绑定（指令由扩展从冻结 scope/base 现场派生，不接受自由文本）。 */
+function executeCommand(overrides = {}) {
+	return `/tpa-work execute ${shared.encodeBindingPayload(revisionBinding(overrides))}`;
+}
+
+/** 期望指令：与扩展内派生规则同形；契约测试再与主进程 buildRevisionPrompt 逐字比对。 */
+function expectedInstruction(overrides = {}) {
+	const scope = revisionBinding(overrides).scope;
+	const sections = scope.sections.length
+		? `
+声明要改的块：${scope.sections.join("、")}`
+		: "";
+	const preserve = scope.preserve.length
+		? `
+必须保留（逐块比较，改动会被判为未授权）：${scope.preserve.join("、")}`
+		: "";
+	return `改稿要求：${scope.summary}${sections}${preserve}
+只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
+}
+
+test("宿主授权的执行由扩展触发：指令从冻结 scope 派生，以自定义消息出发，不落成 role:user 轮", async () => {
+	const host = createHost();
+	await host.command(bindCommand(revisionBinding()));
+	assert.equal(contextMessages(await host.request()).length, 1, "绑定后先有执行上下文");
+	await host.command(executeCommand());
+	// 执行消息必须落成 custom_message（不是用户轮），且内容由冻结 scope 现场派生。
+	const emitted = host.branch.filter((entry) => entry.type === "custom_message" && entry.customType === EXECUTION_TYPE);
+	assert.equal(emitted.length, 1, "执行提示必须以自定义消息发出一次");
+	assert.equal(emitted[0].content, expectedInstruction(), "指令必须来自冻结 scope");
+	const seen = await host.request();
+	assert.equal(executionMessages(seen).length, 1, "本轮请求必须带上执行提示");
+	assert.equal(
+		host.branch.some((entry) => entry.type === "message" && entry.message?.role === "user"),
+		false,
+		"机器提示词不得落成用户轮",
+	);
+	// release 之后：执行权收回，上下文里也不再保留这条执行指令。
+	await host.command("release");
+	assert.equal(executionMessages(await host.request()).length, 0, "release 后执行提示必须退出上下文");
+});
+
+test("execute 的入口校验：未绑定、四元组/会话/类型不匹配、载荷非法一律拒绝", async () => {
+	const unbound = createHost();
+	await unbound.command(executeCommand());
+	assert.equal(unbound.notifications.length, 1, "未绑定时必须拒绝并告知");
+	assert.equal(
+		unbound.branch.some((entry) => entry.customType === EXECUTION_TYPE),
+		false,
+		"未绑定不得发出执行",
+	);
+
+	for (const [label, overrides] of [
+		["尝试不匹配", { attemptId: "at_other" }],
+		["准备不匹配", { preparationId: "pr_other" }],
+		["摘要不匹配", { digest: "b".repeat(64) }],
+		["工作不匹配", { workId: "dw_other" }],
+		["稳定会话不匹配", { sessionId: "another-stable" }],
+		["非改稿轮", { kind: "create_document" }],
+		["原生会话不匹配", { nativeSessionId: "another-native-session" }],
+	]) {
+		const bound = createHost();
+		await bound.command(bindCommand(revisionBinding()));
+		await bound.command(executeCommand(overrides));
+		assert.equal(bound.notifications.length >= 1, true, `${label}必须拒绝`);
+		assert.equal(bound.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 0, `${label}不得触发本轮执行`);
+	}
+
+	const broken = createHost();
+	await broken.command(bindCommand(revisionBinding()));
+	await broken.command("execute not-a-payload!!");
+	assert.equal(broken.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 0, "非法载荷不得执行");
+});
+
+test("同一绑定只执行一次：重复请求、release 之后、重启恢复都不能再开一轮", async () => {
+	const host = createHost();
+	await host.command(bindCommand(revisionBinding()));
+	await host.command(executeCommand());
+	await host.command(executeCommand());
+	assert.equal(host.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 1, "重复 execute 不得再开一轮");
+
+	await host.command("release");
+	await host.command(executeCommand());
+	assert.equal(host.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, 1, "release 之后执行权必须收回");
+	assert.equal(host.notifications.length >= 1, true, "被拒的执行要如实告知");
+
+	// 重启恢复：同一分支重建扩展后，旧绑定只是后台归属，不得凭它再执行。
+	const entries = clone(host.branch);
+	const reopened = createHost({ entries });
+	await reopened.fire("session_start", { type: "session_start" });
+	assert.equal(reopened.state()?.phase, "bound", "恢复仍能看到绑定");
+	assert.equal(contextMessages(await reopened.request()).length, 0, "恢复的绑定不注入执行上下文");
+	await reopened.command(executeCommand());
+	// 恢复出来的分支里本来就带着上一轮的执行消息：只断言「没有新增」。
+	assert.equal(reopened.branch.filter((entry) => entry.customType === EXECUTION_TYPE).length, entries.filter((entry) => entry.customType === EXECUTION_TYPE).length, "恢复后不得凭旧绑定执行");
+});
+
+test("契约一致：扩展现场派生的指令与主进程 buildRevisionPrompt 逐字相同", async () => {
+	const { buildRevisionPrompt } = loadTsCommonJs(`${ROOT}/src/main/document-work/DocumentAttemptRunner.ts`);
+	const scope = { summary: "把第二节改短", sections: ["二、实施安排"], preserve: ["一、项目背景"] };
+	const host = createHost();
+	await host.command(bindCommand(revisionBinding({ scope })));
+	await host.command(executeCommand({ scope }));
+	const seen = await host.request();
+	assert.equal(executionMessages(seen).length, 1);
+	assert.equal(executionMessages(seen)[0], buildRevisionPrompt({ scope }), "同形契约：扩展从绑定派生、主进程从准备派生，两端必须逐字一致");
+});

@@ -60,7 +60,7 @@ test("原指令只改第二节：范围解析成真实标题，合法改稿归�
 		assert.equal(engaged.ok, true, JSON.stringify(engaged));
 		assert.equal(engaged.value.engaged, true, "明确的改稿指令必须接续");
 		harness.runtime.settle();
-		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
+		await waitFor(() => harness.revisionExecutes().length > 0);
 
 		// 准备记录里的范围：目标解析成真实标题，保留句只在 preserve 里。
 		const preparation = await preparationOf(harness, view.workId, "auto-1_s");
@@ -86,7 +86,7 @@ test("未授权改动被要求保留的第一节：归档后检查失败", async
 		const engaged = await runRevisionRound(harness, view.workId, EXACT_INSTRUCTION);
 		assert.equal(engaged.ok, true);
 		harness.runtime.settle();
-		await waitFor(() => harness.state.dispatched.some((message) => message.startsWith("改稿要求：")));
+		await waitFor(() => harness.revisionExecutes().length > 0);
 		await harness.finishRound(REVISED_FIRST_TOO);
 		const operation = await harness.terminal(view.workId, "auto-1_s");
 		assert.equal(operation.phase, "failed", JSON.stringify(operation));

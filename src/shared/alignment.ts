@@ -105,6 +105,20 @@ export function parseDocumentWorkMetadataControl(message: string): DocumentWorkM
 }
 
 /**
+ * 宿主授权的执行命令：`/tpa-work execute <一个受限编码绑定载荷>`。
+ *
+ * 与元数据控制分开分类：它会真正触发一个模型回合（由扩展用自定义消息触发），
+ * 因此**不属于**对齐期间的只读豁免；只在「扩展在位 + 身份与绑定完全一致」时才放行。
+ * 载荷仍是绑定本身（指令由扩展从冻结 scope 派生），这里只做与 bind 同级的形态校验。
+ */
+export function parseDocumentWorkExecutionCommand(message: string): { payload: Record<string, unknown> } | undefined {
+	const tokens = message.trim().split(/[ \t]+/);
+	if (tokens[0] !== DOCUMENT_WORK_BIND_COMMAND || tokens[1] !== "execute" || tokens.length !== 3) return undefined;
+	const payload = decodeBindingPayload(tokens[2] ?? "");
+	return payload ? { payload } : undefined;
+}
+
+/**
  * 命令名级匹配：用于「扩展在不在」的预检，避免把载荷当普通提示交给模型。
  *
  * 必须比严格语法更宽：命令名后面接任何非命令名字符（空格、制表、换行、NBSP、控制字符…）都

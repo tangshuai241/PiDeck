@@ -9,7 +9,7 @@ import { ipcMain, dialog, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { isDigest, isRequestId, isWorkId, parseAuthorizationReference, parseDocumentWorkScope, parseRequirementsReference, parseSessionRuntimeTriple, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
 import { parseDocumentWorkView } from "../../shared/documentWorkRecords";
-import type { DocumentOutputRoot, DocumentWorkView } from "../../shared/types/documentWork";
+import type { AutoReviseResult, DocumentOutputRoot, DocumentWorkView } from "../../shared/types/documentWork";
 import type { DocumentWorkService } from "../document-work/DocumentWorkService";
 
 export type DocumentWorkIpcDeps = {
@@ -87,13 +87,16 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 		return accepted.length ? workSuccess({ paths: accepted, count: accepted.length }) : workFailure("PATH_DENIED", "material_not_referenced");
 	});
 
-	ipcMain.handle(ipcChannels.documentWorkAutoRevise, async (_event, raw: unknown): Promise<WorkResult<{ engaged: boolean }>> => {
+	ipcMain.handle(ipcChannels.documentWorkAutoRevise, async (_event, raw: unknown): Promise<WorkResult<AutoReviseResult>> => {
 		if (typeof raw !== "object" || raw === null) return workFailure("INVALID_INPUT", "payload_required");
 		const sessionId = Reflect.get(raw, "sessionId");
 		const requestId = Reflect.get(raw, "requestId");
 		if (!isBoundedString(sessionId, 96) || !isRequestId(requestId)) return workFailure("INVALID_INPUT", "auto_revise_fields");
-		// 判定完全在主进程：渲染层只报告「有新用户消息了」，不提供任何授权布尔值。
-		return service.autoRevise(sessionId, requestId);
+		// 判定完全在主进程：渲染层只报告「哪一轮有新用户消息」，不提供任何授权布尔值；
+		// sourceTurnId 只是「我指的是这一轮」，正文/策略/授权仍由主进程自己读自己判。
+		const sourceTurnId = Reflect.get(raw, "sourceTurnId");
+		if (sourceTurnId !== undefined && !isBoundedString(sourceTurnId, 200)) return workFailure("INVALID_INPUT", "auto_revise_turn");
+		return service.autoRevise(sessionId, requestId, typeof sourceTurnId === "string" ? sourceTurnId : undefined);
 	});
 
 	ipcMain.handle(ipcChannels.documentWorkCreate, async (_event, raw: unknown): Promise<WorkResult<DocumentWorkView>> => {
