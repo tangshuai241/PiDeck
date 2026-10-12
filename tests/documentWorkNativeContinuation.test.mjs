@@ -80,7 +80,22 @@ function createHost(options = {}) {
 		isIdle: () => true,
 		hasPendingMessages: () => false,
 		ui: { notify: (message) => notifications.push(message) },
-		sessionManager: { getSessionId: () => session, getBranch: () => clone(branch) },
+		sessionManager: {
+			getSessionId: () => session,
+			getBranch: () => clone(branch),
+			// 真实 pi 的 `getEntries()` 返回整个会话文件的条目（含被切走的分支）。
+			// 用例可以按需模拟：只看活动分支（options.visibleEntries）、缺 API（omitGetEntries）、
+			// 超出预算（budgetExceeded）。
+			...(options.omitGetEntries
+				? {}
+				: {
+						getEntries: () => {
+							if (options.budgetExceeded) return new Array(20001);
+							const listed = options.visibleEntries ? options.visibleEntries(branch) : branch;
+							return clone(listed);
+						},
+					}),
+		},
 	};
 	const pi = {
 		on: (name, handler) => {
@@ -93,7 +108,11 @@ function createHost(options = {}) {
 		setActiveTools: (names) => {
 			active = [...names];
 		},
-		appendEntry: (customType, data) => branch.push({ type: "custom", customType, data: clone(data) }),
+		appendEntry: (customType, data) => {
+			// 标记写失败注入：执行路径必须先写标记成功才允许触发模型。
+			if (options.appendEntryThrows || options.appendEntryThrowsFor?.(customType)) throw new Error("appendEntry failed");
+			branch.push({ type: "custom", customType, data: clone(data) });
+		},
 		sendMessage: (message, sendOptions) => {
 			messages.push(clone(message));
 			branch.push({ type: "custom_message", ...clone(message) });
@@ -458,4 +477,142 @@ test("契约一致：扩展现场派生的指令与主进程 buildRevisionPrompt
 	const seen = await host.request();
 	assert.equal(executionMessages(seen).length, 1);
 	assert.equal(executionMessages(seen)[0], buildRevisionPrompt({ scope }), "同形契约：扩展从绑定派生、主进程从准备派生，两端必须逐字一致");
+});
+
+test("缓存淘汰不得重新授予执行权：17 次新尝试后重放第 0 个尝试仍然被拒", async () => {
+	const host = createHost();
+	const attemptFor = (index) => ({ attemptId: `at_${index}`, preparationId: `pr_${index}`, digest: String(index % 10).repeat(64) });
+	// 17 次真正的新尝试：每次都必须执行一次（缓存上限 16，第 0 个已被淘汰）。
+	for (let index = 0; index < 17; index += 1) {
+		const attempt = attemptFor(index);
+		await host.command(bindCommand(revisionBinding(attempt)));
+		await host.command(executeCommand(attempt));
+	}
+	assert.equal(executionTurns(host), 17, "17 次新尝试必须各执行一次");
+	// 第 0 个尝试虽然已被缓存淘汰，历史标记仍然是权威：绝不允许再开一轮。
+	await host.command(bindCommand(revisionBinding(attemptFor(0))));
+	await host.command(executeCommand(attemptFor(0)));
+	assert.equal(executionTurns(host), 17, "缓存淘汰不得让旧尝试重新获得执行权");
+	assert.equal(contextMessages(await host.request()).length, 0, "重放的旧尝试不得重新注入制作上下文");
+	// 真正的新尝试照常执行（第 18 个）。
+	await host.command(bindCommand(revisionBinding(attemptFor(17))));
+	await host.command(executeCommand(attemptFor(17)));
+	assert.equal(executionTurns(host), 18, "可验证为全新的尝试必须能执行");
+	await host.command(executeCommand(attemptFor(17)));
+	assert.equal(executionTurns(host), 18, "它自己也只执行一次");
+});
+
+test("重启后缓存全空：凭原生标记识别旧尝试，重放被拒、新尝试照常", async () => {
+	const source = createHost();
+	const attemptFor = (index) => ({ attemptId: `at_${index}`, preparationId: `pr_${index}`, digest: String(index % 10).repeat(64) });
+	for (let index = 0; index < 17; index += 1) {
+		await source.command(bindCommand(revisionBinding(attemptFor(index))));
+		await source.command(executeCommand(attemptFor(index)));
+	}
+	// 重启：同一原生会话、缓存与内存记账全空，只剩原生条目。
+	const reopened = createHost({ entries: clone(source.branch) });
+	await reopened.fire("session_start", { type: "session_start" });
+	await reopened.command(bindCommand(revisionBinding(attemptFor(0))));
+	await reopened.command(executeCommand(attemptFor(0)));
+	assert.equal(executionTurns(reopened), 0, "重启后重放旧尝试不得执行");
+	assert.equal(contextMessages(await reopened.request()).length, 0, "重启后的旧尝试不注入上下文");
+	await reopened.command(bindCommand(revisionBinding(attemptFor(18))));
+	await reopened.command(executeCommand(attemptFor(18)));
+	assert.equal(executionTurns(reopened), 1, "重启后全新的尝试必须能执行");
+});
+
+test("窗口边缘的 release/unbind：重放已淘汰尝试不得重获执行权", async () => {
+	for (const [label, teardown] of [
+		["release", "release"],
+		["unbind", "unbind"],
+	]) {
+		const host = createHost();
+		const attemptFor = (index) => ({ attemptId: `at_${index}`, preparationId: `pr_${index}`, digest: String(index % 10).repeat(64) });
+		for (let index = 0; index < 17; index += 1) {
+			await host.command(bindCommand(revisionBinding(attemptFor(index))));
+			await host.command(executeCommand(attemptFor(index)));
+		}
+		await host.command(teardown);
+		await host.command(bindCommand(revisionBinding(attemptFor(0))));
+		await host.command(executeCommand(attemptFor(0)));
+		assert.equal(executionTurns(host), 17, `${label} 之后重放已淘汰尝试不得执行`);
+	}
+});
+
+test("分支切换：活动分支看不到的旧尝试由完整历史条目认领", async () => {
+	const source = createHost();
+	const attemptFor = (index) => ({ attemptId: `at_${index}`, preparationId: `pr_${index}`, digest: String(index % 10).repeat(64) });
+	for (let index = 0; index < 17; index += 1) {
+		await source.command(bindCommand(revisionBinding(attemptFor(index))));
+		await source.command(executeCommand(attemptFor(index)));
+	}
+	const fullHistory = clone(source.branch);
+	// 切走分支：活动分支只剩最后两条，旧尝试的标记只在 getEntries() 的完整历史里。
+	const truncated = fullHistory.slice(-2);
+	const host = createHost({ entries: truncated, visibleEntries: () => fullHistory });
+	await host.fire("session_start", { type: "session_start" });
+	await host.command(bindCommand(revisionBinding(attemptFor(0))));
+	await host.command(executeCommand(attemptFor(0)));
+	assert.equal(executionTurns(host), 0, "完整历史里的旧标记必须认领到（不能只看活动分支）");
+	await host.command(bindCommand(revisionBinding(attemptFor(19))));
+	await host.command(executeCommand(attemptFor(19)));
+	assert.equal(executionTurns(host), 1, "历史里没有的新尝试必须能执行");
+});
+
+test("标记写失败不得触发执行；历史不可用/超预算一律 fail-closed", async () => {
+	// 绑定标记正常、执行标记写失败：不能开轮（否则重启后无法去重）。
+	const writeFailure = createHost({ appendEntryThrowsFor: (customType) => customType === EXECUTION_ENTRY_TYPE });
+	await writeFailure.command(bindCommand(revisionBinding()));
+	await writeFailure.command(executeCommand());
+	assert.equal(executionTurns(writeFailure), 0, "执行标记写失败不得触发模型回合");
+	assert.equal(writeFailure.notifications.length >= 1, true, "必须如实告知被拒");
+	await writeFailure.command(executeCommand());
+	assert.equal(executionTurns(writeFailure), 0, "写失败后重试同样不得执行");
+
+	// 历史来源缺失（旧版 pi）或超出预算：无法确认「没执行过」→ 拒绝，不猜新尝试。
+	for (const [label, options] of [
+		["历史 API 缺失", { omitGetEntries: true }],
+		["条目超出预算", { budgetExceeded: true }],
+	]) {
+		const host = createHost(options);
+		await host.command(bindCommand(revisionBinding()));
+		await host.command(executeCommand());
+		assert.equal(executionTurns(host), 0, `${label} 时必须 fail-closed`);
+		assert.equal(contextMessages(await host.request()).length, 0, `${label} 时不得注入制作上下文`);
+	}
+});
+
+test("自身标记畸形/不可分类：一律 fail-closed，不得当成全新尝试", async () => {
+	// 畸形或读不懂的**自家**标记（缺失 data / 缺会话身份 / binding 不是记录）→ unknown。
+	for (const [label, entries] of [
+		["执行标记缺 data", [{ type: "custom", customType: EXECUTION_ENTRY_TYPE }]],
+		["执行标记缺会话身份", [{ type: "custom", customType: EXECUTION_ENTRY_TYPE, data: { attemptId: "at_0" } }]],
+		["执行标记缺尝试标识", [{ type: "custom", customType: EXECUTION_ENTRY_TYPE, data: { sessionId: SESSION } }]],
+		["绑定标记 binding 不是记录", [{ type: "custom", customType: "tpa-document-work-binding", data: { sessionId: SESSION, binding: "corrupt" } }]],
+	]) {
+		const host = createHost({ entries });
+		await host.command(bindCommand(revisionBinding()));
+		await host.command(executeCommand());
+		assert.equal(executionTurns(host), 0, `${label}：不得当成全新尝试执行`);
+		assert.equal(contextMessages(await host.request()).length, 0, `${label}：不得注入制作上下文`);
+	}
+
+	// 身份可验证为**别的会话**的标记、以及别的扩展条目：与本次判定无关，忽略后新尝试照常执行。
+	const foreign = createHost({
+		entries: [
+			{ type: "custom", customType: EXECUTION_ENTRY_TYPE, data: { sessionId: "another-native-session", attemptId: "at_0", workId: "dw_other" } },
+			{ type: "custom", customType: "some-other-extension", data: { anything: true } },
+			{ type: "custom", customType: "some-other-extension" },
+			{ type: "message", message: { role: "user", content: [{ type: "text", text: "hi" }] } },
+		],
+	});
+	await foreign.command(bindCommand(revisionBinding()));
+	await foreign.command(executeCommand());
+	assert.equal(executionTurns(foreign), 1, "别的会话/别的扩展条目不得阻塞全新尝试");
+
+	// 但会话身份读不出来的标记无法证明「与我无关」→ 仍然 fail-closed。
+	const unreadable = createHost({ entries: [{ type: "custom", customType: EXECUTION_ENTRY_TYPE, data: {} }] });
+	await unreadable.command(bindCommand(revisionBinding()));
+	await unreadable.command(executeCommand());
+	assert.equal(executionTurns(unreadable), 0, "无法验证身份的标记必须 fail-closed");
 });

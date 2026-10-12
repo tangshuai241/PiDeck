@@ -81,6 +81,66 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	const boundAttempts = new Map<string, number>();
 	const ATTEMPT_MEMORY_LIMIT = 16;
 
+	/**
+	 * 历史扫描的显式预算：对**已由 SDK 驻留的历史条目**做有界扫描/计数，超过就不再扫并判
+	 * 「无法确认」（它不阻止 SDK 自己返回整份历史；这里只是给我们的遍历与判定设上限）。
+	 * 缓存只是加速，绝不是授权来源。
+	 */
+	const HISTORY_SCAN_BUDGET = 20_000;
+
+	/**
+	 * 一个尝试在原生历史里是否已留下标记。
+	 *
+	 * 缓存命中就够快；**未命中必须回权威历史核对**——否则缓存淘汰（有界）会让一个早已
+	 * 执行过的旧尝试重新获得执行权（真机反例：17 次新尝试后重放第 0 个又开了一轮）。
+	 * 历史来源用公开的 `sessionManager.getEntries()`（整个会话文件的全部条目，含被切走的
+	 * 分支），不读文件、不加通道。
+	 *
+	 * 返回："executed"（投递过执行）| "bound"（绑定过，未投递执行）| "absent"（确认是全新
+	 * 尝试）| "unknown"（历史不可用/超预算/解析失败）。**调用方必须把 unknown 当 fail-closed**：
+	 * 无法确认「没执行过」时不得当成新尝试。
+	 */
+	function lookupAttemptInHistory(ctx: ExtensionContext, attemptId: string): "executed" | "bound" | "absent" | "unknown" {
+		if (executedAttempts.has(attemptId)) return "executed";
+		if (boundAttempts.has(attemptId)) return "bound";
+		// 用公开类型化 SDK 面读取整份会话条目（含被切走的分支）。旧版 pi 没有这个 API 时
+		// 调用会抛错 → 走下面的 fail-closed，而不是靠强转去猜结构。
+		let listed: unknown;
+		try {
+			listed = ctx.sessionManager.getEntries();
+		} catch {
+			return "unknown";
+		}
+		// 旧版 pi 没有这个 API，或条目数超出预算：都不许猜「这是新尝试」。
+		if (!Array.isArray(listed) || listed.length > HISTORY_SCAN_BUDGET) return "unknown";
+		const current = ctx.sessionManager.getSessionId();
+		let sawBinding = false;
+		for (const entry of listed) {
+			if (!isRecord(entry) || entry.type !== "custom") continue;
+			// 别的扩展/内部条目与本次判定无关：忽略。
+			if (entry.customType !== DOCUMENT_WORK_EXECUTION_ENTRY_TYPE && entry.customType !== DOCUMENT_WORK_BINDING_ENTRY_TYPE) continue;
+			// 从这里开始都是**我们自己的**标记：读不懂就说明历史不可信，必须 fail-closed，
+			// 不能因为「这条没解析出来」就把尝试当成全新的（那正是重复开轮的入口）。
+			const data = entry.data;
+			if (!isRecord(data)) return "unknown";
+			const entrySession = data.sessionId;
+			if (typeof entrySession !== "string" || entrySession.length === 0) return "unknown";
+			// 身份可验证为别的会话：与本次判定无关，忽略。
+			if (entrySession !== current) continue;
+			if (entry.customType === DOCUMENT_WORK_EXECUTION_ENTRY_TYPE) {
+				if (typeof data.attemptId !== "string" || data.attemptId.length === 0) return "unknown";
+				if (data.attemptId === attemptId) return "executed";
+				continue;
+			}
+			// 绑定条目的尝试标识在 binding 里；按 attemptId 判定即可（不比对 digest：
+			// 同一 attemptId 的不同身份属于篡改，保守方向是继续收紧执行权）。
+			const bound = isRecord(data.binding) ? data.binding.attemptId : undefined;
+			if (typeof bound !== "string" || bound.length === 0) return "unknown";
+			if (bound === attemptId) sawBinding = true;
+		}
+		return sawBinding ? "bound" : "absent";
+	}
+
 	/** 有界记账：重复条目只刷新时间，超出上限丢最旧的。 */
 	function rememberAttempt(memory: Map<string, number>, attemptId: string): void {
 		memory.delete(attemptId);
@@ -141,11 +201,14 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 			}
 			if (binding.attemptId === next.attemptId) return "conflict";
 		}
+		// 判定必须在写本条标记**之前**做：否则刚写下的绑定条目会把这一轮自己算成「已存在」。
+		// 只有历史确认是全新尝试才进入「制作中」；重绑已释放/已执行/无法确认的尝试都不得
+		// 重新获得授权（缓存只是加速，判定回权威历史）。
+		const history = ctx ? lookupAttemptInHistory(ctx, next.attemptId) : "unknown";
 		pi.appendEntry(DOCUMENT_WORK_BINDING_ENTRY_TYPE, { sessionId: next.nativeSessionId, binding: next, boundAt: Date.now() });
 		binding = next;
 		sessionId = next.nativeSessionId;
-		// 只有**第一次**绑定这个尝试才进入「制作中」；重绑已释放/已执行的尝试不得重新获得授权。
-		attemptLive = !boundAttempts.has(next.attemptId) && !executedAttempts.has(next.attemptId);
+		attemptLive = history === "absent";
 		rememberAttempt(boundAttempts, next.attemptId);
 		materialStatus.clear();
 		// 旧尝试的候选不继承：新绑定只用新汇报。
@@ -369,7 +432,6 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 				if (
 					!binding ||
 					!attemptLive ||
-					executedAttempts.has(raw.attemptId) ||
 					binding.workId !== raw.workId ||
 					binding.attemptId !== raw.attemptId ||
 					binding.preparationId !== raw.preparationId ||
@@ -379,10 +441,22 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify("TPA execution rejected: no matching live binding for this attempt.", "warning");
 					return;
 				}
+				// 缓存未命中时回权威历史核对：确认执行过 → 拒绝；历史不可用/超预算 →
+				// 无法确认「没执行过」，同样拒绝（fail-closed，不猜新尝试）。
+				const history = lookupAttemptInHistory(ctx, raw.attemptId);
+				if (history === "executed" || history === "unknown") {
+					ctx.ui.notify(history === "executed" ? "TPA execution rejected: this attempt already delivered its execution." : "TPA execution rejected: cannot confirm this attempt never executed; refusing to start a possibly duplicate round.", "warning");
+					return;
+				}
 				// 先记去重（内存 + 原生 custom entry）：即使进程随后重启，这一尝试也不会再被
-				// 重新武装；标记只是传输层去重，不是任务授权。
+				// 重新武装；标记只是传输层去重，不是任务授权。**写标记失败就不触发模型**。
 				rememberAttempt(executedAttempts, raw.attemptId);
-				pi.appendEntry(DOCUMENT_WORK_EXECUTION_ENTRY_TYPE, { sessionId: raw.nativeSessionId, workId: binding.workId, attemptId: binding.attemptId, preparationId: binding.preparationId, digest: binding.digest, deliveredAt: Date.now() });
+				try {
+					pi.appendEntry(DOCUMENT_WORK_EXECUTION_ENTRY_TYPE, { sessionId: raw.nativeSessionId, workId: binding.workId, attemptId: binding.attemptId, preparationId: binding.preparationId, digest: binding.digest, deliveredAt: Date.now() });
+				} catch (error) {
+					ctx.ui.notify(`TPA execution rejected: could not persist the delivery marker; no round was started. ${error instanceof Error ? error.message : ""}`.trim(), "warning");
+					return;
+				}
 				pi.sendMessage(
 					{
 						customType: DOCUMENT_WORK_EXECUTION_TYPE,

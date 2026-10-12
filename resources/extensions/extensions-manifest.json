@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "fc9592a893124398af5d29513822e8baa834c2f18797a0c243d9be78754c8ebf",
+  "bundleSha256": "bd56b5dc5328c6674fafbb477f292d272e7d1f87376b7c91c85bc7c958909fe0",
   "fileCount": 31,
   "files": [
     {
@@ -31,8 +31,8 @@
     },
     {
       "name": "pi-deck-document-work.ts",
-      "sha256": "3d57ba46e5453759294b786947af72269db9ccb793a379963184e9f7a12e9a0d",
-      "bytes": 26056
+      "sha256": "5bea69b42c08dd2248286428d704b425a9052edbfba24a66bf168dece660f9ce",
+      "bytes": 30526
     },
     {
       "name": "pi-deck-ext-points.ts",
