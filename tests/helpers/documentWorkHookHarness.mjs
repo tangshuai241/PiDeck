@@ -188,6 +188,8 @@ export function createDocumentWorkHarness(options = {}) {
 						onChanged: () => () => {},
 						create: async (input) => {
 							calls.create.push(input);
+							// 需要真实验证「渲染层编码出的入参能否过公开 IPC 边界」时，把这条调用接到生产 handler 上。
+							if (options.createImpl) return options.createImpl(input);
 							const created = { workId: "dw_1", sessionId: input.sessionId, revision: 1, title: input.title ?? "文稿工作", outputRootLabel: "文稿", requirementsSummary: "", active: null, versions: [], revisionReady: false };
 							workState.views = [created];
 							return { ok: true, value: created };

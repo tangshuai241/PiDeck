@@ -16,8 +16,12 @@
  * 6. 当前轮路由（与确认单批准路径共用 `routeDocumentTurn`）：用户原话、当前 revision 的
  *    brief 二者之一命中正式文稿证据 → arm（绑定该轮身份）；明确工程/编码轮或两者都没有
  *    证据 → clear（普通计划/编码轮不得出现文稿卡）。
+ * 7. arm 时派生的显示标题只服务界面与记录：走共享 `sanitizeWorkTitle`（截 80 字），恒定满足
+ *    公开 IPC `documentWorkCreate` 的标题上界；不够长/超长的需求摘要都不许反过来挡住建档。
+ *    需求正文（goal/deliverable/acceptance）与用户轮身份不受归一影响。
  */
 import { isAlignmentActive } from "../../../shared/alignment";
+import { sanitizeWorkTitle } from "../../../shared/documentWork";
 import { routeDocumentTurn } from "../../../shared/documentIntentPolicy";
 import type { AlignmentState } from "../../../shared/types/alignment";
 import type { DocumentWorkPhase } from "../atoms/document-work-atoms";
@@ -38,7 +42,11 @@ export function deriveDocumentWorkFirstCreateAction(input: { alignment?: Alignme
 	const briefText = briefIsCurrent && alignment.brief ? `${alignment.brief.goal}\n${alignment.brief.deliverable}` : "";
 	// 与确认单批准路径共用同一套当前轮路由：用户原话优先于模型措辞。
 	if (routeDocumentTurn({ userText: input.latestUserTurn.text, briefText }) !== "document") return { kind: "clear" };
-	const title = alignment.brief?.goal?.trim();
+	// 标题只是给卡片/记录用的显示派生值，必须走共享 sanitizeWorkTitle 策略（空白与控制字符归一、
+	// 截 80 字），因为公开 IPC documentWorkCreate 的标题上界是 120 字：直接拿整段 goal 当标题，
+	// 真实验收里 219 字的正式需求摘要会在边界被拒（INVALID_INPUT/title_too_long），记录根本建不出来。
+	// 归一不得反哺需求正文：brief 原文（goal/deliverable/acceptance）与用户轮身份保持原样。
+	const title = alignment.brief?.goal ? sanitizeWorkTitle(alignment.brief.goal, "") : "";
 	return { kind: "arm", intent: { sourceTurnId: input.latestUserTurn.id, ...(title ? { title } : {}) } };
 }
 
