@@ -42,7 +42,7 @@ function createDomain(input) {
 		status: "idle",
 		flags: {},
 		generation: 1,
-		messages: [{ id: "turn-1", role: "user", text: "把标题改短一点", agentId: AGENT_ID, timestamp: 1 }],
+		messages: [{ id: "turn-1", role: "user", text: "请写一份季度报告", agentId: AGENT_ID, timestamp: 1 }],
 		dispatched: [],
 	};
 	const port = {

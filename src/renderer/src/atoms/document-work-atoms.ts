@@ -22,9 +22,6 @@ export const pendingWorkCreationAtomFamily = atomFamily((_sessionId: string) => 
 export type ActivePreparation = { preparation: PreparedWork; runtime: SessionRuntimeTriple; authorizationKind: "alignment_confirmation" | "revision_instruction" };
 export const activePreparationAtomFamily = atomFamily((_sessionId: string) => atom<ActivePreparation | undefined>(undefined));
 
-/** 用户显式开启的改稿模式：只有它打开时，普通聊天里发送的要求才会被当成改稿轮。 */
-export const documentWorkRevisionModeAtomFamily = atomFamily((_sessionId: string) => atom(false));
-
 /** 主进程推送的变化事件落点：只保留本会话的最近一条，避免无界增长。 */
 export type DocumentWorkChange = { workId: string; changeKind: string; revision: number; attemptId?: string };
 export const documentWorkChangeAtomFamily = atomFamily((_sessionId: string) => atom<DocumentWorkChange | undefined>(undefined));
@@ -37,6 +34,5 @@ export function resetDocumentWorkSession(store: ReturnType<typeof createStore>, 
 	store.set(documentWorkMaterialsAtomFamily(sessionId), []);
 	store.set(pendingWorkCreationAtomFamily(sessionId), undefined);
 	store.set(activePreparationAtomFamily(sessionId), undefined);
-	store.set(documentWorkRevisionModeAtomFamily(sessionId), false);
 	store.set(documentWorkChangeAtomFamily(sessionId), undefined);
 }

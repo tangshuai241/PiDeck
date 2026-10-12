@@ -3,23 +3,13 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AgentBackend } from "../../../shared/types";
 import type { DocumentWorkView, PreparedWork, SessionRuntimeTriple } from "../../../shared/types/documentWork";
 import { isAlignmentActive } from "../../../shared/alignment";
+import { isDocumentWorkIntent } from "../../../shared/documentIntentPolicy";
 import { sameRuntimeTriple } from "../../../shared/documentWork";
 import { sessionComposerModeBySessionIdAtomFamily, setSessionComposerModeAtom } from "../atoms/composer-atoms";
 import { waitForAlignmentAcknowledgement } from "../utils/alignmentAcknowledgement";
 import { sessionMessageCacheBySessionIdAtomFamily } from "../atoms/session-atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../atoms/session-selectors";
-import {
-	activePreparationAtomFamily,
-	documentWorkChangeAtomFamily,
-	documentWorkErrorAtomFamily,
-	documentWorkMaterialsAtomFamily,
-	documentWorkPhaseAtomFamily,
-	documentWorkRevisionModeAtomFamily,
-	documentWorkViewAtomFamily,
-	pendingWorkCreationAtomFamily,
-	type DocumentWorkFailure,
-	type DocumentWorkPhase,
-} from "../atoms/document-work-atoms";
+import { activePreparationAtomFamily, documentWorkChangeAtomFamily, documentWorkErrorAtomFamily, documentWorkMaterialsAtomFamily, documentWorkPhaseAtomFamily, documentWorkViewAtomFamily, pendingWorkCreationAtomFamily, type DocumentWorkFailure, type DocumentWorkPhase } from "../atoms/document-work-atoms";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
@@ -89,7 +79,6 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	const pendingAtom = pendingWorkCreationAtomFamily(sessionId);
 	const preparationAtom = activePreparationAtomFamily(sessionId);
 	const changeAtom = documentWorkChangeAtomFamily(sessionId);
-	const revisionModeAtom = documentWorkRevisionModeAtomFamily(sessionId);
 
 	const view = useAtomValue(viewAtom);
 	const phase = useAtomValue(phaseAtom);
@@ -98,7 +87,6 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	const pendingCreation = useAtomValue(pendingAtom);
 	const preparation = useAtomValue(preparationAtom);
 	const change = useAtomValue(changeAtom);
-	const revisionMode = useAtomValue(revisionModeAtom);
 	const runtime = useAtomValue(runtimeAtom);
 	const messages = useAtomValue(messagesAtom)?.messages;
 	/** 材料绝对路径只在本 hook 内短暂保留，不进全局状态。 */
@@ -222,6 +210,15 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		if (!enabled) return "proceedWithAlignment";
 		const currentView = store.get(viewAtom);
 		if (!currentView) return "proceedWithAlignment";
+		// 已有工作也要确认本轮要求仍然是文稿任务：后续普通编码/解释必须走原生批准。
+		const currentAlignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
+		const alignmentText = currentAlignment?.brief
+			? `${currentAlignment.brief.goal}
+${currentAlignment.brief.deliverable}`
+			: latestUserMessageId(store.get(messagesAtom)?.messages)
+				? (store.get(messagesAtom)?.messages.at(-1)?.text ?? "")
+				: "";
+		if (!isDocumentWorkIntent({ text: alignmentText, hasWork: true, hasUsableBase: currentView.versions.some((version) => version.inspection === "passed") })) return "proceedWithAlignment";
 		const alignment = store.get(runtimeAtom)?.state?.alignment ?? undefined;
 		const triple = targetNow();
 		if (!alignment?.brief || !isAlignmentActive(alignment) || !triple) {
@@ -282,64 +279,19 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	}, [enabled, sessionId, store, viewAtom, runtimeAtom, phaseAtom, errorAtom, preparationAtom, refresh, targetNow]);
 
 	/**
-	 * 普通聊天里的改稿轮（不需要重开对齐）。
+	/**
+	 * 普通聊天的明确改稿：判定与接续全在主进程。
 	 *
-	 * 用户在卡片上开启改稿后发送要求；主进程核对「那一轮用户轮正文指纹」才准备，
-	 * 随后等 Pi 本轮稳定、绑定扩展、再派发一次正式改稿提示。模型自己声明意图不会启动。
+	 * 渲染层只报告「有新用户消息」，不提供任何授权布尔值；主进程读真实用户当前轮，
+	 * 用保守策略判断是不是明确改稿要求（改哪里 + 改什么，且没有「别改先解释」语境）。
 	 */
-	const prepareAndStartRevision = useCallback(
-		async (instruction: string): Promise<boolean> => {
-			const currentView = store.get(viewAtom);
-			const triple = targetNow();
-			if (!enabled || !currentView || !triple) return false;
-			const latest = latestUserMessageId(store.get(messagesAtom)?.messages);
-			if (!latest) {
-				showNotice(t("documentWork.unavailable"));
-				return false;
-			}
-			const turn = store.get(messagesAtom)?.messages.find((message) => message.id === latest);
-			const text = instruction.trim() || turn?.text || "";
-			const hash = await hashUserTurnText(text);
-			store.set(phaseAtom, "preparing");
-			store.set(errorAtom, undefined);
-			try {
-				const prepared = await desktopApi.documentWork.prepare({
-					requestId: crypto.randomUUID(),
-					workId: currentView.workId,
-					expectedRevision: currentView.revision,
-					kind: "revise_document",
-					requirementsRef: { kind: "user_instruction", sourceTurnId: latest, sourceTurnHash: hash },
-					scope: { summary: text, sections: [], preserve: [] },
-					materialPaths: materialPathsRef.current,
-				});
-				if (!prepared.ok) {
-					store.set(errorAtom, failureOf(prepared));
-					showNotice(noticeForFailure(failureOf(prepared)));
-					return false;
-				}
-				const started = await desktopApi.documentWork.start({
-					requestId: crypto.randomUUID(),
-					workId: currentView.workId,
-					expectedRevision: prepared.value.workRevision,
-					preparation: prepared.value.preparation,
-					expectedRuntime: triple,
-					authorization: { kind: "revision_instruction", sourceTurnId: latest, sourceTurnHash: hash },
-				});
-				if (!started.ok) {
-					store.set(errorAtom, failureOf(started));
-					showNotice(noticeForFailure(failureOf(started)));
-					return false;
-				}
-				store.set(preparationAtom, { preparation: prepared.value, runtime: triple, authorizationKind: "revision_instruction" });
-				store.set(revisionModeAtom, false);
-				return true;
-			} finally {
-				store.set(phaseAtom, "idle");
-				void refresh();
-			}
-		},
-		[enabled, store, viewAtom, phaseAtom, errorAtom, preparationAtom, revisionModeAtom, refresh, targetNow, messagesAtom],
-	);
+	const requestAutoRevise = useCallback(async (): Promise<boolean> => {
+		if (!enabled) return false;
+		const result = await desktopApi.documentWork.autoRevise({ sessionId, requestId: crypto.randomUUID() });
+		if (!result.ok) return false;
+		if (result.value.engaged) void refresh();
+		return result.value.engaged;
+	}, [enabled, sessionId, refresh]);
 
 	/**
 	 * 改稿轮触发点：用户开启改稿后发送的下一条消息就是本轮改稿要求。
@@ -347,14 +299,14 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 	 */
 	const lastRevisionTurnRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
-		if (!enabled || !revisionMode) return;
+		if (!enabled || !view?.revisionReady) return;
 		const latest = latestUserMessageId(messages);
 		if (!latest || latest === lastRevisionTurnRef.current) return;
 		lastRevisionTurnRef.current = latest;
 		const turn = messages?.find((message) => message.id === latest);
 		if (!turn?.text.trim()) return;
-		void prepareAndStartRevision(turn.text);
-	}, [enabled, revisionMode, messages, prepareAndStartRevision]);
+		void requestAutoRevise();
+	}, [enabled, view?.revisionReady, messages, requestAutoRevise]);
 
 	/** 取消只针对本轮：attemptId 与 runtime 三元组都必须匹配。 */
 	const cancelActive = useCallback(async (): Promise<void> => {
@@ -397,9 +349,7 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 		chooseMaterials,
 		registerChatMaterials,
 		prepareAndStartForApproval,
-		prepareAndStartRevision,
-		revisionMode,
-		setRevisionMode: (value: boolean) => store.set(revisionModeAtom, value),
+		requestAutoRevise,
 		cancelActive,
 		refresh,
 	};

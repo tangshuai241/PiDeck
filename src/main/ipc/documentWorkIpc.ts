@@ -76,6 +76,15 @@ export function registerDocumentWorkIpc({ service, getWindow, registerOutputRoot
 		return accepted.length ? workSuccess({ paths: accepted, count: accepted.length }) : workFailure("PATH_DENIED", "material_not_referenced");
 	});
 
+	ipcMain.handle(ipcChannels.documentWorkAutoRevise, async (_event, raw: unknown): Promise<WorkResult<{ engaged: boolean }>> => {
+		if (typeof raw !== "object" || raw === null) return workFailure("INVALID_INPUT", "payload_required");
+		const sessionId = Reflect.get(raw, "sessionId");
+		const requestId = Reflect.get(raw, "requestId");
+		if (!isBoundedString(sessionId, 96) || !isRequestId(requestId)) return workFailure("INVALID_INPUT", "auto_revise_fields");
+		// 判定完全在主进程：渲染层只报告「有新用户消息了」，不提供任何授权布尔值。
+		return service.autoRevise(sessionId, requestId);
+	});
+
 	ipcMain.handle(ipcChannels.documentWorkCreate, async (_event, raw: unknown): Promise<WorkResult<DocumentWorkView>> => {
 		if (typeof raw !== "object" || raw === null) return workFailure("INVALID_INPUT", "payload_required");
 		const requestId = Reflect.get(raw, "requestId");

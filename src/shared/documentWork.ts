@@ -189,7 +189,9 @@ export function parseDocumentWorkScope(value: unknown): DocumentWorkScope | unde
 	const sections = parseBoundedList(value.sections, 24, 200);
 	const preserve = parseBoundedList(value.preserve, 24, 200);
 	if (!sections || !preserve) return undefined;
-	return { summary: value.summary, sections, preserve };
+	const allow = value.allow === undefined ? undefined : parseBoundedList(value.allow, 24, 200);
+	if (value.allow !== undefined && !allow) return undefined;
+	return { summary: value.summary, sections, preserve, ...(allow ? { allow } : {}) };
 }
 
 function parseBoundedList(value: unknown, maxItems: number, maxLength: number): string[] | undefined {

@@ -45,6 +45,8 @@ export type InspectionRequest = {
 	comparedTo?: { versionId: string; textDigest?: string; sections?: readonly InspectorSection[] };
 	/** 本轮声明必须保留的块标题（准备记录的 scope.preserve）。 */
 	preserve?: readonly string[];
+	/** 本轮显式允许改动的块标题（准备记录的 scope.allow / sections）。 */
+	allow?: readonly string[];
 };
 
 export type InspectionBudgetOptions = {
@@ -111,6 +113,7 @@ export class DocumentInspectionService {
 			timeoutMs: this.timeoutMs,
 			...(request.comparedTo ? { comparedTo: request.comparedTo } : {}),
 			...(request.preserve ? { preserve: request.preserve } : {}),
+			...(request.allow ? { allow: request.allow } : {}),
 		});
 		if (outcome.kind === "timeout") return this.failureInspection(base, request.versionId, "timeout", "within_time_budget", fingerprint.bytes, started);
 		if (outcome.kind === "unavailable") return this.failureInspection(base, request.versionId, "worker_unavailable", "worker_available", fingerprint.bytes, started);

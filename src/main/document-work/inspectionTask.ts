@@ -17,6 +17,7 @@ export type InspectionTaskInput = {
 	timeoutMs: number;
 	comparedTo?: { versionId: string; textDigest?: string; sections?: readonly InspectorSection[] };
 	preserve?: readonly string[];
+	allow?: readonly string[];
 };
 
 export type InspectionTaskOutput = { ok: true; kind: "inspect"; inspectorId: string; inspectorVersion: string; output: InspectorOutput } | { ok: true; kind: "analyze"; analysis: { headings: string[]; sections: InspectorSection[] } } | { ok: false; reason: "unknown_format" | "inspector_failed" };
@@ -43,6 +44,7 @@ export async function runInspectionTask(input: InspectionTaskInput, inspectors: 
 			deadlineAt,
 			...(input.comparedTo ? { comparedTo: input.comparedTo } : {}),
 			...(input.preserve ? { preserve: input.preserve } : {}),
+			...(input.allow ? { allow: input.allow } : {}),
 		});
 		return { ok: true, kind: "inspect", inspectorId: inspector.id, inspectorVersion: inspector.version, output };
 	} catch {

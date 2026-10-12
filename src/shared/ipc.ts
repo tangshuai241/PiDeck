@@ -1147,6 +1147,8 @@ export const ipcChannels = {
 	documentWorkPrepare: "document-work:prepare",
 	/** 持久操作并分发到当前 Pi；授权不在渲染层校验。 */
 	documentWorkStart: "document-work:start",
+	/** 普通聊天里的明确改稿：判定与接续都在主进程，渲染层只报告有新用户消息。 */
+	documentWorkAutoRevise: "document-work:auto-revise",
 	/** 查询原分发的运行与检查结果。 */
 	documentWorkOperation: "document-work:operation",
 	/** 只取消本轮尝试；不取消其他会话或轮次。 */

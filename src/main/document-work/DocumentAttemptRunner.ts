@@ -107,7 +107,7 @@ export class DocumentAttemptRunner {
 			return workSuccess(operation);
 		}
 		const encoded = this.buildBindingPayload(record, preparation, operation);
-		if (!encoded) return this.failOperation(operation, "INVALID_INPUT", "payload_too_large");
+		if (!encoded) return this.failOperation(operation, "RUNTIME_CHANGED", "binding_payload_unavailable");
 		const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
 		if (!bind.accepted) return this.failOperation(operation, bind.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", bind.error);
 		if (!(await this.waitForExtensionBinding(operation))) return this.failOperation(operation, "EXTENSION_UNAVAILABLE", "binding_not_confirmed");
@@ -136,7 +136,7 @@ export class DocumentAttemptRunner {
 			}
 			const encoded = this.buildBindingPayload(record, preparation, operation);
 			if (!encoded) {
-				await this.failOperation(operation, "INVALID_INPUT", "payload_too_large");
+				await this.failOperation(operation, "RUNTIME_CHANGED", "binding_payload_unavailable");
 				return;
 			}
 			const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
@@ -264,6 +264,7 @@ export class DocumentAttemptRunner {
 				? {
 						comparedTo: { versionId: preparation.base.versionId, ...(comparedTextDigest ? { textDigest: comparedTextDigest } : {}), sections: preparation.base.sections },
 						preserve: preparation.scope.preserve,
+						allow: [...preparation.scope.sections, ...(preparation.scope.allow ?? [])],
 					}
 				: {}),
 		});
@@ -280,6 +281,8 @@ export class DocumentAttemptRunner {
 		await this.deps.store.saveOperation(settled);
 		this.attempts.delete(record.workId);
 		await this.deps.store.removeStaging(preparation.stagingDirectory);
+		// 结算完成即释放制作上下文：旧绑定只保留后台归属，不再影响下一轮普通聊天。
+		await this.releaseAttempt(record, operation);
 		this.emit(mutated.value, inspection.status === "failed" ? "failed" : "archived", operation.attemptId);
 	}
 
@@ -298,6 +301,11 @@ export class DocumentAttemptRunner {
 		return documentLike.map((file) => ({ relativePath: file, role: file === primary ? ("primary" as const) : /\.md$/i.test(file) ? ("editable_source" as const) : ("supporting" as const) }));
 	}
 
+	/** 通知扩展结束本轮制作上下文；释放失败不影响结论，只记日志。 */
+	private async releaseAttempt(record: DocumentWorkRecord, operation: DocumentWorkOperation): Promise<void> {
+		await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrelease_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} release`, expectedRuntime: operation.runtime }).catch(() => undefined);
+	}
+
 	private async failOperation(operation: DocumentWorkOperation, code: WorkErrorCode, detail?: string, currentRevision?: number): Promise<WorkResult<DocumentWorkOperation>> {
 		const failed: DocumentWorkOperation = {
 			...operation,
@@ -308,6 +316,8 @@ export class DocumentAttemptRunner {
 		};
 		await this.deps.store.saveOperation(failed);
 		this.attempts.delete(operation.workId);
+		const recordForRelease = await this.deps.store.getRecord(operation.workId);
+		if (recordForRelease) await this.releaseAttempt(recordForRelease, operation);
 		const record = await this.deps.store.getRecord(operation.workId);
 		if (record?.activeRequestId === operation.requestId) {
 			const cleared = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({ ...current, activeRequestId: undefined }));
@@ -319,13 +329,17 @@ export class DocumentAttemptRunner {
 
 	/** 绑定载荷：只放本轮真实解析出的路径与身份，不放正文。 */
 	private buildBindingPayload(record: DocumentWorkRecord, preparation: DocumentWorkPreparation, operation: DocumentWorkOperation): string | undefined {
+		// 原生会话 id 是扩展校验绑定的唯一依据：缺它就发不出可确认的绑定，宁可失败也不发半截载荷。
+		if (!preparation.nativeSessionId) return undefined;
 		const payload = {
 			schemaVersion: 1,
 			workId: record.workId,
 			attemptId: operation.attemptId,
 			preparationId: preparation.preparationId,
 			digest: preparation.digest,
+			// 稳定 SessionRecord.id 与 pi 原生会话 id 是两套身份：扩展用后者校验绑定。
 			sessionId: record.sessionId,
+			nativeSessionId: preparation.nativeSessionId ?? "",
 			kind: preparation.kind,
 			workDirectory: record.workDirectory,
 			stagingDirectory: preparation.stagingDirectory,

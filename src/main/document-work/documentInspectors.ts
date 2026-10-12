@@ -45,8 +45,10 @@ export type InspectorInput = {
 	/** 结构检查截止时刻；到点按 timeout 记未验证，不把没算完的结果当结论。 */
 	deadlineAt: number;
 	comparedTo?: { versionId: string; textDigest?: string; sections?: readonly InspectorSection[] };
-	/** 本轮声明必须保留的块（来自准备记录的 scope.preserve）。 */
+	/** 本轮声明必须保留的块（准备记录的 scope.preserve）。 */
 	preserve?: readonly string[];
+	/** 本轮显式允许改动的块；基稿里其余块默认视为必须保留。 */
+	allow?: readonly string[];
 };
 
 export type FormatInspector = {
@@ -155,12 +157,14 @@ function expired(deadlineAt: number): boolean {
  * 逐块校验保留内容：只对「能同时定位到基稿块与本轮声明」的条目下结论。
  * 定位不到的条目不算违规（属于范围歧义，由准备阶段的范围校验负责）。
  */
-function preservedBlockItem(input: { preserve: readonly string[]; baseSections: readonly InspectorSection[] | undefined; nextSections: readonly InspectorSection[] }): DocumentInspectionItem | undefined {
+function preservedBlockItem(input: { preserve: readonly string[]; allow: readonly string[]; baseSections: readonly InspectorSection[] | undefined; nextSections: readonly InspectorSection[] }): DocumentInspectionItem | undefined {
 	// 新建轮没有基稿：没有「保留内容」这个概念，不产出检查项。
 	if (input.baseSections === undefined) return undefined;
-	// 声明里没有要保留的块 = 允许自由改写，无法也不该虚构违规。
-	if (!input.preserve.length) return { id: "preserved_blocks_intact", status: "passed", detail: "nothing_declared_to_preserve" };
-	const checkable = input.baseSections.filter((section) => input.preserve.some((entry) => matchesHeading(entry, section.heading)));
+	const allowed = (heading: string): boolean => input.allow.some((entry) => matchesHeading(entry, heading));
+	// 有效保留集合：显式声明的保留块 + 基稿里未被显式允许改动的块。
+	// 「allow 与 preserve 都是空」不等于随便改：基稿已有的块默认全部保留，否则未授权改动会被漏判。
+	const implicit = input.baseSections.filter((section) => !allowed(section.heading));
+	const checkable = [...input.baseSections.filter((section) => input.preserve.some((entry) => matchesHeading(entry, section.heading))), ...implicit].filter((section, index, list) => list.findIndex((candidate) => candidate.heading === section.heading) === index);
 	if (checkable.length === 0) return { id: "preserved_blocks_intact", status: "unverified", detail: "no_scope_to_verify" };
 	for (const section of checkable) {
 		const next = input.nextSections.find((candidate) => matchesHeading(section.heading, candidate.heading) || matchesHeading(candidate.heading, section.heading));
@@ -234,7 +238,9 @@ export const docxInspector: FormatInspector = {
 		items.push(duplicates.length === 0 ? { id: "no_duplicate_headings", status: "passed" } : { id: "no_duplicate_headings", status: "unverified", detail: "duplicate_heading" });
 		// 基稿存在但没有块大纲：声明了保留内容却无法逐块比较，必须记未验证。
 		const preserved =
-			input.comparedTo && !input.comparedTo.sections ? ({ id: "preserved_blocks_intact", status: "unverified", detail: "base_outline_missing" } satisfies DocumentInspectionItem) : preservedBlockItem({ preserve: input.preserve ?? [], baseSections: input.comparedTo?.sections, nextSections: parsed.sections });
+			input.comparedTo && !input.comparedTo.sections
+				? ({ id: "preserved_blocks_intact", status: "unverified", detail: "base_outline_missing" } satisfies DocumentInspectionItem)
+				: preservedBlockItem({ preserve: input.preserve ?? [], allow: input.allow ?? [], baseSections: input.comparedTo?.sections, nextSections: parsed.sections });
 		if (preserved) items.push(preserved);
 		items.push(timedOut ? { id: "within_time_budget", status: "unverified", detail: "timeout" } : { id: "within_time_budget", status: "passed" });
 		const textDigest = hashText(text);
@@ -313,7 +319,9 @@ export const markdownInspector: FormatInspector = {
 		const duplicates = duplicateHeadings(parsed.headings);
 		items.push(duplicates.length === 0 ? { id: "no_duplicate_headings", status: "passed" } : { id: "no_duplicate_headings", status: "unverified", detail: "duplicate_heading" });
 		const preserved =
-			input.comparedTo && !input.comparedTo.sections ? ({ id: "preserved_blocks_intact", status: "unverified", detail: "base_outline_missing" } satisfies DocumentInspectionItem) : preservedBlockItem({ preserve: input.preserve ?? [], baseSections: input.comparedTo?.sections, nextSections: parsed.sections });
+			input.comparedTo && !input.comparedTo.sections
+				? ({ id: "preserved_blocks_intact", status: "unverified", detail: "base_outline_missing" } satisfies DocumentInspectionItem)
+				: preservedBlockItem({ preserve: input.preserve ?? [], allow: input.allow ?? [], baseSections: input.comparedTo?.sections, nextSections: parsed.sections });
 		if (preserved) items.push(preserved);
 		items.push(timedOut ? { id: "within_time_budget", status: "unverified", detail: "timeout" } : { id: "within_time_budget", status: "passed" });
 		return {

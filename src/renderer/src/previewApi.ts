@@ -1991,6 +1991,7 @@ export function createPreviewApi(): PiDesktopApi {
 			list: async () => [],
 			prepare: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
 			start: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
+			autoRevise: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
 			operation: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
 			cancel: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),
 			chooseOutputRoot: async () => ({ ok: false as const, error: { code: "EXTENSION_UNAVAILABLE" as const, retryable: false } }),

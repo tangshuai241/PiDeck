@@ -64,6 +64,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	/** 本轮已发布的候选；同一尝试只允许汇报一次，避免覆盖已被检查的成果。 */
 	let reportCache: DocumentWorkExtensionState["report"] | undefined;
 	const materialStatus = new Map<string, DocumentWorkExtensionState["materials"][number]>();
+	/** 本轮是否还在制作：结算完成后只保留后台身份，不再注入制作上下文。 */
+	let attemptLive = false;
 
 	function publish(phase: DocumentWorkExtensionState["phase"], extra?: { report?: DocumentWorkExtensionState["report"]; reason?: DocumentWorkExtensionState["reason"] }): void {
 		if (!binding) return;
@@ -89,6 +91,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		pi.appendEntry(DOCUMENT_WORK_BINDING_ENTRY_TYPE, { sessionId: next.nativeSessionId, binding: next, boundAt: Date.now() });
 		binding = next;
 		sessionId = next.nativeSessionId;
+		attemptLive = true;
 		materialStatus.clear();
 		// 旧尝试的候选不继承：新绑定只用新汇报。
 		reportCache = undefined;
@@ -118,6 +121,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		}
 		if (!restored) return;
 		binding = restored;
+		attemptLive = false;
 		reportCache = restoredReport;
 		for (const material of restored.materials) materialStatus.set(material.materialId, { materialId: material.materialId, status: "unknown" });
 		// 重新发布绑定状态：应用重启后主进程需要再次确认本轮绑定仍然对应同一份准备。
@@ -209,7 +213,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("tpa-work", {
-		description: "TPA document work binding: bind <base64url payload> | status | unbind",
+		description: "TPA document work binding: bind <base64url payload> | release | status | unbind",
 		handler: async (args, ctx) => {
 			ensureSession(ctx);
 			const [action, ...rest] = args.trim().split(/\s+/);
@@ -232,9 +236,16 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 				}
 				return;
 			}
+			if (action === "release") {
+				// 结算已完成：绑定身份留着做后台归属，但不再注入「本轮要制作」的上下文，
+				// 否则下一轮普通聊天还会被上一轮的执行要求污染。
+				attemptLive = false;
+				return;
+			}
 			if (action === "unbind") {
 				binding = undefined;
 				reportCache = undefined;
+				attemptLive = false;
 				return;
 			}
 			if (action === "status") {
@@ -245,7 +256,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		ensureSession(ctx);
-		if (!binding) return;
+		// 只有本轮仍在制作时才注入制作上下文：归档/取消/失败之后，绑定只是后台归属。
+		if (!binding || !attemptLive) return;
 		const materials = binding.materials.map((material) => `${material.materialId} (${material.label})`).join(", ") || "none";
 		return {
 			message: {
@@ -271,6 +283,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	pi.on("session_tree", async (_event, ctx) => restoreSession(ctx));
 	pi.on("session_shutdown", async () => {
 		binding = undefined;
+		attemptLive = false;
 		reportCache = undefined;
 		sessionId = undefined;
 		materialStatus.clear();

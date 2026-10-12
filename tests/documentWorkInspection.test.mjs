@@ -137,7 +137,7 @@ test("正文相同而包不同 → 正文指纹相同、格式指纹不同，且
 test("保留块被改或被删才判 failed，未被触碰时判通过", async () => {
 	await withTempDir(async (root) => {
 		const base = join(root, "base.md");
-		writeFileSync(base, "# 第一章\n\n原始结论\n\n# 第二章\n\n可以改的部分\n", "utf8");
+		writeFileSync(base, ["# 第一章", "", "原始结论", "", "# 第二章", "", "改过的部分", ""].join("\n"), "utf8");
 		const intact = join(root, "intact.md");
 		writeFileSync(intact, "# 第一章\n\n原始结论\n\n# 第二章\n\n改过的部分\n", "utf8");
 		const changed = join(root, "changed.md");
@@ -147,7 +147,8 @@ test("保留块被改或被删才判 failed，未被触碰时判通过", async (
 		const service = makeService();
 		const baseResult = await service.inspect({ versionId: "v_base", filePath: base });
 		const comparedTo = { versionId: "v_base", textDigest: baseResult.coverage.textDigest, sections: baseResult.coverage.sections };
-		const okResult = await service.inspect({ versionId: "v_ok", filePath: intact, comparedTo, preserve: ["第一章"] });
+		// 第一章保留、第二章是本轮允许改的块 → 通过。
+		const okResult = await service.inspect({ versionId: "v_ok", filePath: intact, comparedTo, preserve: ["第一章"], allow: ["第二章"] });
 		assert.equal(item(okResult, "preserved_blocks_intact").status, "passed");
 		assert.equal(okResult.status, "passed", "声明要改的块变了不影响结论");
 
@@ -160,10 +161,20 @@ test("保留块被改或被删才判 failed，未被触碰时判通过", async (
 		assert.equal(item(missing, "preserved_blocks_intact").detail, "preserved_block_missing");
 		assert.equal(missing.status, "failed");
 
-		// 声明里没有要保留的块 = 允许自由改写：无法也不该虚构违规。
+		// 显式允许改动的块可以变：allow 就是「用户说可以改这里」。
+		const allowed = await service.inspect({ versionId: "v_allow", filePath: changed, comparedTo, preserve: [], allow: ["第一章"] });
+		assert.equal(item(allowed, "preserved_blocks_intact").status, "passed");
+		assert.equal(allowed.status, "passed");
+
+		// 没声明保留也没声明允许改动 ≠ 随便改：基稿里已有的块默认必须保留。
 		const freeform = await service.inspect({ versionId: "v_free", filePath: changed, comparedTo, preserve: [] });
-		assert.equal(item(freeform, "preserved_blocks_intact").status, "passed");
-		assert.equal(freeform.status, "passed");
+		assert.equal(item(freeform, "preserved_blocks_intact").status, "failed");
+		assert.equal(item(freeform, "preserved_blocks_intact").detail, "preserved_block_changed");
+		assert.equal(freeform.status, "failed", "未声明范围时的正文改动不能被漏判");
+
+		// 新增块不属于「改坏了已有块」。
+		const appended = await service.inspect({ versionId: "v_append", filePath: intact, comparedTo, preserve: [] });
+		assert.equal(appended.status, "passed");
 
 		// 基稿没有块大纲时无法逐块比较，必须记未验证而不是通过。
 		const noOutline = await service.inspect({ versionId: "v_nooutline", filePath: changed, comparedTo: { versionId: "v_base", textDigest: baseResult.coverage.textDigest }, preserve: ["第一章"] });

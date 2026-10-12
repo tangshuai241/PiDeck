@@ -37,6 +37,7 @@ import type { DocumentWorkRuntimeAdapter } from "./DocumentWorkRuntimeAdapter";
 import type { DocumentWorkStore } from "./DocumentWorkStore";
 import { DocumentAttemptRunner } from "./DocumentAttemptRunner";
 import { selectBaseVersion, validateScopeAgainstHeadings } from "./DocumentRevisionPolicy";
+import { isDocumentWorkIntent, isExplicitRevisionRequest, revisionScopeHints } from "../../shared/documentIntentPolicy";
 import { emitWorkChanged } from "./documentWorkEvents";
 import { containPath, fingerprintFile, hashText, isReadableFile, resolveInsideDirectory } from "./documentWorkPaths";
 
@@ -73,7 +74,8 @@ export type CreateWorkInput = {
 export type PrepareWorkInput = WorkMutation & {
 	kind: "create_document" | "revise_document";
 	requirementsRef: RequirementsReference;
-	scope: { summary: string; sections: string[]; preserve: string[] };
+	/** allow 声明本轮允许改动的块；缺省时基稿里已有块默认全部必须保留。 */
+	scope: { summary: string; sections: string[]; preserve: string[]; allow?: string[] };
 	materialPaths: string[];
 	baseVersionId?: string;
 };
@@ -166,6 +168,9 @@ export class DocumentWorkService {
 			const view = workId ? await this.readView(workId, input.sessionId) : undefined;
 			return view ? workSuccess(view) : workFailure<DocumentWorkView>("WORK_NOT_FOUND");
 		}
+		// 文稿归档只适用于明确的正式文稿任务：普通 Plan/编码/解释不建工作，走原生批准。
+		const turn = await this.latestUserTurn(input.sessionId);
+		if (!turn || !isDocumentWorkIntent({ text: turn.text, hasWork: false, hasUsableBase: false })) return workFailure<DocumentWorkView>("INVALID_INPUT", "not_document_intent");
 		const outputRoot = await this.deps.store.getOutputRoot(input.outputRootId);
 		if (!outputRoot || !(await this.deps.artifacts.directoryExists(outputRoot.path))) return workFailure<DocumentWorkView>("PATH_DENIED");
 		// 一个会话一件工作：已有记录直接返回，不因重复提交再建第二件。
@@ -330,7 +335,8 @@ export class DocumentWorkService {
 			stagingDirectory: staging.value,
 			materials: materials.value,
 			...(base ? { base } : {}),
-			scope: { summary: input.scope.summary.slice(0, 2000), sections: input.scope.sections.slice(0, 24), preserve: input.scope.preserve.slice(0, 24) },
+			// allow 必须一并落盘：它是「哪些块允许改」的唯一来源，丢了就会把合法改动判成违规。
+			scope: { summary: input.scope.summary.slice(0, 2000), sections: input.scope.sections.slice(0, 24), preserve: input.scope.preserve.slice(0, 24), ...(input.scope.allow ? { allow: input.scope.allow.slice(0, 24) } : {}) },
 			runtime: runtime.target,
 			...(runtime.nativeSessionId ? { nativeSessionId: runtime.nativeSessionId } : {}),
 			createdAt: Date.now(),
@@ -495,6 +501,8 @@ export class DocumentWorkService {
 		// 授权只对应「用户明确提出的那次改稿要求」：准备里声明的范围必须就是授权的那段文字，
 		// 否则一段普通讨论被模型拿去调用工具时也能成立。
 		if (hashTurnText(preparation.scope.summary) !== authorization.sourceTurnHash) return workFailure("APPROVAL_REQUIRED", "scope_mismatch");
+		// 二次复核：讨论、否定或「先解释」类消息即使原样成为范围文本，也不构成改稿授权。
+		if (!isExplicitRevisionRequest(preparation.scope.summary)) return workFailure("APPROVAL_REQUIRED", "not_explicit_revision");
 		return workSuccess({ confirmed: true });
 	}
 
@@ -530,6 +538,43 @@ export class DocumentWorkService {
 		const cleared = await this.deps.store.mutateRecord(record.workId, record.revision, (current) => ({ ...current, activeRequestId: undefined }));
 		if (cleared.ok) this.emit(cleared.value, "cancelled", operation.attemptId);
 		return workSuccess({ attemptId: operation.attemptId });
+	}
+
+	/**
+	 * 普通聊天里的明确改稿：主进程自己读「真实用户当前轮」判断，不需要用户先切模式。
+	 *
+	 * 保守策略：只有既出现改稿动词又指名要改的块、且没有「别改先解释」类语境时才接续；
+	 * 拿不准就返回 engaged=false，让这一轮停在普通聊天里，由用户自然澄清。
+	 */
+	async autoRevise(sessionId: string, requestId: string): Promise<WorkResult<{ engaged: boolean }>> {
+		const views = await this.listForSession(sessionId);
+		const work = views[0];
+		if (!work) return workSuccess({ engaged: false });
+		const turn = await this.latestUserTurn(sessionId);
+		if (!turn) return workSuccess({ engaged: false });
+		if (!work.versions.some((version) => version.inspection === "passed")) return workSuccess({ engaged: false });
+		if (!isExplicitRevisionRequest(turn.text)) return workSuccess({ engaged: false });
+		const prepared = await this.prepare({
+			requestId: `${requestId}_p`,
+			workId: work.workId,
+			expectedRevision: work.revision,
+			kind: "revise_document",
+			requirementsRef: { kind: "user_instruction", sourceTurnId: turn.sourceTurnId, sourceTurnHash: turn.hash },
+			scope: { summary: turn.text, sections: [], preserve: [], allow: revisionScopeHints(turn.text) },
+			materialPaths: [],
+		});
+		if (!prepared.ok) return workFailure<{ engaged: boolean }>(prepared.error.code, prepared.error.detail);
+		const runtime = await this.deps.runtime.snapshot(sessionId);
+		if (!runtime) return workFailure<{ engaged: boolean }>("RUNTIME_CHANGED");
+		const started = await this.start({
+			requestId: `${requestId}_s`,
+			workId: work.workId,
+			expectedRevision: prepared.value.workRevision,
+			preparation: prepared.value.preparation,
+			expectedRuntime: runtime.target,
+			authorization: { kind: "revision_instruction", sourceTurnId: turn.sourceTurnId, sourceTurnHash: turn.hash },
+		});
+		return started.ok ? workSuccess({ engaged: true }) : workFailure<{ engaged: boolean }>(started.error.code, started.error.detail);
 	}
 
 	/** 退出路径：先标记取消，再等所有结算协程收敛。 */

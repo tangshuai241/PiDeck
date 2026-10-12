@@ -1,4 +1,4 @@
-import { FileText, FolderOpen, Loader2, Paperclip, PenLine, ShieldAlert, Square } from "lucide-react";
+import { FileText, FolderOpen, Loader2, Paperclip, ShieldAlert, Square } from "lucide-react";
 import type { TranslationKey } from "../../i18n";
 import { t } from "../../i18n";
 import type { SessionDocumentWorkControls } from "../../hooks/useSessionDocumentWork";
@@ -106,15 +106,7 @@ export function DocumentWorkCard(props: { controls: SessionDocumentWorkControls 
 				</section>
 			)}
 
-			{presentation.canRevise && (
-				<div className="flex flex-wrap items-center gap-2">
-					<p className="text-caption text-muted-foreground">{t("documentWork.revisionReadyHint")}</p>
-					<Button variant={controls.revisionMode ? "default" : "ghost"} size="sm" onClick={() => controls.setRevisionMode(!controls.revisionMode)}>
-						<PenLine size={14} aria-hidden="true" />
-						{controls.revisionMode ? t("documentWork.revisionModeOn") : t("documentWork.revisionModeOff")}
-					</Button>
-				</div>
-			)}
+			{presentation.canRevise && <p className="text-caption text-muted-foreground">{t("documentWork.revisionReadyHint")}</p>}
 			{newest && view?.outputRootLabel && <p className="text-caption text-muted-foreground">{t("documentWork.currentBase", { version: formatVersionLabel(newest.ordinal) })}</p>}
 			{errorMessage && presentation.kind !== "failed" && presentation.kind !== "unknown" && (
 				<p className="flex items-center gap-1 text-caption text-danger">

@@ -1671,6 +1671,8 @@ const api = {
 		prepare: (input: DocumentWorkPrepareInput) => ipcRenderer.invoke(ipcChannels.documentWorkPrepare, input) as Promise<DocumentWorkResult<PreparedWork>>,
 		/** 持久操作并分发：授权在主进程复核，渲染层不能自证批准。 */
 		start: (input: DocumentWorkStartInput) => ipcRenderer.invoke(ipcChannels.documentWorkStart, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
+		/** 明确改稿自动接续：主进程读真实用户当前轮后决定是否接续。 */
+		autoRevise: (input: { sessionId: string; requestId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkAutoRevise, input) as Promise<DocumentWorkResult<{ engaged: boolean }>>,
 		/** 查询原请求的分发/运行/检查结果；未知结果不重新制作。 */
 		operation: (input: { workId: string; requestId: string; sessionId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkOperation, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
 		/** 只取消本轮；不影响其他会话或轮次。 */

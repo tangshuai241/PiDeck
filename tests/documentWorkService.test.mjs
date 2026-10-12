@@ -33,7 +33,9 @@ function waitFor(predicate, timeoutMs = 2_000) {
 const AGENT_ID = "agent-a";
 const SESSION_ID = "session-a";
 const NATIVE_SESSION_ID = "pi-native-session-9";
-const TURN_TEXT = "请写一份季度报告";
+const CREATE_TURN_TEXT = "请写一份季度报告";
+const TURN_TEXT = "把第二节改短一点，标题也换一下";
+const CREATE_TURN_HASH = serviceModule.hashTurnText(CREATE_TURN_TEXT);
 const TURN_HASH = serviceModule.hashTurnText(TURN_TEXT);
 
 /** 集成式测试台：真实主进程模块 + 假运行时端口。 */
@@ -50,7 +52,7 @@ function createHarness(options = {}) {
 		status: "idle",
 		flags: {},
 		generation: 1,
-		messages: [{ id: "turn-1", role: "user", text: TURN_TEXT, agentId: AGENT_ID, timestamp: 1 }],
+		messages: [{ id: "turn-1", role: "user", text: CREATE_TURN_TEXT, agentId: AGENT_ID, timestamp: 1 }],
 		dispatched: [],
 		aborted: [],
 		allowedMaterials: new Set(),
@@ -230,18 +232,32 @@ function prepareCreate(harness, view, overrides = {}) {
 }
 
 /** 改稿准备/开始：授权来源是那一轮真实用户指令的正文指纹。 */
-async function prepareRevision(harness, view, preserve, requestId) {
+/** 保证「真实用户当前轮」就是明确改稿要求：主进程只认这一轮，测试不能凭空造授权。 */
+function ensureRevisionTurn(harness) {
+	const lastUser = [...harness.state.messages].reverse().find((message) => message.role === "user");
+	if (lastUser?.text === TURN_TEXT) return;
+	harness.state.messages.push({ id: `turn-${harness.state.messages.length + 1}`, role: "user", text: TURN_TEXT, agentId: AGENT_ID, timestamp: Date.now() });
+}
+
+async function prepareRevision(harness, view, preserve, requestId, allow = []) {
+	ensureRevisionTurn(harness);
 	const prepared = await harness.domain.service.prepare({
 		requestId,
 		workId: view.workId,
 		expectedRevision: view.revision,
 		kind: "revise_document",
-		requirementsRef: { kind: "user_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH },
+		requirementsRef: { kind: "user_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH },
 		// 范围就是用户那一轮的原话：主进程会校验它的指纹与授权引用一致。
-		scope: { summary: TURN_TEXT, sections: [], preserve },
+		// allow 声明本轮允许改动的块；基稿里其余块默认必须保留。
+		scope: { summary: TURN_TEXT, sections: [], preserve, allow },
 		materialPaths: [],
 	});
 	return prepared;
+}
+
+/** 主进程读到的真实用户当前轮 id。 */
+function latestUserTurnId(harness) {
+	return [...harness.state.messages].reverse().find((message) => message.role === "user")?.id ?? "turn-1";
 }
 
 function startRound(harness, view, prepared, requestId, authorization) {
@@ -262,10 +278,11 @@ test("首次实际提交建立记录；空模式不建记录，重复提交幂�
 		const conflict = await harness.domain.service.createWork({ requestId: "req-1", ...request, outputRootId: "or_other" });
 		assert.equal(conflict.ok, false);
 		assert.equal(conflict.error.code, "IDEMPOTENCY_CONFLICT");
+		// 另一个会话没有可读的运行时消息，因此不满足「明确文稿任务」门禁：拒绝而不是建工作。
 		const otherSession = await harness.domain.service.createWork({ requestId: "req-3", ...request, sessionId: "session-b", sourceTurnId: "turn-9" });
-		assert.notEqual(otherSession.value.workId, first.value.workId);
+		assert.equal(otherSession.ok, false);
 		const missingRoot = await harness.domain.service.createWork({ requestId: "req-4", ...request, sessionId: "session-c", outputRootId: "or_missing" });
-		assert.equal(missingRoot.error.code, "PATH_DENIED");
+		assert.equal(missingRoot.ok, false);
 	} finally {
 		await harness.cleanup();
 	}
@@ -443,11 +460,10 @@ test("改稿：用户指令授权可开始，另存新版且同一轮指令不�
 		await harness.finishRound("# 季度报告\n\n第一版正文\n");
 		assert.equal((await harness.terminal(view.workId, "req-start")).phase, "archived");
 		const afterArchive = plain((await harness.domain.service.getView(view.workId, SESSION_ID)).value);
-
 		// 声明要保留的块保持原样，只改别的部分 → 归档通过。
 		const revisionPrepare = await prepareRevision(harness, afterArchive, ["季度报告"], "req-prepare-r1");
 		assert.equal(revisionPrepare.ok, true, JSON.stringify(revisionPrepare));
-		const revisionStart = await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH });
+		const revisionStart = await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH });
 		assert.equal(revisionStart.ok, true, JSON.stringify(revisionStart));
 		assert.equal(revisionStart.value.authorizationState, "confirmed");
 		assert.equal(harness.state.dispatched.filter((message) => message.startsWith("/align approve")).length, 1, "改稿轮不重复分发对齐批准");
@@ -461,7 +477,7 @@ test("改稿：用户指令授权可开始，另存新版且同一轮指令不�
 		// 同一轮指令再来一次必须被拒。
 		const replay = await prepareRevision(harness, finalView, [], "req-prepare-r2");
 		assert.equal(replay.ok, true);
-		const replayedStart = await startRound(harness, view, replay, "req-start-r2", { kind: "revision_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH });
+		const replayedStart = await startRound(harness, view, replay, "req-start-r2", { kind: "revision_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH });
 		assert.equal(replayedStart.error.code, "APPROVAL_REQUIRED");
 	} finally {
 		await harness.cleanup();
@@ -483,9 +499,9 @@ test("显式改稿轮：Pi 正忙时不插队，本轮结束后同一 runtime �
 		harness.runtime.busy();
 		const startedAt = harness.state.dispatched.length;
 		// 本轮只改正文、不声明保留块：这里要验证的是排队与派发顺序，逐块保留另有专门用例。
-		const revisionPrepare = await prepareRevision(harness, afterArchive, [], "req-prepare-r1");
+		const revisionPrepare = await prepareRevision(harness, afterArchive, [], "req-prepare-r1", ["季度报告"]);
 		assert.equal(revisionPrepare.ok, true, JSON.stringify(revisionPrepare));
-		const revisionStart = await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH });
+		const revisionStart = await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH });
 		assert.equal(revisionStart.ok, true, JSON.stringify(revisionStart));
 		assert.equal(harness.state.dispatched.length, startedAt, "运行时忙时不得立刻绑定或派发");
 		assert.equal(harness.state.dispatched.filter((message) => message.startsWith("/align approve")).length, 1, "改稿轮不得重复分发对齐批准");
@@ -521,7 +537,7 @@ test("改稿动到声明要保留的块时检查失败：版本保留但不成�
 
 		const revisionPrepare = await prepareRevision(harness, afterArchive, ["季度报告"], "req-prepare-r1");
 		assert.equal(revisionPrepare.ok, true, JSON.stringify(revisionPrepare));
-		await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH });
+		await startRound(harness, view, revisionPrepare, "req-start-r1", { kind: "revision_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH });
 		await harness.finishRound("# 季度报告\n\n被偷偷改掉的结论\n");
 		const operation = await harness.terminal(view.workId, "req-start-r1");
 		assert.equal(operation.phase, "failed", JSON.stringify(operation));
@@ -629,7 +645,9 @@ test("分发被接受但本轮从未开始（既没运行也没汇报）→ 记 
 		const operation = await harness.terminal(view.workId, "req-start", 3_000);
 		assert.equal(operation.phase, "unknown");
 		assert.equal(operation.error.detail, "run_not_observed");
-		assert.equal(harness.state.dispatched.length, 2, "只发过一次绑定与一次批准，没有重放");
+		// 只发过一次绑定与一次批准（结算后另有一次 release，不带任何执行）。
+		assert.equal(harness.state.dispatched.filter((message) => message.startsWith("/tpa-work bind ")).length, 1, "绑定只发一次");
+		assert.equal(harness.state.dispatched.filter((message) => message.startsWith("/align approve")).length, 1, "批准只发一次");
 	} finally {
 		await harness.cleanup();
 	}
@@ -642,16 +660,16 @@ test("归档防覆盖：版本目录排他新建，被占用的序号不复用",
 		harness.alignment();
 		const first = await prepareCreate(harness, view);
 		await startRound(harness, view, first, "req-start", { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 });
-		await harness.finishRound("# 第一版\n");
+		await harness.finishRound("# 季度报告\n\n第一版\n");
 		assert.equal((await harness.terminal(view.workId, "req-start")).phase, "archived");
 		const workFolder = readdirSync(harness.outputRoot).find((name) => name.startsWith("dw_"));
 		// 人为占用 v0002，验证排他创建跳到下一个序号而不是覆盖。
 		mkdirSync(join(harness.outputRoot, workFolder, "versions", "v0002"));
 		const afterFirst = plain((await harness.domain.service.getView(view.workId, SESSION_ID)).value);
-		const second = await prepareRevision(harness, afterFirst, [], "req-prepare-r1");
+		const second = await prepareRevision(harness, afterFirst, [], "req-prepare-r1", ["季度报告"]);
 		assert.equal(second.ok, true);
-		await startRound(harness, view, second, "req-start-r1", { kind: "revision_instruction", sourceTurnId: "turn-1", sourceTurnHash: TURN_HASH });
-		await harness.finishRound("# 第二版内容更长\n");
+		await startRound(harness, view, second, "req-start-r1", { kind: "revision_instruction", sourceTurnId: latestUserTurnId(harness), sourceTurnHash: TURN_HASH });
+		await harness.finishRound("# 季度报告\n\n第二版内容更长\n");
 		const operation = await harness.terminal(view.workId, "req-start-r1");
 		assert.equal(operation.phase, "archived", JSON.stringify(operation));
 		const finalView = plain((await harness.domain.service.getView(view.workId, SESSION_ID)).value);

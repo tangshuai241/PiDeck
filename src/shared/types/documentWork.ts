@@ -137,6 +137,11 @@ export type DocumentWorkScope = {
 	/** 声明的章节引用（规范化后的标题文本）；不在基稿标题中存在即范围冲突。 */
 	sections: string[];
 	preserve: string[];
+	/**
+	 * 本轮显式允许改动的块。基稿里其余块默认视为必须保留：
+	 * 不写 allow 又不写 preserve 不等于「随便改」，否则未授权正文变化会被漏判。
+	 */
+	allow?: string[];
 };
 
 export type PreparedWork = {
