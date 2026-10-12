@@ -632,6 +632,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"documentWork.error.REVISION_CONFLICT": "工作記錄已被其他操作更新，請按最新版本重試。",
 	"documentWork.error.IDEMPOTENCY_CONFLICT": "同一個請求編號被用於不同內容，已拒絕執行。",
 	"documentWork.error.RUNTIME_CHANGED": "會話執行程序已變化，請重新確認後再製作。",
+	"documentWork.error.COMMAND_BLOCKED": "宿主在派發前攔下了文稿命令，本輪沒有開始製作；普通聊天不受影響，請重試或退出對齊後重發。",
 	"documentWork.error.RUNTIME_BUSY": "當前會話正在執行其他任務，請等它結束後重試。",
 	"documentWork.error.PREPARATION_STALE": "本輪準備已失效（要求或材料發生變化），請重新確認。",
 	"documentWork.error.APPROVAL_REQUIRED": "缺少對應版本的明確確認，不能開始製作。",

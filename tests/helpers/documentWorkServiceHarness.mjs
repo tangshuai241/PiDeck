@@ -60,6 +60,8 @@ function createHarness(options = {}) {
 		bindingAck: true,
 		approveAccepted: true,
 		approveUnknown: false,
+		bindRejection: undefined,
+		approveRejection: undefined,
 	};
 	const port = {
 		readRuntime: async (sessionId) =>
@@ -77,6 +79,9 @@ function createHarness(options = {}) {
 					: undefined,
 		dispatch: async (input) => {
 			state.dispatched.push(input.message);
+			// 宿主可以结构化拒绝：真机上对齐输入守卫/扩展缺位就是这样把 accepted 置 false 的。
+			if (input.message.startsWith("/tpa-work bind ") && state.bindRejection) return { accepted: false, unknown: false, ...state.bindRejection };
+			if (input.message.startsWith("/align approve") && state.approveRejection) return { accepted: false, unknown: false, ...state.approveRejection };
 			if (input.message.startsWith("/tpa-work bind ")) {
 				if (!state.bindingAck) return { accepted: true, unknown: false };
 				const payload = shared.decodeBindingPayload(input.message.slice("/tpa-work bind ".length));

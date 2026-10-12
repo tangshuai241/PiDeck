@@ -37,6 +37,11 @@ export type WorkErrorCode =
 	| "REVISION_CONFLICT"
 	| "IDEMPOTENCY_CONFLICT"
 	| "RUNTIME_CHANGED"
+	/**
+	 * 宿主在派发前拦下了命令（对齐输入守卫或扩展缺位）：不是 runtime 换代，不能按「重试」处理。
+	 * 这条码只在文稿域内部出现，用于如实结算「命令没被转发」的失败。
+	 */
+	| "COMMAND_BLOCKED"
 	| "RUNTIME_BUSY"
 	| "PREPARATION_STALE"
 	| "APPROVAL_REQUIRED"

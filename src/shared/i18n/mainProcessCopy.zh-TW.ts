@@ -134,6 +134,8 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainAgent.nameRequired": "Agent 名稱不能為空。",
 	"mainAgent.alignmentCommandBlocked": "對齊期間不能執行其他命令。請先確認要求，或退出對齊後再執行。",
 	"mainAgent.alignmentUnavailable": "需求對齊擴充套件未載入。請啟用它並重新啟動會話。",
+	"mainAgent.documentWorkUnavailable": "文稿擴充套件未載入，本輪沒有開始製作。請啟用文稿擴充套件並重新啟動會話。",
+	"mainAgent.documentWorkInvalidCommand": "文稿命令格式不正確，已拒絕執行。",
 	"mainAgent.alignmentRuntimeChanged": "會話執行程序已變化，請檢視最新要求後重試。",
 	"mainAgent.renameFailed": "會話重新命名失敗，請重試。",
 	"store.promptSearchFailed": "搜尋 prompt 商店失敗，請重試。",

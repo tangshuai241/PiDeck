@@ -391,7 +391,14 @@ export type SendPromptInput = {
 };
 
 /** 主进程完成 pi prompt 预检后的明确接收结果。 */
-export type SendPromptResult = { accepted: true } | ({ accepted: false; error: string; delivery?: "rejected" } & I18nDescriptor) | ({ accepted: false; error: string; delivery: "unknown" } & I18nDescriptor);
+/**
+ * 拒绝的机器可读原因：宿主内部调用方（如文稿分发的 bind/approve）靠它区分
+ * 「策略拦截 / 扩展不可用 / 身份变化 / 入参不合法」，而不是把一切都归成「进程变了」。
+ * 渲染层仍只读 i18nKey 与 error，不做行为分支。
+ */
+export type PromptRejectionReason = "alignment_blocked" | "extension_unavailable" | "invalid_input" | "runtime_changed";
+
+export type SendPromptResult = { accepted: true } | ({ accepted: false; error: string; delivery?: "rejected"; reason?: PromptRejectionReason } & I18nDescriptor) | ({ accepted: false; error: string; delivery: "unknown"; reason?: PromptRejectionReason } & I18nDescriptor);
 
 export type SendSessionPromptInput = Omit<SendPromptInput, "agentId"> & {
 	sessionId: string;

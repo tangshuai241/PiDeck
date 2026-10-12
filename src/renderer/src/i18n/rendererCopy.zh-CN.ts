@@ -626,6 +626,7 @@ export const zhCN = {
 	"documentWork.error.REVISION_CONFLICT": "工作记录已被其他操作更新，请按最新版本重试。",
 	"documentWork.error.IDEMPOTENCY_CONFLICT": "同一个请求编号被用于不同内容，已拒绝执行。",
 	"documentWork.error.RUNTIME_CHANGED": "会话运行进程已变化，请重新确认后再制作。",
+	"documentWork.error.COMMAND_BLOCKED": "宿主在派发前拦下了文稿命令，本轮没有开始制作；普通聊天不受影响，请重试或退出对齐后重发。",
 	"documentWork.error.RUNTIME_BUSY": "当前会话正在运行其他任务，请等它结束后重试。",
 	"documentWork.error.PREPARATION_STALE": "本轮准备已失效（要求或材料发生变化），请重新确认。",
 	"documentWork.error.APPROVAL_REQUIRED": "缺少对应版本的明确确认，不能开始制作。",

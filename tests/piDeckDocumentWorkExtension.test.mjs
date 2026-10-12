@@ -205,3 +205,40 @@ test("扩展镜像的绑定与候选解析与主进程 shared 判定一致", () 
 	assert.equal(plain(types.decodeArtifactCandidate({ reportId: "rp", artifacts: [{ relativePath: "a/b.docx", role: "primary" }], summary: "", risks: [] })).artifacts.length, 1);
 	assert.equal(types.decodeArtifactCandidate({ reportId: "rp", artifacts: [{ relativePath: "../x.docx", role: "primary" }], summary: "", risks: [] }), undefined);
 });
+
+test("宿主守卫放行的元数据控制就是扩展处理的那几条，且共享编码的载荷能被扩展解开", () => {
+	const policy = loadTsCommonJs(`${ROOT}/src/shared/alignment.ts`);
+	const shared = loadTsCommonJs(`${ROOT}/src/shared/documentWork.ts`);
+	const h = harness();
+
+	// 共享编码器（主进程真实载荷来源）→ 扩展解码器：两端对同一份 wire 格式负责。
+	const encoded = shared.encodeBindingPayload(binding());
+	assert.equal(typeof encoded, "string");
+	assert.equal(shared.decodeBindingPayload(encoded).workId, "dw_abc");
+	h.command(`bind ${encoded}`);
+	assert.equal(h.state().phase, "bound", "主进程编码出的载荷必须能被扩展绑定");
+
+	// 守卫只放行这四种动作；扩展对 bind 之外的三条都必须有确定行为（status 会回执，release/unbind 静默清理）。
+	assert.equal(policy.parseDocumentWorkMetadataControl(`/tpa-work bind ${encoded}`)?.action, "bind");
+	for (const action of ["release", "unbind", "status"]) {
+		assert.equal(policy.parseDocumentWorkMetadataControl(`/tpa-work ${action}`)?.action, action);
+	}
+	const before = h.notifications.length;
+	h.command("status");
+	assert.equal(h.notifications.length, before + 1);
+	assert.match(h.notifications.at(-1), /dw_abc/);
+	h.command("release");
+	h.command("unbind");
+	// 守卫放行的动作都不得在扩展里变成「未知命令」类的静默失败：release/unbind 之后绑定仍在（发布状态可查）。
+	assert.equal(h.state().phase, "bound");
+
+	// 反向：守卫拒绝的形态，扩展侧也不该把它们当作有效绑定（多余参数/未知动作不产生绑定）。
+	const broken = harness();
+	broken.command(`bind ${encoded} extra`);
+	// 扩展会把多余参数拼回载荷（rest.join("")）；拼出来的字符串解不开 → 必须拒绝绑定。
+	assert.equal(broken.state(), undefined);
+	const unknownAction = harness();
+	unknownAction.command("unknown");
+	assert.equal(unknownAction.state(), undefined);
+	assert.equal(unknownAction.notifications.length, 0);
+});

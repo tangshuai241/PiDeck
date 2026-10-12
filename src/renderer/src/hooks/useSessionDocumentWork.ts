@@ -29,6 +29,7 @@ const FAILURE_COPY: Record<string, TranslationKey> = {
 	REVISION_CONFLICT: "documentWork.error.REVISION_CONFLICT",
 	IDEMPOTENCY_CONFLICT: "documentWork.error.IDEMPOTENCY_CONFLICT",
 	RUNTIME_CHANGED: "documentWork.error.RUNTIME_CHANGED",
+	COMMAND_BLOCKED: "documentWork.error.COMMAND_BLOCKED",
 	RUNTIME_BUSY: "documentWork.error.RUNTIME_BUSY",
 	PREPARATION_STALE: "documentWork.error.PREPARATION_STALE",
 	APPROVAL_REQUIRED: "documentWork.error.APPROVAL_REQUIRED",

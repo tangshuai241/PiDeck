@@ -626,6 +626,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"documentWork.error.REVISION_CONFLICT": "The work record was updated elsewhere; retry from the latest revision.",
 	"documentWork.error.IDEMPOTENCY_CONFLICT": "The same request id was used with different content and was rejected.",
 	"documentWork.error.RUNTIME_CHANGED": "The session runtime changed; confirm the requirements again.",
+	"documentWork.error.COMMAND_BLOCKED": "The host blocked the document command before dispatch, so this round did not start. Ordinary chat still works; retry, or leave alignment and send again.",
 	"documentWork.error.RUNTIME_BUSY": "This session is running another task; retry once it finishes.",
 	"documentWork.error.PREPARATION_STALE": "This round's preparation is stale (requirements or material changed); confirm again.",
 	"documentWork.error.APPROVAL_REQUIRED": "There is no explicit confirmation for this exact version, so production cannot start.",

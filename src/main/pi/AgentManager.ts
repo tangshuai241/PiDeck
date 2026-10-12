@@ -69,7 +69,8 @@ import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityD
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
-import { isAlignmentActive, isAlignmentReadOnlyInputAllowed, PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
+import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
+import { documentWorkBindingIdentity, isAlignmentActive, isAlignmentReadOnlyInputAllowed, isDocumentWorkMetadataCommandName, PI_DECK_ALIGNMENT_MODE_MARKER, parseDocumentWorkMetadataControl } from "../../shared/alignment";
 import { latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
@@ -1899,17 +1900,45 @@ export class AgentManager {
 		const alignmentRequested = input.agentMessage?.startsWith(`${PI_DECK_ALIGNMENT_MODE_MARKER}\n`) === true;
 		const activeAlignment = this.alignmentProjection.read(input.agentId, this.alignmentIdentity(runtime));
 		if ((alignmentRequested || isAlignmentActive(activeAlignment ?? undefined)) && !isAlignmentReadOnlyInputAllowed(input.message)) {
-			return { accepted: false, error: this.translate("mainAgent.alignmentCommandBlocked") };
+			return { accepted: false, error: this.translate("mainAgent.alignmentCommandBlocked"), reason: "alignment_blocked" };
 		}
 		if (alignmentRequested || /^\/align(?:\s|$)/.test(input.message.trimStart())) {
 			const expectedIdentity = this.alignmentIdentity(runtime);
 			const loaded = await this.promptMatchesRegisteredExtensionCommand(runtime, "/align");
 			if (this.agents.get(input.agentId) !== runtime || runtime.process !== expectedIdentity.process || runtime.tab.deckSessionId !== expectedIdentity.sessionId || runtime.tab.runtimeGeneration !== expectedIdentity.runtimeGeneration || runtime.tab.sessionPath !== expectedIdentity.sessionPath) {
-				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged") };
+				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged"), reason: "runtime_changed" };
 			}
-			if (!loaded) return { accepted: false, error: this.translate("mainAgent.alignmentUnavailable") };
+			if (!loaded) return { accepted: false, error: this.translate("mainAgent.alignmentUnavailable"), reason: "extension_unavailable" };
 		}
-
+		// 文稿元数据控制（`/tpa-work bind|release|unbind|status`）：只落会话/准备元数据，是宿主自己
+		// 派发的链路（绑定 → 批准 → 释放）。只允许精确语法，并在转发前逐项核对当前 runtime 身份；
+		// 语法不符、扩展不在或身份不对都必须结构化拒绝——绝不能把载荷当成普通模型提示交出去。
+		if (isDocumentWorkMetadataCommandName(input.message)) {
+			const control = parseDocumentWorkMetadataControl(input.message);
+			if (!control) return { accepted: false, error: this.translate("mainAgent.documentWorkInvalidCommand"), reason: "invalid_input" };
+			const expectedIdentity = this.alignmentIdentity(runtime);
+			// 绑定身份用 pi 原生会话 id 校验（稳定 SessionRecord.id 与它不同），两套身份快照都要冻结。
+			const expectedNativeSessionId = runtime.tab.sessionId;
+			const loaded = await this.promptMatchesRegisteredExtensionCommand(runtime, DOCUMENT_WORK_BIND_COMMAND);
+			if (
+				this.agents.get(input.agentId) !== runtime ||
+				runtime.process !== expectedIdentity.process ||
+				runtime.tab.deckSessionId !== expectedIdentity.sessionId ||
+				runtime.tab.sessionId !== expectedNativeSessionId ||
+				runtime.tab.runtimeGeneration !== expectedIdentity.runtimeGeneration ||
+				runtime.tab.sessionPath !== expectedIdentity.sessionPath
+			) {
+				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged"), reason: "runtime_changed" };
+			}
+			if (!loaded) return { accepted: false, error: this.translate("mainAgent.documentWorkUnavailable"), reason: "extension_unavailable" };
+			if (control.action === "bind") {
+				const identity = documentWorkBindingIdentity(control.payload);
+				// 载荷声明的两套会话身份必须就是当前 runtime：别的会话的载荷不进这条会话。
+				if (!identity || identity.sessionId !== expectedIdentity.sessionId || identity.nativeSessionId !== expectedNativeSessionId) {
+					return { accepted: false, error: this.translate("mainAgent.documentWorkInvalidCommand"), reason: "invalid_input" };
+				}
+			}
+		}
 		// 解析 !/!! 前缀：与 pi 终端行为一致
 		// !command  → 执行命令并将输出发送给 LLM（excludeFromContext: false）
 		// !!command → 执行命令但不将输出发送给 LLM（excludeFromContext: true）

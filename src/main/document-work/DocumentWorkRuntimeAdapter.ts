@@ -7,6 +7,7 @@
  */
 import { clearTimeout as clearDelay, setTimeout as delay } from "node:timers";
 import type { AgentStatus, ChatMessage } from "../../shared/types";
+import type { PromptRejectionReason } from "../../shared/types/session";
 import type { SessionRuntimeTriple } from "../../shared/types/documentWork";
 import { sameRuntimeTriple } from "../../shared/documentWork";
 
@@ -53,7 +54,11 @@ export type DocumentWorkRuntimeSnapshot = {
 	nativeSessionId?: string;
 };
 
-export type DocumentWorkDispatchOutcome = { accepted: boolean; unknown: boolean; error?: string };
+/**
+ * 分发结果。`reason` 是宿主给的失败分类（策略拦截 / 扩展不可用 / 身份变化 / 入参不合法）：
+ * 文稿分发必须据此结算操作错误码，不能把「还没确认绑定的扩展」一律写成进程变了。
+ */
+export type DocumentWorkDispatchOutcome = { accepted: boolean; unknown: boolean; error?: string; reason?: PromptRejectionReason };
 
 export type DocumentWorkRuntimePort = {
 	readRuntime(sessionId: string): Promise<DocumentWorkRuntimeSnapshot | undefined>;

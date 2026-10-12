@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { clearTimeout as clearDelay, setTimeout as delay } from "node:timers";
 import { encodeBindingPayload, workFailure, workSuccess, type WorkResult } from "../../shared/documentWork";
 import type { DocumentArtifactVersion, DocumentWorkChangedEvent, DocumentWorkExtensionState, DocumentWorkOperation, DocumentWorkPreparation, DocumentWorkRecord, WorkErrorCode } from "../../shared/types/documentWork";
+import type { DocumentWorkDispatchOutcome } from "./DocumentWorkRuntimeAdapter";
 import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
 import type { ArtifactStoreFailure, DocumentArtifactStore } from "./DocumentArtifactStore";
 import type { DocumentInspectionService } from "./DocumentInspectionService";
@@ -112,14 +113,14 @@ export class DocumentAttemptRunner {
 		const encoded = this.buildBindingPayload(record, preparation, operation);
 		if (!encoded) return this.failOperation(operation, "RUNTIME_CHANGED", "binding_payload_unavailable");
 		const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
-		if (!bind.accepted) return this.failOperation(operation, bind.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", bind.error);
+		if (!bind.accepted) return this.failOperation(operation, documentWorkDispatchFailureCode(bind), bind.error);
 		if (!(await this.waitForExtensionBinding(operation))) return this.failOperation(operation, "EXTENSION_UNAVAILABLE", "binding_not_confirmed");
 		const running: DocumentWorkOperation = { ...operation, phase: "running", extensionBound: true, dispatchAccepted: true, updatedAt: Date.now() };
 		await this.deps.store.saveOperation(running);
 		this.emit(record, "running", running.attemptId);
 		// 确认授权只在扩展确认绑定之后才分发：顺序不可被渲染层或模型重排。
 		const approve = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwapprove_${operation.requestId}`, message: `/align approve ${operation.authorization.briefId} ${operation.authorization.revision}`, expectedRuntime: operation.runtime });
-		if (!approve.accepted) return this.failOperation(running, approve.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", approve.error);
+		if (!approve.accepted) return this.failOperation(running, documentWorkDispatchFailureCode(approve), approve.error);
 		if (approve.unknown) return this.failOperation(running, "DISPATCH_UNKNOWN");
 		this.trackAttempt(record.workId, running);
 		return workSuccess(running);
@@ -144,7 +145,7 @@ export class DocumentAttemptRunner {
 			}
 			const bind = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwbind_${operation.requestId}`, message: `${DOCUMENT_WORK_BIND_COMMAND} bind ${encoded}`, expectedRuntime: operation.runtime });
 			if (!bind.accepted) {
-				await this.failOperation(operation, bind.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", bind.error);
+				await this.failOperation(operation, documentWorkDispatchFailureCode(bind), bind.error);
 				return;
 			}
 			if (!(await this.waitForExtensionBinding(operation))) {
@@ -158,7 +159,7 @@ export class DocumentAttemptRunner {
 			const revisionPrompt = buildRevisionPrompt(preparation);
 			const dispatched = await this.deps.runtime.sendCommand({ sessionId: record.sessionId, requestId: `dwrevise_${operation.requestId}`, message: revisionPrompt, expectedRuntime: operation.runtime });
 			if (!dispatched.accepted) {
-				await this.failOperation(bound, dispatched.unknown ? "DISPATCH_UNKNOWN" : "RUNTIME_CHANGED", dispatched.error);
+				await this.failOperation(bound, documentWorkDispatchFailureCode(dispatched), dispatched.error);
 				return;
 			}
 			const running: DocumentWorkOperation = { ...bound, dispatchAccepted: true, dispatchUnknown: dispatched.unknown, updatedAt: Date.now() };
@@ -372,5 +373,28 @@ export class DocumentAttemptRunner {
 
 	private emit(record: DocumentWorkRecord, changeKind: DocumentWorkChangedEvent["changeKind"], attemptId?: string): void {
 		emitWorkChanged(this.deps.onChanged, record, changeKind, attemptId);
+	}
+}
+
+/**
+ * 分发失败的错误码归类。
+ *
+ * 背景（真实验收）：绑定命令被宿主的对齐输入守卫拦下时，`accepted: false` 里没有可区分的
+ * 原因，原实现一律记成 `RUNTIME_CHANGED`（「会话运行进程已变化」）——日志把策略拦截和
+ * 扩展缺位都误报成进程换代，排障方向完全相反。宿主的 `reason` 是权威分类，这里只做映射；
+ * 没有 `reason`（老宿主/内部异常）才退回 `RUNTIME_CHANGED`。
+ * `unknown`（发送结果未知）必须优先且单独结算：它保留 active 与租约，绝不重放。
+ */
+function documentWorkDispatchFailureCode(outcome: DocumentWorkDispatchOutcome): WorkErrorCode {
+	if (outcome.unknown) return "DISPATCH_UNKNOWN";
+	switch (outcome.reason) {
+		case "extension_unavailable":
+			return "EXTENSION_UNAVAILABLE";
+		case "invalid_input":
+			return "INVALID_INPUT";
+		case "alignment_blocked":
+			return "COMMAND_BLOCKED";
+		default:
+			return "RUNTIME_CHANGED";
 	}
 }

@@ -4923,7 +4923,8 @@ app
 				dispatch: async (input) => {
 					const result = await sessionRuntimeCoordinator.send({ sessionId: input.sessionId, requestId: input.requestId, message: input.message, expectedRuntime: input.expectedRuntime });
 					if (result.accepted) return { accepted: true, unknown: false };
-					return { accepted: false, unknown: result.delivery === "unknown", error: result.error };
+					// reason 是宿主给失败分类的唯一来源：文稿域据此结算错误码，不再一律写成「进程变了」。
+					return { accepted: false, unknown: result.delivery === "unknown", error: result.error, ...(result.reason ? { reason: result.reason } : {}) };
 				},
 				abort: async (input) => {
 					const result = await sessionRuntimeCoordinator.abortRuntime(input.expectedRuntime);
