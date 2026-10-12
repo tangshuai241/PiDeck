@@ -97,6 +97,34 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		reportCache = undefined;
 	}
 
+	/**
+	 * 本轮执行上下文的正文：每次都由「当前绑定」现场拼出，绝不缓存/复用旧轮文本。
+	 * staging/base/scope 三样是模型唯一可信的落盘依据（真实验收里模型因为看不到它，
+	 * 去翻了旧 outputs 与源码，先写错旧工作再靠读准备文件猜回为止）。
+	 */
+	function contextText(current: DocumentWorkBinding): string {
+		const materials = current.materials.map((material) => `${material.materialId} (${material.label})`).join(", ") || "none";
+		return `This session is executing TPA document work ${current.workId} (attempt ${current.attemptId}, ${current.kind}).\nWrite every deliverable inside this attempt's staging directory: ${current.stagingDirectory}\nRead declared materials with tpa_read_material and their materialId; never invent a path. Materials: ${materials}.\n${current.base ? `The frozen base copy for this round is ${current.base.path} (version ${current.base.versionId}). Modify that copy locally; never rebuild an existing Word document from Markdown and never overwrite the original file.` : "This round creates a new document."}\nScope: ${current.scope.summary || "as confirmed"}${current.scope.sections.length ? `; sections: ${current.scope.sections.join(", ")}` : ""}${current.scope.preserve.length ? `; preserve: ${current.scope.preserve.join(", ")}` : ""}.\nWhen the deliverables are written, call tpa_artifact_report once with staging-relative paths. Reporting is a candidate record only: the desktop verifies, inspects and archives it, and the user decides acceptance. Do not claim the work is archived, verified or accepted.`;
+	}
+
+	/** 只有「本轮仍在制作」才产出上下文；结算/释放后连旧消息一起去掉。 */
+	function currentContextMessage(): Record<string, unknown> | undefined {
+		if (!binding || !attemptLive) return undefined;
+		return { role: "custom", customType: CONTEXT_TYPE, content: contextText(binding), display: false, details: { workId: binding.workId, attemptId: binding.attemptId, preparationId: binding.preparationId, digest: binding.digest }, timestamp: Date.now() };
+	}
+
+	/**
+	 * 同一条请求里只保留一份「当前轮」的上下文；旧轮/已结算/未绑定的条目一律丢掉。
+	 * 必须同时要求 attemptLive：release 之后即使历史里还躺着一条身份完全匹配的上下文，
+	 * 它也不得继续当「正在制作」的指令跟到普通聊天里。
+	 */
+	function isCurrentContextMessage(message: unknown): boolean {
+		if (!binding || !attemptLive || !isRecord(message) || message.customType !== CONTEXT_TYPE) return false;
+		const details = message.details;
+		if (!isRecord(details)) return false;
+		return details.attemptId === binding.attemptId && details.preparationId === binding.preparationId && details.digest === binding.digest;
+	}
+
 	function restoreSession(ctx: ExtensionContext): void {
 		const current = ctx.sessionManager.getSessionId();
 		sessionId = current;
@@ -109,7 +137,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 			if (!isRecord(entry)) continue;
 			if (entry.type === "custom" && entry.customType === DOCUMENT_WORK_BINDING_ENTRY_TYPE && isRecord(entry.data) && entry.data.sessionId === current) {
 				const candidate = decodeBinding(entry.data.binding);
-				if (candidate && candidate.sessionId === current) {
+				if (candidate && candidate.nativeSessionId === current) {
 					restored = candidate;
 					restoredReport = undefined;
 				}
@@ -256,27 +284,43 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		ensureSession(ctx);
-		// 只有本轮仍在制作时才注入制作上下文：归档/取消/失败之后，绑定只是后台归属。
-		if (!binding || !attemptLive) return;
-		const materials = binding.materials.map((material) => `${material.materialId} (${material.label})`).join(", ") || "none";
-		return {
-			message: {
-				customType: CONTEXT_TYPE,
-				display: false,
-				content: `This session is executing TPA document work ${binding.workId} (attempt ${binding.attemptId}, ${binding.kind}).\nWrite every deliverable inside this attempt's staging directory: ${binding.stagingDirectory}\nRead declared materials with tpa_read_material and their materialId; never invent a path. Materials: ${materials}.\n${binding.base ? `The frozen base copy for this round is ${binding.base.path} (version ${binding.base.versionId}). Modify that copy locally; never rebuild an existing Word document from Markdown and never overwrite the original file.` : "This round creates a new document."}\nScope: ${binding.scope.summary || "as confirmed"}${binding.scope.sections.length ? `; sections: ${binding.scope.sections.join(", ")}` : ""}${binding.scope.preserve.length ? `; preserve: ${binding.scope.preserve.join(", ")}` : ""}.\nWhen the deliverables are written, call tpa_artifact_report once with staging-relative paths. Reporting is a candidate record only: the desktop verifies, inspects and archives it, and the user decides acceptance. Do not claim the work is archived, verified or accepted.`,
-			},
-		};
+		// 用用户提示词开新回合的路径：这里返回的消息会落成一条 custom_message（可审计）。
+		// 但 pi.sendMessage(triggerTurn: true) 的续跑路径不会触发本钩子，因此真正的保底在
+		// 下面的 `context`：每个模型请求都会经过它。
+		const message = currentContextMessage();
+		return message ? { message } : undefined;
 	});
 
-	pi.on("context", async (event) => {
-		return {
-			messages: event.messages.filter((message: unknown) => {
-				if (!isRecord(message)) return true;
-				if (message.customType === DOCUMENT_WORK_STATE_TYPE || message.customType === DOCUMENT_WORK_REVISION_INTENT_TYPE) return false;
-				if (message.customType === CONTEXT_TYPE) return Boolean(binding);
-				return true;
-			}),
-		};
+	pi.on("context", async (event, ctx) => {
+		// 会话边界也要认一次：换了原生会话必须立即按新会话恢复/清空绑定，
+		// 否则跨会话的第一次请求可能带着上个会话的上下文。
+		ensureSession(ctx);
+		// 保留/注入本轮上下文的唯一可靠位置：`context` 对每个模型请求都执行。
+		// 背景（真机会话）：批准走的是 alignment 的 pi.sendMessage(triggerTurn: true)，
+		// 不经过 before_agent_start，于是模型请求里从未出现 document-work-context，
+		// 模型只能去翻旧输出/源码猜 staging。
+		const messages: unknown[] = [];
+		let kept = false;
+		for (const message of event.messages) {
+			if (!isRecord(message)) {
+				messages.push(message);
+				continue;
+			}
+			if (message.customType === DOCUMENT_WORK_STATE_TYPE || message.customType === DOCUMENT_WORK_REVISION_INTENT_TYPE) continue;
+			if (message.customType === CONTEXT_TYPE) {
+				if (!kept && isCurrentContextMessage(message)) {
+					kept = true;
+					messages.push(message);
+				}
+				// 旧轮上下文一律丢弃：新绑定只能配新 staging/base/scope。
+				continue;
+			}
+			messages.push(message);
+		}
+		const live = currentContextMessage();
+		// 续跑路径没有现成条目：补到末尾，紧贴本轮要求，且不动前面的前缀（对提示缓存友好）。
+		if (!kept && live) messages.push(live);
+		return { messages };
 	});
 
 	pi.on("session_start", async (_event, ctx) => restoreSession(ctx));

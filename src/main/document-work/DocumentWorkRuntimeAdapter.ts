@@ -115,6 +115,9 @@ export class DocumentWorkRuntimeAdapter {
 			const agentId = Reflect.get(payload, "agentId");
 			const state = Reflect.get(payload, "state");
 			if (typeof agentId !== "string" || typeof state !== "object" || state === null) return;
+			// 只认自带完整三元组的补丁：身份是生产者（AgentManager）在发出时刻冻结的。
+			// 不拿「当前绑定」去补全无标识的迟到事件——重启后同一 agentId 会换代，补全就把旧事件
+			// 认成了新 runtime（AGENTS：所有 runtime 事件必须带 sessionId+agentId+runtimeGeneration）。
 			const triple = runtimeTripleOf(payload);
 			if (triple) {
 				// status 是「本轮是否还在跑」的一半证据；补丁不带 status 时沿用上一次，

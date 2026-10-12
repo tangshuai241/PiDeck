@@ -2954,6 +2954,8 @@ export class AgentManager {
 		// 这样即使工具极快完成或完整状态请求乱序，renderer 仍能稳定看到 true → false。
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			// 身份在发出时刻冻结（与渲染层信封同一处来源）：文稿域按三元组严格判忙与稳定。
+			...this.streamRuntimeTriple(agentId),
 			state: {
 				isExecutingTool,
 				executingToolName,
@@ -2978,7 +2980,7 @@ export class AgentManager {
 			state.toolStateSequence = latestToolSequence;
 			// A live snapshot/clear may arrive between getRuntimeState and this emission.
 			state.alignment = this.alignmentProjection.read(agentId, this.alignmentIdentity(runtime));
-			this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
+			this.emit(ipcChannels.agentsRuntimeState, { agentId, ...this.streamRuntimeTriple(agentId), state });
 		} catch {
 			// 运行态刷新失败不影响主流程；下一次轮询或事件会继续同步。
 		}
@@ -5948,6 +5950,7 @@ export class AgentManager {
 	private emitStreamingStatePatch(agentId: string) {
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: {
 				isStreaming: this.streamingAgents.has(agentId),
 				isExecutingTool: !!this.toolExecutingByAgent.get(agentId),
@@ -5964,6 +5967,7 @@ export class AgentManager {
 	private emitContextOverflowState(agentId: string, contextOverflow: boolean) {
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: { contextOverflow },
 		});
 	}
@@ -5975,6 +5979,7 @@ export class AgentManager {
 		// of waiting for the next asynchronous get_state snapshot.
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: { isTurnActive },
 		});
 	}

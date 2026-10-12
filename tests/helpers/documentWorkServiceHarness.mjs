@@ -136,6 +136,24 @@ function createHarness(options = {}) {
 		state,
 		changes,
 		emitRuntime,
+		/**
+		 * 接管输出源：把真实 AgentManager 的 output 事件（生产 emitter）接到适配器上，
+		 * 只假 pi 传输面——轻量补丁的身份必须由 emitter 自己带上，收端不做任何补全。
+		 */
+		attachOutputs(attach) {
+			attach((payload) => {
+				for (const listener of outputs) listener("agents:runtime-state", payload);
+			});
+		},
+		/** 直接投递一条原始 runtime 输出：用于「无标识的迟到事件不得获得当前权威」的反例。 */
+		emitRawOutput(payload) {
+			for (const listener of outputs) listener("agents:runtime-state", payload);
+		},
+		/** 当前操作相位（不等待终态）。 */
+		async operationPhase(workId, requestId) {
+			const result = await domain.service.getOperation(workId, requestId, SESSION_ID);
+			return result.ok ? result.value.phase : "missing";
+		},
 		/** 扩展看到的绑定载荷：attemptId 与 staging 路径都以此为准，与真实扩展一致。 */
 		bindingPayload() {
 			const bind = [...state.dispatched].reverse().find((message) => message.startsWith("/tpa-work bind "));
