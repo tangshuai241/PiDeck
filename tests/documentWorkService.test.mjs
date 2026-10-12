@@ -684,3 +684,75 @@ test("归档防覆盖：版本目录排他新建，被占用的序号不复用",
 		await harness.cleanup();
 	}
 });
+
+test("跨接口回归：服务产出的真实绑定载荷能被真实扩展 handler 确认绑定", async () => {
+	// 这条是审查明确要求的跨接口负向/修复回归：不看解码器单独绿，而是把 service 实际发出的
+	// `/tpa-work bind <payload>` 原文交给扩展注册的 handler，并断言真的产生 bound 确认。
+	// 稳定 SessionRecord.id 与 pi 原生会话 id 刻意不同：缺 nativeSessionId 的真实链路必挂。
+	const { createRequire } = await import("node:module");
+	const require = createRequire(import.meta.url);
+	const extension = loadTsCommonJs(`${ROOT}/resources/extensions/pi-deck-document-work.ts`, { stubs: { typebox: require("typebox") } }).default;
+	const harness = createHarness();
+	try {
+		const bound = [];
+		const commands = new Map();
+		let branch = [];
+		const ctx = {
+			hasUI: false,
+			mode: "rpc",
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+			ui: { notify: (message) => bound.push({ kind: "notify", message }) },
+			sessionManager: { getSessionId: () => NATIVE_SESSION_ID, getBranch: () => [...branch] },
+		};
+		extension({
+			on: () => {},
+			registerCommand: (name, value) => commands.set(name, value),
+			registerTool: () => {},
+			getActiveTools: () => [],
+			setActiveTools: () => {},
+			appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+			sendMessage: (message) => {
+				branch.push({ type: "custom_message", ...message });
+				if (message.details?.documentWork) bound.push(message.details.documentWork);
+			},
+		});
+
+		const view = await createWork(harness);
+		harness.alignment();
+		const prepared = await prepareCreate(harness, view);
+		assert.equal(prepared.ok, true, JSON.stringify(prepared));
+		assert.equal((await startRound(harness, view, prepared, "req-start", { kind: "alignment_confirmation", briefId: "brief-1", revision: 2 })).ok, true);
+		const bind = harness.state.dispatched.find((message) => message.startsWith("/tpa-work bind "));
+		assert.ok(bind, "本轮必须发出绑定命令");
+
+		let handlerError = "";
+		try {
+			await commands.get("tpa-work").handler(bind.slice("/tpa-work ".length), ctx);
+		} catch (error) {
+			handlerError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+		}
+		const confirmed = bound.find((entry) => entry.phase === "bound");
+		assert.ok(confirmed, `真实扩展必须确认绑定（回执：${JSON.stringify(bound)}；错误：${handlerError}）`);
+		// 发布的状态快照报告稳定工作身份；原生身份落在持久化的绑定条目里。
+		assert.equal(confirmed.sessionId, SESSION_ID, "状态快照报告稳定会话 id");
+		const boundEntry = branch.find((entry) => entry.customType === "tpa-document-work-binding");
+		assert.ok(boundEntry, "绑定必须落盘到活动分支");
+		assert.equal(boundEntry.data.sessionId, NATIVE_SESSION_ID, "分支条目按原生会话 id 归属");
+		assert.equal(boundEntry.data.binding.nativeSessionId, NATIVE_SESSION_ID);
+		assert.notEqual(boundEntry.data.binding.sessionId, boundEntry.data.binding.nativeSessionId, "稳定会话 id 与原生 id 必须不同");
+		// 负向：把载荷里的原生 id 换成别的会话，同一条链路必须被拒。
+		const payload = shared.decodeBindingPayload(bind.slice("/tpa-work bind ".length));
+		const tampered = shared.encodeBindingPayload({ ...payload, nativeSessionId: "pi-native-session-other" });
+		bound.length = 0;
+		await commands.get("tpa-work").handler(`bind ${tampered}`, ctx);
+		assert.equal(bound.filter((entry) => entry.phase === "bound").length, 0, "跨会话载荷不得产生 bound 确认");
+		assert.equal(
+			bound.some((entry) => entry.kind === "notify"),
+			true,
+			"跨会话载荷必须显式拒绝并告知用户",
+		);
+	} finally {
+		await harness.cleanup();
+	}
+});
