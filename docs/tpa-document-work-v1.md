@@ -417,3 +417,19 @@ node scripts/generate-extensions-manifest.mjs --check
    两件不同工作在同一运行时并发确认时，后到的一件在**发出绑定之前**就被拒（`RUNTIME_BUSY`）；
    不同运行时仍可并行；取消与终态释放租约且只释放自己那一份；未知分发的重放保护仍来自 requestId 台账与终态。
    锁顺序固定：先 workId 互斥，再运行时租约（同步 Map，无 await，不成环）。
+
+## 15. 第三轮审查修正（实现 B · 批准回执与未知运行时占用）
+
+1. **建记录失败必须拦下**：`beforeApprove` 已确定本轮是正式文稿后，`ensureWork` 失败（存档不可写/校验失败）
+   改为返回 `blocked` 并给出明确错误，绝不退回原生 approve 绕过归档与检查；普通 coding 仍 `proceed`。
+2. **批准 fence 冻结**：`useSessionAlignmentControls.approve` 在 `await` 文稿桥**之前**冻结运行时三元组与
+   确认单版本，`await` 之后只与冻结快照比较。换代时旧点击不再改动新运行时的模式/pending/error，
+   也不会把旧确认单发给新运行时。
+3. **`handled` 不等于已批准**：`start` 只表示主进程收取了本轮操作（后台可能仍在等绑定确认）。
+   前端在 `handled` 分支等待**同一 frozen briefId+revision+runtime** 的 `approved/complete` 回执
+   （复用 `waitForAlignmentAcknowledgement`）才切换 UI；超时/失败/换代保留实际状态与输入。
+   唯一 approve owner 仍是主进程，桥不额外发批准。
+4. **未知分发保守占用运行时**：`unknown` 不再自动释放同运行时。`DocumentWorkStore.blockingUnknownOperation`
+   是**持久化**判定（重启后仍生效）：同一会话里存在结果未知且 runtime 三代组相同的操作时，
+   新的文稿 attempt（含另一件工作的新 requestId）一律 `DISPATCH_UNKNOWN` 拒绝；解除方式只有
+   用户显式取消（`unknown → interrupted`）或会话换绑到新运行时。租约与 workId 互斥顺序不变，清理成对。

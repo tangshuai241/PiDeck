@@ -165,7 +165,20 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 				outputRootId: "",
 			})
 			.catch(() => undefined);
-		if (!created || !created.ok) return undefined;
+		if (!created) {
+			const message = t("documentWork.error.generic", { code: "IPC" });
+			setView((value) => ({ ...value, pending: false, error: message }));
+			showNotice(message);
+			return undefined;
+		}
+		if (!created.ok) {
+			// 记录建不起来（磁盘/权限/校验失败）：如实报错，并由调用方拦下批准——
+			// 绝不能悄悄退回原生 approve，否则正式文稿会绕过归档与检查。
+			const message = failureCopy(created.error);
+			setView((value) => ({ ...value, pending: false, error: message }));
+			showNotice(message);
+			return undefined;
+		}
 		const snapshot = await desktopApi.documentWork.get({ workId: created.value.workId, sessionId }).catch(() => undefined);
 		if (snapshot && snapshot.ok) setView((value) => ({ ...value, loading: false, snapshot: snapshot.value }));
 		return created.value;
@@ -228,7 +241,9 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 			if (route.route !== "document") return "proceed";
 			const current = store.get(viewAtom);
 			const work = current.snapshot?.work ?? (await ensureWork());
-			if (!work) return "proceed";
+			// 记录不可用（创建失败/存档不可写）时拦下本轮：保留用户输入，等待用户重试，
+			// 但绝不绕过正式流程直接发原生批准。
+			if (!work) return "blocked";
 			const gate = shouldBlockDocumentApproval({ route: "document", hasWork: true, hasOutputRoot: Boolean(work.outputRootId) });
 			if (gate.block) {
 				showNotice(t("documentWork.needOutputFolder"));
@@ -276,7 +291,9 @@ export function useSessionDocumentWork(sessionId: string, backend: AgentBackend 
 				return "blocked";
 			}
 			setView((value) => ({ ...value, pending: false }));
-			// 主进程已经在 `start` 里发出了唯一一次 `/align approve`：调用方只同步状态，不再发原生批准。
+			// `start` 只表示主进程已收取本轮操作（后台可能还在等绑定确认）。
+			// 真正的批准由主进程发出，前端等同一 briefId+revision+runtime 的 approved/complete 回执，
+			// 因此这里返回 handled 只表示"不要发原生批准"，不是"已经批准成功"。
 			return "handled";
 		},
 		[available, alignmentBrief, backend, ensureWork, runtimeAtom, sessionId, setView, store, viewAtom],

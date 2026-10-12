@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOCUMENT_WORK_SCHEMA_VERSION, workFail, workOk, type WorkResult } from "../../shared/documentWork";
-import type { DocumentArtifactVersion, DocumentWorkOutputRoot, DocumentWorkRecord } from "../../shared/types/documentWork";
+import type { DocumentArtifactVersion, DocumentWorkOperation, DocumentWorkOutputRoot, DocumentWorkRecord } from "../../shared/types/documentWork";
 import { canonicalJsonForStore, emptyIndex, parseIndexState, parseWorkBucket, type DocumentWorkBucketState, type DocumentWorkIndexState } from "./DocumentWorkStoreCodec";
 
 /** 注入点：测试用它模拟写入失败/损坏文件，生产用真实 fs。 */
@@ -343,6 +343,27 @@ export class DocumentWorkStore {
 			if (display.record?.sessionId === sessionId) records.push(display.record);
 		}
 		return records.sort((left, right) => left.createdAt - right.createdAt);
+	}
+
+	/**
+	 * 同一会话里是否有"结果未知"的操作卡在这个运行时上。
+	 *
+	 * 这是**持久化**的保守恢复策略（不只内存租约）：未知分发意味着无法证明那一轮是否
+	 * 已经在 pi 里跑过，因此同一个运行时上的新文稿 attempt 一律拒绝，直到
+	 * 用户显式取消（操作转 interrupted）或会话换绑到新的运行时（agentId/世代不同）。
+	 * 应用重启后这条判定照常生效；新运行时的三代组不同，天然不受影响。
+	 */
+	blockingUnknownOperation(input: { sessionId: string; target: { agentId: string; runtimeGeneration: number } }): DocumentWorkOperation | undefined {
+		for (const work of this.listWorksForSession(input.sessionId)) {
+			const read = this.readWork(work.workId);
+			if (!read.ok) continue;
+			for (const operation of Object.values(read.value.operations)) {
+				if (operation.state !== "unknown") continue;
+				if (operation.runtime.agentId !== input.target.agentId || operation.runtime.runtimeGeneration !== input.target.runtimeGeneration) continue;
+				return operation;
+			}
+		}
+		return undefined;
 	}
 
 	/** 哪些工作记录当前不可解析（损坏）；供恢复提示与诊断。 */

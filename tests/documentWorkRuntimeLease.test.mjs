@@ -41,7 +41,10 @@ function harness(options = {}) {
 		store,
 		runtime: runtime.port,
 		adapter,
-		archive: { prepareStaging: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/work/staging/round" } }), settleAndArchive: async () => ({ state: "unknown", code: "DISPATCH_UNKNOWN", detail: "test settle" }) },
+		archive: {
+			prepareStaging: async () => ({ ok: true, value: { stagingAbsolutePath: "C:/out/work/staging/round" } }),
+			settleAndArchive: async () => (options.settle ? options.settle() : { state: "unknown", code: "DISPATCH_UNKNOWN", detail: "test settle" }),
+		},
 		pathFs: pathMemory.fs,
 		workRoot: "C:/userData/document-work",
 		emit: () => undefined,
@@ -158,4 +161,74 @@ test("租约是同步的 Map 所有权：换绑天然换键，不会误放别人
 	assert.equal(lease.holder(target), undefined);
 	lease.releaseAll();
 	assert.deepEqual({ ...lease.snapshot() }, {});
+});
+
+test("未知分发保守占用同运行时：新 request 被拒且没有第二次 bind，换代后恢复", async () => {
+	const h = harness({ bindAckMs: 20 });
+	const workA = h.createWork(STABLE_SESSION, "create_a").value;
+	const started = await prepareAndStart(h, workA, "A", { ...h.runtime.target });
+	assert.equal(started.ok, true);
+	const attemptId = started.value.attemptId;
+	// 绑定命令被接受但没等到确认：结果未知。
+	for (let index = 0; index < 200 && h.store.readWork(workA.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(h.store.readWork(workA.workId).value.operations[attemptId].state, "unknown");
+	const bindsAfterUnknown = h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length;
+	assert.equal(bindsAfterUnknown, 1);
+
+	// 另一件工作在同一运行时用**新的** requestId：必须被拒，且不得发出第二次绑定。
+	const workB = h.createWork(STABLE_SESSION, "create_b").value;
+	const blocked = await prepareAndStart(h, workB, "B", { ...h.runtime.target });
+	assert.equal(blocked.ok, false);
+	assert.equal(blocked.error.code, "DISPATCH_UNKNOWN");
+	assert.equal(h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length, 1, "未知占用期间不得再绑定");
+	// 同一件工作的旧 requestId 走幂等路径，也不重放。
+	const repeat = await h.service.start({
+		requestId: "start_A",
+		workId: workA.workId,
+		sessionId: workA.sessionId,
+		expectedRevision: h.store.readWork(workA.workId).value.record.revision,
+		kind: "create_document",
+		preparation: { preparationId: started.value.preparationId, digest: started.value.preparationDigest },
+		expectedRuntime: { ...h.runtime.target },
+		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 3 },
+	});
+	assert.equal(repeat.ok, true);
+	assert.equal(repeat.value.attemptId, attemptId);
+	assert.equal(h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length, 1);
+
+	// 换到新运行时（新 pi 进程）：未知占用不再约束，新工作可以正常开始。
+	h.runtime.target.agentId = "agent-2";
+	h.runtime.target.runtimeGeneration = 2;
+	h.runtime.target.piSessionId = "pi-native-2";
+	const prepared = await h.service.prepare({ requestId: "prepare_B2", workId: workB.workId, sessionId: workB.sessionId, expectedRevision: h.store.readWork(workB.workId).value.record.revision, kind: "create_document", requirementsRef: { kind: "alignment", briefId: "brief_1", revision: 3 } });
+	assert.equal(prepared.ok, true);
+	const afterReplace = await h.service.start({
+		requestId: "start_B2",
+		workId: workB.workId,
+		sessionId: workB.sessionId,
+		expectedRevision: prepared.value.workRevision,
+		kind: "create_document",
+		preparation: prepared.value.preparation,
+		expectedRuntime: { ...h.runtime.target, agentId: "agent-2", runtimeGeneration: 2, piSessionId: "pi-native-2" },
+		authorization: { kind: "alignment_confirmation", briefId: "brief_1", revision: 3 },
+	});
+	assert.equal(afterReplace.ok, true, afterReplace.ok ? "" : JSON.stringify(afterReplace.error));
+	assert.equal(h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length, 2, "新运行时上可以正常绑定");
+});
+
+test("未知占用可以被用户显式取消清理，之后同运行时恢复可用", async () => {
+	const h = harness({ bindAckMs: 20 });
+	const workA = h.createWork(STABLE_SESSION, "create_a").value;
+	const started = await prepareAndStart(h, workA, "A", { ...h.runtime.target });
+	const attemptId = started.value.attemptId;
+	for (let index = 0; index < 200 && h.store.readWork(workA.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(h.store.readWork(workA.workId).value.operations[attemptId].state, "unknown");
+	// 用户显式清理：unknown → interrupted（这就是那条权威证据）。
+	const cleared = await h.service.cancel({ requestId: "cancel_unknown", workId: workA.workId, attemptId, expectedRevision: h.store.readWork(workA.workId).value.record.revision, expectedRuntime: { ...h.runtime.target } });
+	assert.equal(cleared.ok, true);
+	assert.equal(cleared.value.state, "interrupted");
+	assert.equal(h.store.blockingUnknownOperation({ sessionId: STABLE_SESSION, target: { agentId: "agent-1", runtimeGeneration: 1 } }), undefined);
+	const workB = h.createWork(STABLE_SESSION, "create_b").value;
+	const next = await prepareAndStart(h, workB, "B", { ...h.runtime.target });
+	assert.equal(next.ok, true, next.ok ? "" : JSON.stringify(next.error));
 });

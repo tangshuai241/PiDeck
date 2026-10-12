@@ -54,6 +54,17 @@ function extensionHarness() {
 }
 
 /** 主进程侧：真实 store/service/adapter + 假运行时端口；sendControl 直连真实扩展并回灌确认。 */
+/** 可控制的批准回执：默认立即成功，测试可以延迟/失败/换代。 */
+function deferredAck() {
+	let resolveFn;
+	let rejectFn;
+	const promise = new Promise((resolve, reject) => {
+		resolveFn = resolve;
+		rejectFn = reject;
+	});
+	return { promise, resolve: resolveFn, reject: rejectFn };
+}
+
 function mainHarness(brief) {
 	const storeFs = f.createMemoryWorkFs();
 	const pathMemory = f.createMemoryFs({ dirs: ["C:/out", "C:/project", "C:/userData"] });
@@ -67,6 +78,8 @@ function mainHarness(brief) {
 	const sends = [];
 	runtime.port.sendControl = async (input) => {
 		sends.push(input.message);
+		// 生产里 pi 会执行批准并让对齐扩展发布 approved；测试在这里同步给渲染层。
+		mainHarness.lastDispatch?.(input.message);
 		runtime.calls.push({ kind: "sendControl", message: input.message, requestId: input.requestId });
 		const bind = /^\/tpa-work bind (\S+)$/.exec(input.message);
 		if (bind) {
@@ -93,7 +106,7 @@ function mainHarness(brief) {
 }
 
 /** 渲染层侧：生产 hook + 真实 service 的 desktopApi 适配；`sessions.sendPrompt` 单独计数。 */
-function hookHarness(main, brief) {
+function hookHarness(main, brief, options = {}) {
 	const store = createStore();
 	// 会话 id 用真实稳定 id：文稿域的 create/recover 都按它归属，否则会读到别人的工作。
 	const session = f.STABLE_SESSION;
@@ -124,6 +137,14 @@ function hookHarness(main, brief) {
 	const documentCalls = [];
 	const rendererSends = [];
 	const notices = [];
+	// 主进程发出的批准/改稿会让 pi 更新对齐状态，这里把结果回灌给渲染层状态（生产是扩展发布）。
+	mainHarness.lastDispatch = (message) => {
+		const session = f.STABLE_SESSION;
+		const current = values.get(`runtime:${session}`);
+		if (!current?.state?.alignment) return;
+		if (!message.startsWith("/align approve")) return;
+		values.set(`runtime:${session}`, { ...current, state: { alignment: { ...current.state.alignment, phase: "approved" } } });
+	};
 	const applyRuntimeState = (sessionId, state) => values.set(`runtime:${sessionId}`, { ...values.get(`runtime:${sessionId}`), state });
 	const commonStubs = {
 		jotai: { atom, createStore, useStore: () => store, useAtomValue: (key) => store.get(key), useSetAtom: (key) => (value) => store.set(key, typeof value === "function" ? value(store.get(key)) : value) },
@@ -215,16 +236,38 @@ function hookHarness(main, brief) {
 		stubs: {
 			...commonStubs,
 			"../atoms/alignment-atoms": alignmentAtomsStub,
-			"../utils/alignmentControls": { alignmentActionCommand: () => "/align approve brief_1 3", alignmentModeCommands: () => [], sameAlignmentRuntime: () => true },
+
 			"../utils/alignmentPresentation": { deriveAlignmentPresentation: () => ({ kind: "ready", canApprove: true, questionCount: 0 }) },
-			"../utils/alignmentAcknowledgement": { waitForAlignmentAcknowledgement: async () => undefined },
+			"../utils/alignmentAcknowledgement": {
+				waitForAlignmentAcknowledgement: async (input) => {
+					// 生产实现的判据：同一 frozen briefId+revision 的 approved/complete 才算回执。
+					const behaviour = options.ack;
+					if (!behaviour) {
+						// 与生产一致的语义：等"同一 briefId+revision 的 approved/complete"出现，超时才算没回执。
+						const deadline = Date.now() + 500;
+						for (;;) {
+							const latest = input.read();
+							if (latest && input.matches(latest)) return;
+							if (!input.isCurrent() || Date.now() > deadline) throw new Error("notAcknowledged");
+							await new Promise((resolve) => setTimeout(resolve, 5));
+						}
+					}
+					await behaviour.promise;
+					if (!input.isCurrent()) throw new Error("notAcknowledged");
+					const latest = input.read();
+					if (!latest || !input.matches(latest)) throw new Error("notAcknowledged");
+				},
+			},
+			"../utils/alignmentControls": { alignmentActionCommand: () => "/align approve brief_1 3", alignmentModeCommands: () => [], sameAlignmentRuntime: (left, right) => Boolean(left && right && left.agentId === right.agentId && left.runtimeGeneration === right.runtimeGeneration && left.sessionId === right.sessionId) },
 			"../composerBehavior": { buildComposerPromptSubmission: (message) => ({ message }) },
 		},
 	});
 	return {
 		values,
 		session,
-		renderAlignment: () => alignmentHookModule.useSessionAlignmentControls(session, "pi", { beforeApprove: (state) => documentHookModule.useSessionDocumentWork(session, "pi").beforeApprove(state) }),
+		renderAlignment: (bridge) => alignmentHookModule.useSessionAlignmentControls(session, "pi", bridge ?? { beforeApprove: (state) => documentHookModule.useSessionDocumentWork(session, "pi").beforeApprove(state) }),
+		/** 换代：模拟新 pi 进程接管同一会话。 */
+		replaceRuntime: (generation) => values.set(`runtime:${session}`, { agentId: `agent-${generation}`, runtimeGeneration: generation, status: "idle", state: values.get(`runtime:${session}`).state }),
 		renderDocument: () => documentHookModule.useSessionDocumentWork(session, "pi"),
 		documentCalls,
 		rendererSends,
@@ -254,7 +297,7 @@ test("正式文稿轮次：总批准次数恰好 1，且由主进程发出（前
 	await setImmediate();
 	controls.approve();
 	await waitFor(() => main.sends.some((message) => message.startsWith("/align approve")));
-	await setImmediate();
+	await waitFor(() => hook.values.get(`mode:${f.STABLE_SESSION}`) === "normal");
 	const mainApproves = main.sends.filter((message) => message.startsWith("/align approve"));
 	const rendererApproves = hook.rendererSends.filter((message) => message.startsWith("/align approve"));
 	assert.equal(mainApproves.length, 1, `主进程必须恰好发一次批准（实际 ${JSON.stringify(mainApproves)}）`);
@@ -308,4 +351,97 @@ test("文稿轮次缺成果目录：批准被拦下，两边都不发批准", as
 	assert.equal(hook.rendererSends.length, 0);
 	assert.equal(main.sends.length, 0);
 	assert.deepEqual([...hook.notices], ["documentWork.needOutputFolder"]);
+});
+
+test("文稿记录创建失败（IO_ERROR）：拦下本轮，不发原生批准也不 prepare/start", async () => {
+	const main = mainHarness(WORD_BRIEF);
+	const hook = hookHarness(main, WORD_BRIEF);
+	// 存档不可用：真实 API 创建返回结构化错误（磁盘/权限失败的真实形态）。
+	const originalCreate = main.store.createWork.bind(main.store);
+	main.store.createWork = () => ({ ok: false, error: { code: "IO_ERROR", retryable: true, detail: "failed to persist the work record" } });
+	const controls = hook.renderAlignment();
+	hook.renderDocument();
+	await setImmediate();
+	controls.approve();
+	await setImmediate();
+	assert.deepEqual([...hook.documentCalls], ["create"], "只尝试建记录，不得继续 prepare/start");
+	assert.deepEqual([...hook.rendererSends], [], "不得绕过正式流程发原生批准");
+	assert.equal(main.sends.length, 0);
+	assert.deepEqual([...hook.notices], ["documentWork.error.generic"], "必须给出明确错误");
+	main.store.createWork = originalCreate;
+});
+
+test("handled 不等于已批准：回执到达前保持对齐与 pending，回执后（同一 frozen 版本）才切正常", async () => {
+	const main = mainHarness(WORD_BRIEF);
+	const root = main.store.registerOutputRoot({ path: "C:/out", label: "out" });
+	main.store.createWork({ requestId: "create_seed", requestDigest: "d", sessionId: f.STABLE_SESSION, sourceTurnId: "turn_seed", title: "report", outputRootId: root.value.outputRootId });
+	const ack = deferredAck();
+	const hook = hookHarness(main, WORD_BRIEF, { ack });
+	const controls = hook.renderAlignment();
+	hook.renderDocument();
+	await setImmediate();
+	controls.approve();
+	// 后台绑定确认还没回执：UI 必须保持对齐模式与 pending，不能提前宣布批准成功。
+	await waitFor(() => main.sends.some((message) => message.startsWith("/align approve")));
+	assert.equal(hook.values.get(`mode:${f.STABLE_SESSION}`), "alignment", "回执前不得切换模式");
+	assert.equal(hook.values.get(`pending:${f.STABLE_SESSION}`), true, "回执前保持 pending");
+	ack.resolve();
+	await waitFor(() => hook.values.get(`mode:${f.STABLE_SESSION}`) === "normal");
+	assert.equal(hook.values.get(`pending:${f.STABLE_SESSION}`), false);
+	assert.equal(hook.values.get(`error:${f.STABLE_SESSION}`), undefined);
+});
+
+test("回执缺失/失败：保留实际状态与输入，不假装批准成功", async () => {
+	const main = mainHarness(WORD_BRIEF);
+	const root = main.store.registerOutputRoot({ path: "C:/out", label: "out" });
+	main.store.createWork({ requestId: "create_seed", requestDigest: "d", sessionId: f.STABLE_SESSION, sourceTurnId: "turn_seed", title: "report", outputRootId: root.value.outputRootId });
+	const ack = deferredAck();
+	const hook = hookHarness(main, WORD_BRIEF, { ack });
+	const controls = hook.renderAlignment();
+	hook.renderDocument();
+	await setImmediate();
+	controls.approve();
+	await waitFor(() => main.sends.some((message) => message.startsWith("/align approve")));
+	ack.reject(new Error("notAcknowledged"));
+	await waitFor(() => hook.values.get(`pending:${f.STABLE_SESSION}`) === false);
+	assert.equal(hook.values.get(`mode:${f.STABLE_SESSION}`), "alignment", "没有回执就不算批准：保持对齐模式");
+	assert.equal(hook.values.get(`error:${f.STABLE_SESSION}`)?.briefId, "brief_1");
+	assert.deepEqual([...hook.notices], ["alignment.notAcknowledged"]);
+	assert.deepEqual([...hook.rendererSends], [], "不得补发原生批准");
+});
+
+test("文稿桥等待期间换代：不碰新运行时的确认状态，也不向新运行时发旧确认", async () => {
+	const main = mainHarness(WORD_BRIEF);
+	const hook = hookHarness(main, WORD_BRIEF);
+	const bridge = deferredAck();
+	const controls = hook.renderAlignment({ beforeApprove: () => bridge.promise.then(() => "handled") });
+	await setImmediate();
+	controls.approve();
+	// 桥还没返回就换代：旧点击必须彻底作废。
+	hook.replaceRuntime(2);
+	bridge.resolve();
+	await setImmediate();
+	// 挂载时的对齐模式由 effect 设置；关键是旧点击不得把它切成 normal，也不得标 pending。
+	assert.equal(hook.values.get(`mode:${f.STABLE_SESSION}`), "alignment", "旧点击不得改动新运行时的模式");
+	assert.equal(Boolean(hook.values.get(`pending:${f.STABLE_SESSION}`)), false, "不得把新运行时标成 pending");
+	assert.deepEqual([...hook.rendererSends], [], "不得向新运行时发旧确认");
+	assert.equal(main.sends.length, 0);
+});
+
+test("同一确认双击：主进程只发一次绑定与一次批准", async () => {
+	const main = mainHarness(WORD_BRIEF);
+	const root = main.store.registerOutputRoot({ path: "C:/out", label: "out" });
+	main.store.createWork({ requestId: "create_seed", requestDigest: "d", sessionId: f.STABLE_SESSION, sourceTurnId: "turn_seed", title: "report", outputRootId: root.value.outputRootId });
+	const hook = hookHarness(main, WORD_BRIEF);
+	const controls = hook.renderAlignment();
+	hook.renderDocument();
+	await setImmediate();
+	controls.approve();
+	controls.approve();
+	await waitFor(() => main.sends.some((message) => message.startsWith("/align approve")));
+	await waitFor(() => hook.values.get(`mode:${f.STABLE_SESSION}`) === "normal");
+	await setImmediate();
+	assert.equal(main.sends.filter((message) => message.startsWith("/tpa-work bind")).length, 1, "双击只允许一次绑定");
+	assert.equal(main.sends.filter((message) => message.startsWith("/align approve")).length, 1, "双击只允许一次批准");
+	assert.equal(hook.rendererSends.length, 0);
 });

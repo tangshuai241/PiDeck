@@ -155,8 +155,14 @@ test("未知分发不重放：命令被接受但没确认时最多发一次 bind
 	const attemptId = started.value.attemptId;
 	for (let index = 0; index < 200 && h.store.readWork(h.work.workId).value.operations[attemptId].state === "dispatching"; index++) await new Promise((resolve) => setTimeout(resolve, 5));
 	assert.equal(h.store.readWork(h.work.workId).value.operations[attemptId].state, "unknown");
-	// 再点一次确认（新的 requestId）不会重放旧 attempt，而是新的操作（旧操作是终态）。
+	// 未知结果保守占用这个运行时：新的 requestId 也被拒，且不会出现第二次绑定。
+	// （要重新开始，用户要显式取消这条未知操作，或让会话换绑到新的 pi 进程。）
 	const again = await h.service.start(startInput(h, { value: { workRevision: h.store.readWork(h.work.workId).value.record.revision, preparation: prepared.value.preparation } }, "start_again"));
-	assert.ok(again.ok || again.ok === false);
-	assert.equal(h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length, 2, "旧 attempt 不重放，新确认是新的一轮");
+	assert.equal(again.ok, false);
+	assert.equal(again.error.code, "DISPATCH_UNKNOWN");
+	assert.equal(h.runtime.calls.filter((call) => call.kind === "sendControl" && call.message.startsWith("/tpa-work bind")).length, 1, "未知期间不得重放，也不得开新的一轮");
+	// 显式取消之后同运行时恢复可用（这是唯一不依赖换代的清理路径）。
+	const cleared = await h.service.cancel({ requestId: "cancel_unknown", workId: h.work.workId, attemptId, expectedRevision: h.store.readWork(h.work.workId).value.record.revision, expectedRuntime: { sessionId: STABLE_SESSION, agentId: "agent-1", runtimeGeneration: 1 } });
+	assert.equal(cleared.ok, true);
+	assert.equal(cleared.value.state, "interrupted");
 });

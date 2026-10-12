@@ -180,29 +180,60 @@ export function useSessionAlignmentControls(sessionId: string, backend: AgentBac
 			showNotice(t("alignment.busy"));
 			return;
 		}
-		// 文稿轮次：主进程先落准备与操作记录，成功时由**它**发出唯一一次批准；
+		// 文稿轮次：主进程先落准备与操作记录，真正的批准由**主进程**在绑定确认后发出；
 		// 前端只在 plain 分支发原生批准，避免同一次点击产生两次 approve。
 		const bridge = approvalBridge;
 		if (!bridge || !current) {
 			void dispatch([command], "normal");
 			return;
 		}
+		// 关键（审查修正项 2）：await 之前冻结本次点击的目标与确认单版本。
+		// await 之后再读 store 只会拿到"当前"运行时，fence 会失效——旧点击就可能
+		// 改到新运行时的模式、甚至把旧确认单发给新运行时。
+		const frozenRuntime = targetNow();
+		const frozenBrief = { briefId: current.briefId, revision: current.revision };
+		if (!frozenRuntime) {
+			showNotice(t("alignment.runtimeChanged"));
+			return;
+		}
 		void (async () => {
 			const outcome = await bridge.beforeApprove(current);
+			const stillSameRuntime = () => sameAlignmentRuntime(frozenRuntime, targetNow());
 			if (outcome === "blocked") return;
-			if (outcome === "handled") {
-				// 只同步"已交给文稿轮次"的可见状态：退出对齐模式、清掉待定与错误。
-				if (sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) {
-					store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
-					store.set(pendingAtom, false);
-					store.set(errorAtom, undefined);
-				}
+			if (outcome === "proceed") {
+				// 普通开发：冻结目标仍成立才发原生批准，否则如实报运行时已变化。
+				if (stillSameRuntime()) void dispatch([command], "normal");
+				else showNotice(t("alignment.runtimeChanged"));
 				return;
 			}
-			if (sameAlignmentRuntime(expectedRuntimeOf(store, runtimeAtom, sessionId), targetNow())) void dispatch([command], "normal");
-			else showNotice(t("alignment.runtimeChanged"));
+			// handled：只表示主进程已经收取了本轮操作，**不等于**原生对齐已 approved
+			// （后台可能还在等绑定确认）。必须等到同一 frozen briefId+revision+runtime 的
+			// approved/complete 回执，才转换 UI 确认状态；超时/失败/换代保留实际状态与输入。
+			if (!stillSameRuntime()) return;
+			store.set(pendingAtom, true);
+			try {
+				await waitForAlignmentAcknowledgement({
+					read: () => store.get(runtimeAtom)?.state?.alignment ?? undefined,
+					isCurrent: stillSameRuntime,
+					subscribe: (changed) => store.sub(runtimeAtom, changed),
+					matches: (latest) => latest.briefId === frozenBrief.briefId && latest.revision === frozenBrief.revision && (latest.phase === "approved" || latest.phase === "complete"),
+				});
+				// 回执期间换代：不碰新运行时的确认状态。
+				if (!stillSameRuntime()) return;
+				store.set(setSessionComposerModeAtom, { sessionId, mode: "normal" });
+				store.set(pendingAtom, false);
+				store.set(errorAtom, undefined);
+			} catch (error) {
+				// 没有拿到回执就不假装批准成功：保留输入、如实报错。
+				if (!stillSameRuntime()) return;
+				const reason = error instanceof Error ? error.message : String(error);
+				const message = reason === "notAcknowledged" ? t("alignment.notAcknowledged") : t("alignment.actionFailed", { error: reason });
+				store.set(pendingAtom, false);
+				store.set(errorAtom, { ...frozenRuntime, message, briefId: frozenBrief.briefId, revision: frozenBrief.revision });
+				showNotice(message);
+			}
 		})();
-	}, [backend, state, runtimeAtom, presentationNow, dispatch, store, approvalBridge, sessionId, targetNow]);
+	}, [backend, state, runtimeAtom, presentationNow, dispatch, store, approvalBridge, sessionId, targetNow, pendingAtom, errorAtom]);
 	const resume = useCallback(() => {
 		if (backend !== "pi") return;
 		void dispatch([t("alignment.resumeRequest")], undefined, true);

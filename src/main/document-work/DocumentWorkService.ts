@@ -313,6 +313,12 @@ export class DocumentWorkService {
 			const active = read.value.operations[record.activeOperationId];
 			if (active && !this.isTerminal(active.state)) return workFail("RUNTIME_BUSY", true, { detail: "this work already has a run in flight" });
 		}
+		// 未知分发：无法证明上一轮是否已经在 pi 里跑过，同一个运行时上的新 attempt 一律拒绝，
+		// 直到显式取消或换绑（持久化判定，重启后仍生效）。
+		const blockingUnknown = this.deps.store.blockingUnknownOperation({ sessionId: value.expectedRuntime.sessionId, target });
+		if (blockingUnknown) {
+			return workFail("DISPATCH_UNKNOWN", true, { detail: `an earlier attempt (${blockingUnknown.attemptId}) on this runtime has an unknown outcome; cancel it or restart the session runtime before starting another round` });
+		}
 		// 同一运行时上只允许一件文稿工作：占用发生在**任何 RPC 之前**，所以两件不同工作
 		// 并发确认时，后到的那件在绑定之前就被拒（不会互相覆盖绑定）。
 		const lease = this.lease.acquire({ target, workId: value.workId, attemptId: value.attemptId });
@@ -459,7 +465,16 @@ export class DocumentWorkService {
 		if ("error" in read) return read;
 		const operation = read.value.operations[attemptId];
 		if (!operation) return workFail("WORK_NOT_FOUND", false, { detail: "the attempt does not belong to this work" });
-		if (this.isTerminal(operation.state)) return workOk(operation);
+		if (this.isTerminal(operation.state) && operation.state !== "unknown") return workOk(operation);
+		// `unknown` 是唯一"终态但可显式清理"的状态：它是保守占用（阻止同运行时的新 attempt），
+		// 用户点取消就是那条权威证据——把它记成 interrupted，释放运行时。
+		if (operation.state === "unknown") {
+			const cleared = finishOperation(this.deps.store, workId, attemptId, { state: "interrupted", code: "DISPATCH_UNKNOWN", detail: "the user cleared an unknown outcome for this attempt" }, this.now);
+			if (cleared) this.deps.emit(cleared);
+			this.lease.releaseWork(workId);
+			const afterClear = this.deps.store.readWork(workId);
+			return "error" in afterClear ? afterClear : workOk(afterClear.value.operations[attemptId]);
+		}
 		const current = await this.deps.runtime.resolveRuntime(read.value.record.sessionId);
 		// 只取消匹配的运行时：换绑后旧 attempt 的运行由新运行时自行收口，不越界中止别人的回合。
 		if (!current || current.agentId !== operation.runtime.agentId || current.runtimeGeneration !== operation.runtime.runtimeGeneration) return workFail("RUNTIME_CHANGED", true, { detail: "the runtime for this attempt is gone; the run cannot be cancelled scoped" });
