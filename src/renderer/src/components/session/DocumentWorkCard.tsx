@@ -42,7 +42,7 @@ export function DocumentWorkCard(props: { controls: SessionDocumentWorkControls 
 				<FileText size={15} aria-hidden="true" className="text-muted-foreground" />
 				<h3 className="text-control font-medium text-foreground">{view?.title ?? t("documentWork.pendingTitle")}</h3>
 				{presentation.kind !== "needsLocation" && <Badge variant="secondary">{t(KIND_COPY[presentation.kind as keyof typeof KIND_COPY] ?? "documentWork.phase.idle")}</Badge>}
-				{busy && <Loader2 size={14} className="animate-spin text-muted-foreground" aria-hidden="true" />}
+				{busy && <Loader2 size={14} className="animate-pideck-spin text-muted-foreground" aria-hidden="true" />}
 			</header>
 
 			{presentation.kind === "needsLocation" && (
