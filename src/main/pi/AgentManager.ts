@@ -43,6 +43,7 @@ import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
+import { INTERNAL_CONTROL, type InternalPromptDelivery } from "../sessions/internalPromptDelivery";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
@@ -69,7 +70,8 @@ import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityD
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { AlignmentProjection, loadEnabledAlignmentHistory, type AlignmentRuntimeIdentity } from "./AlignmentProjection";
-import { isAlignmentActive, isAlignmentReadOnlyInputAllowed, PI_DECK_ALIGNMENT_MODE_MARKER } from "../../shared/alignment";
+import { DOCUMENT_WORK_BIND_COMMAND } from "../../shared/types/documentWork";
+import { documentWorkBindingIdentity, isAlignmentActive, isAlignmentReadOnlyInputAllowed, isDocumentWorkMetadataCommandName, PI_DECK_ALIGNMENT_MODE_MARKER, parseDocumentWorkExecutionCommand, parseDocumentWorkMetadataControl } from "../../shared/alignment";
 import { latestAlignmentStateFromMessages } from "../../shared/alignment";
 import type { AlignmentState } from "../../shared/types/alignment";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
@@ -1881,7 +1883,7 @@ export class AgentManager {
 		return runtime.tab;
 	}
 
-	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
+	async sendPrompt(input: SendPromptInput & InternalPromptDelivery): Promise<SendPromptResult> {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
@@ -1899,17 +1901,47 @@ export class AgentManager {
 		const alignmentRequested = input.agentMessage?.startsWith(`${PI_DECK_ALIGNMENT_MODE_MARKER}\n`) === true;
 		const activeAlignment = this.alignmentProjection.read(input.agentId, this.alignmentIdentity(runtime));
 		if ((alignmentRequested || isAlignmentActive(activeAlignment ?? undefined)) && !isAlignmentReadOnlyInputAllowed(input.message)) {
-			return { accepted: false, error: this.translate("mainAgent.alignmentCommandBlocked") };
+			return { accepted: false, error: this.translate("mainAgent.alignmentCommandBlocked"), reason: "alignment_blocked" };
 		}
 		if (alignmentRequested || /^\/align(?:\s|$)/.test(input.message.trimStart())) {
 			const expectedIdentity = this.alignmentIdentity(runtime);
 			const loaded = await this.promptMatchesRegisteredExtensionCommand(runtime, "/align");
 			if (this.agents.get(input.agentId) !== runtime || runtime.process !== expectedIdentity.process || runtime.tab.deckSessionId !== expectedIdentity.sessionId || runtime.tab.runtimeGeneration !== expectedIdentity.runtimeGeneration || runtime.tab.sessionPath !== expectedIdentity.sessionPath) {
-				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged") };
+				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged"), reason: "runtime_changed" };
 			}
-			if (!loaded) return { accepted: false, error: this.translate("mainAgent.alignmentUnavailable") };
+			if (!loaded) return { accepted: false, error: this.translate("mainAgent.alignmentUnavailable"), reason: "extension_unavailable" };
 		}
-
+		// 文稿元数据控制（`/tpa-work bind|release|unbind|status`）：只落会话/准备元数据，是宿主自己
+		// 派发的链路（绑定 → 批准 → 释放）。只允许精确语法，并在转发前逐项核对当前 runtime 身份；
+		// 语法不符、扩展不在或身份不对都必须结构化拒绝——绝不能把载荷当成普通模型提示交出去。
+		if (isDocumentWorkMetadataCommandName(input.message)) {
+			// 元数据控制（bind/release/unbind/status）与执行命令（execute）分开分类：
+			// 前者是零执行权限的元数据，后者会触发一个模型回合，只能走同一条身份闸门。
+			const control = parseDocumentWorkMetadataControl(input.message) ?? parseDocumentWorkExecutionCommand(input.message);
+			if (!control) return { accepted: false, error: this.translate("mainAgent.documentWorkInvalidCommand"), reason: "invalid_input" };
+			const expectedIdentity = this.alignmentIdentity(runtime);
+			// 绑定身份用 pi 原生会话 id 校验（稳定 SessionRecord.id 与它不同），两套身份快照都要冻结。
+			const expectedNativeSessionId = runtime.tab.sessionId;
+			const loaded = await this.promptMatchesRegisteredExtensionCommand(runtime, DOCUMENT_WORK_BIND_COMMAND);
+			if (
+				this.agents.get(input.agentId) !== runtime ||
+				runtime.process !== expectedIdentity.process ||
+				runtime.tab.deckSessionId !== expectedIdentity.sessionId ||
+				runtime.tab.sessionId !== expectedNativeSessionId ||
+				runtime.tab.runtimeGeneration !== expectedIdentity.runtimeGeneration ||
+				runtime.tab.sessionPath !== expectedIdentity.sessionPath
+			) {
+				return { accepted: false, error: this.translate("mainAgent.alignmentRuntimeChanged"), reason: "runtime_changed" };
+			}
+			if (!loaded) return { accepted: false, error: this.translate("mainAgent.documentWorkUnavailable"), reason: "extension_unavailable" };
+			if ("payload" in control) {
+				const identity = documentWorkBindingIdentity(control.payload);
+				// 载荷声明的两套会话身份必须就是当前 runtime：别的会话的载荷不进这条会话。
+				if (!identity || identity.sessionId !== expectedIdentity.sessionId || identity.nativeSessionId !== expectedNativeSessionId) {
+					return { accepted: false, error: this.translate("mainAgent.documentWorkInvalidCommand"), reason: "invalid_input" };
+				}
+			}
+		}
 		// 解析 !/!! 前缀：与 pi 终端行为一致
 		// !command  → 执行命令并将输出发送给 LLM（excludeFromContext: false）
 		// !!command → 执行命令但不将输出发送给 LLM（excludeFromContext: true）
@@ -1965,7 +1997,12 @@ export class AgentManager {
 			// 删除按钮仍拿着乐观 id，不能再另起 UUID 导致 Message not found。
 			...(input.requestId ? { requestId: input.requestId } : {}),
 		};
-		this.addMessage(input.agentId, "user", trimmed || this.translate("session.imagePlaceholder"), Object.keys(optimisticMeta).length > 0 ? optimisticMeta : undefined, input.images);
+		// 主进程内部控制的协议命令（`/tpa-work …`、`/align approve …`）：照常校验、照常发送、
+		// 照常触发模型，但不生成乐观用户气泡——它们是宿主元数据与编码载荷，不是用户说的话。
+		// 只允许主进程内部调用方设置该选项；渲染层经 IPC 伪造的同名字段在边界被丢弃。
+		if (input[INTERNAL_CONTROL] !== true) {
+			this.addMessage(input.agentId, "user", trimmed || this.translate("session.imagePlaceholder"), Object.keys(optimisticMeta).length > 0 ? optimisticMeta : undefined, input.images);
+		}
 
 		// streamingBehavior 只在 agent 忙碌时需要；UI 可以显式传 steer/followUp 以复用 pi 队列语义。
 		// 当前端排队 flush 连续发送多条消息时，第一条会触发 agent_start 使 agent 变忙碌，
@@ -2925,6 +2962,8 @@ export class AgentManager {
 		// 这样即使工具极快完成或完整状态请求乱序，renderer 仍能稳定看到 true → false。
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			// 身份在发出时刻冻结（与渲染层信封同一处来源）：文稿域按三元组严格判忙与稳定。
+			...this.streamRuntimeTriple(agentId),
 			state: {
 				isExecutingTool,
 				executingToolName,
@@ -2949,7 +2988,7 @@ export class AgentManager {
 			state.toolStateSequence = latestToolSequence;
 			// A live snapshot/clear may arrive between getRuntimeState and this emission.
 			state.alignment = this.alignmentProjection.read(agentId, this.alignmentIdentity(runtime));
-			this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
+			this.emit(ipcChannels.agentsRuntimeState, { agentId, ...this.streamRuntimeTriple(agentId), state });
 		} catch {
 			// 运行态刷新失败不影响主流程；下一次轮询或事件会继续同步。
 		}
@@ -5919,6 +5958,7 @@ export class AgentManager {
 	private emitStreamingStatePatch(agentId: string) {
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: {
 				isStreaming: this.streamingAgents.has(agentId),
 				isExecutingTool: !!this.toolExecutingByAgent.get(agentId),
@@ -5935,6 +5975,7 @@ export class AgentManager {
 	private emitContextOverflowState(agentId: string, contextOverflow: boolean) {
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: { contextOverflow },
 		});
 	}
@@ -5946,6 +5987,7 @@ export class AgentManager {
 		// of waiting for the next asynchronous get_state snapshot.
 		this.emit(ipcChannels.agentsRuntimeState, {
 			agentId,
+			...this.streamRuntimeTriple(agentId),
 			state: { isTurnActive },
 		});
 	}

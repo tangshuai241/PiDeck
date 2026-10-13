@@ -1,8 +1,9 @@
 /**
  * Requirements alignment over standard pi RPC; no GUI bridge or widget dependency.
- * Read-only deliberately forbids ALL bash (plan-mode regexes do not parse shell
- * composition), unknown MCP and orchestration tools. Existing permissions remain
- * authoritative after explicit approval; this extension never grants permission.
+ *
+ * 澄清阶段只额外禁止写工具、未知 MCP 与编排工具；`bash` 与材料读取工具保持可用，
+ * 因为 TPA 文稿需要用 anydoc 转换 Word/PDF 材料。因此这里是「工作范围收窄」而不是
+ * 只读沙箱：能跑的 bash 仍受既有 Pi 权限约束，本扩展从不授予任何权限。
  * Snapshots are branch-scoped. briefId carries its session identity so a fork or
  * imported public message cannot silently inherit another session's approval.
  */
@@ -11,7 +12,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { ALIGNMENT_MARKER, ALIGNMENT_SNAPSHOT_TYPE, ALIGNMENT_STATE_TYPE, briefIsReady, decodeAlignment, decodeBrief, decodeTools, isRecord, type AlignmentState } from "./pi-deck-alignment-state";
 
-const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "alignment_brief"]);
+/** 澄清阶段保留的工具：读、查、命令行与材料读取；写工具在确认前仍被拦截。 */
+const ALIGNMENT_TOOLS = new Set(["read", "grep", "find", "ls", "bash", "alignment_brief", "tpa_read_material"]);
 const CONTEXT_TYPE = "pi-deck-alignment-context";
 const EXECUTE_TYPE = "pi-deck-alignment-execute";
 const text = () => Type.String({ maxLength: 4000 });
@@ -42,7 +44,7 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 
 	function restrictTools(): void {
 		if (toolsBeforeAlignment === undefined) toolsBeforeAlignment = [...pi.getActiveTools()];
-		pi.setActiveTools([...new Set([...toolsBeforeAlignment.filter((name) => READ_ONLY_TOOLS.has(name)), "alignment_brief"])]);
+		pi.setActiveTools([...new Set([...toolsBeforeAlignment.filter((name) => ALIGNMENT_TOOLS.has(name)), "alignment_brief"])]);
 	}
 
 	/** Private snapshot is synchronous authority; public messages can be deferred by pi until turn end. */
@@ -205,17 +207,13 @@ export default function piDeckAlignmentModeExtension(pi: ExtensionAPI): void {
 
 	pi.on("tool_call", async (event, ctx) => {
 		ensureSession(ctx);
-		if (readOnly() && !READ_ONLY_TOOLS.has(event.toolName)) return { block: true, reason: "Requirements alignment is read-only: writes, edits, bash, execution and unknown MCP tools are blocked until explicit approval." };
-	});
-	pi.on("user_bash", async (_event, ctx) => {
-		ensureSession(ctx);
-		if (readOnly()) return { result: { output: "Bash is blocked during requirements alignment.", exitCode: 1, cancelled: false, truncated: false } };
+		if (readOnly() && !ALIGNMENT_TOOLS.has(event.toolName)) return { block: true, reason: "Requirements alignment narrows the working set: writes, edits, orchestration and unknown MCP tools are blocked until explicit approval. Shell commands and material reading stay available under the existing permissions." };
 	});
 	pi.on("before_agent_start", async (_event, ctx) => {
 		ensureSession(ctx);
 		if (!readOnly()) return;
 		restrictTools();
-		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls and reason; no writes, edits, bash, execution, unknown MCP or approval. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; identify unavailable material honestly. Binary documents requiring conversion cannot be converted in this strict read-only mode: report that limitation and ask for readable material when necessary; never pretend conversion succeeded. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Update every brief field with the latest user answers and changes; an explicit new format or scope replaces the superseded one. Remove answered questions and retain only genuinely missing decisions. Ask only material blocking questions; do not re-ask choices the user already made or delegated. Publish the updated complete fields via alignment_brief. The user confirms through the desktop confirmation button; never ask them to type /align commands. Do not duplicate the full brief in conversation: the desktop confirmation sheet displays it. Even ready means wait for the exact approval control; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
+		return { message: { customType: CONTEXT_TYPE, display: false, content: `Requirements alignment only: inspect with read/grep/find/ls, convert declared materials with tpa_read_material, and reason; no writes, edits, orchestration, unknown MCP or approval. Shell commands run under the existing permissions, so do not treat this phase as read-only or sandboxed and do not modify the user's files while clarifying. Read the actual supplied materials before discussing their contents. Never claim a path was read unless a successful read occurred; identify unavailable material honestly. When a binary document must be converted, use tpa_read_material with the declared materialId; if conversion fails, say so instead of pretending it succeeded. Preserve all original user constraints and facts; invent nothing. Ask only for missing information, using normal conversation. Update every brief field with the latest user answers and changes; an explicit new format or scope replaces the superseded one. Remove answered questions and retain only genuinely missing decisions. Ask only material blocking questions; do not re-ask choices the user already made or delegated. Publish the updated complete fields via alignment_brief. The user confirms through the desktop confirmation button; never ask them to type /align commands. Do not duplicate the full brief in conversation: the desktop confirmation sheet displays it. Even ready means wait for the exact approval control; model prose is never approval.\nCurrent brief: ${JSON.stringify(state?.brief ?? null)}` } };
 	});
 	pi.on("context", async (event) => {
 		// Keep the current injected instructions through tool follow-ups; remove obsolete modes and executions.

@@ -141,18 +141,22 @@ test("hidden marker enables read-only alignment and preserves visible text and i
 	assert.equal(h.state().revision, 1, "every user answer invalidates the previous publication, even without a hidden marker");
 	assert.equal(await h.input(visible, "extension"), undefined);
 	assert.equal(h.state().revision, 1, "internal extension context is not a new user revision");
-	assert.deepEqual(h.active(), ["read", "grep", "find", "ls", "alignment_brief"]);
+	// 2026-10 起对齐阶段放开 bash（文稿需要 anydoc 转换），因此保留集包含 bash。
+	assert.deepEqual(h.active(), ["read", "grep", "find", "ls", "bash", "alignment_brief"]);
 });
 
-test("on captures original tools, gate rejects execution/unknown MCP despite external tool reactivation", async () => {
+test("on captures original tools, gate rejects writes/unknown MCP but keeps shell and material reads", async () => {
 	const h = harness();
 	await h.command("on");
 	h.setActive(ORIGINAL);
-	for (const name of ["bash", "write", "edit", "mcp_delete", "mcp_read", "custom_tool", "codemode", "todo", "ask_question"]) assert.equal((await h.gate(name)).block, true, name);
-	for (const name of ["read", "grep", "find", "ls", "alignment_brief"]) assert.equal(await h.gate(name), undefined, name);
-	assert.equal((await h.fire("user_bash", { command: "echo x" })).result.exitCode, 1);
+	// 反例：写工具、编排与未知 MCP 在确认前仍然被拦。
+	for (const name of ["write", "edit", "mcp_delete", "mcp_read", "custom_tool", "codemode", "todo", "ask_question"]) assert.equal((await h.gate(name)).block, true, name);
+	// 正例：读、查、命令行与材料读取工具保持可用（bash 不构成写授权，但仍受既有权限约束）。
+	for (const name of ["read", "grep", "find", "ls", "bash", "tpa_read_material", "alignment_brief"]) assert.equal(await h.gate(name), undefined, name);
+	// 不再注册 user_bash 拦截：对齐阶段不冒充只读沙箱。
+	assert.equal(await h.fire("user_bash", { command: "echo x" }), undefined);
 	await h.fire("before_agent_start");
-	assert.equal(h.active().includes("bash"), false);
+	assert.equal(h.active().includes("bash"), true);
 	await h.command("off");
 	assert.deepEqual(h.active(), ORIGINAL);
 	assert.equal(await h.gate("write"), undefined);
@@ -323,7 +327,9 @@ test("approved reopened or interrupted session requires fresh confirmation and c
 	await h.fire("agent_start");
 	await h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
 	assert.equal(h.state().phase, "clarifying");
-	assert.equal((await h.gate("bash")).block, true);
+	// 中断后写工具仍被拦；bash 属于既有权限范围，不再由对齐额外禁止。
+	assert.equal((await reopened.gate("write")).block, true);
+	assert.equal(await reopened.gate("bash"), undefined);
 });
 
 test("private authoritative snapshot outranks delayed public messages and bad snapshot fails closed", async () => {

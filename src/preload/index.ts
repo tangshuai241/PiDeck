@@ -6,6 +6,7 @@ import type { AnnouncementState } from "../shared/types/announcement";
 import type { HostPluginContext, HostPluginDesktopApi } from "../shared/types/hostPlugin";
 import type { PiDeckMcpDesktopApi } from "../shared/types/piDeckMcp";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
+import type { AutoReviseResult, DocumentWorkChangedEvent, DocumentWorkOperation, DocumentWorkPrepareInput, DocumentWorkStartInput, DocumentWorkView, PreparedWork, WorkResult as DocumentWorkResult } from "../shared/types/documentWork";
 import type { ModelTraceRecord } from "../shared/types/bridge";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { DshHomeSharingState } from "../shared/types/dshHome";
@@ -1654,6 +1655,36 @@ const api = {
 		updateSettings: (patch: UpdateAutomationSettingsInput) => ipcRenderer.invoke(ipcChannels.automationUpdateSettings, patch) as Promise<AutomationSettings>,
 		previewCron: (expression: string, count?: number) => ipcRenderer.invoke(ipcChannels.automationPreviewCron, expression, count) as Promise<AutomationCronPreview>,
 		onChanged: (callback: (event: AutomationChangedEvent) => void) => subscribe<AutomationChangedEvent>(ipcChannels.automationChanged, callback),
+	},
+
+	// ── TPA 独立文稿（工作/准备/成果归档） ──
+	// 边界：渲染层只传 ID 与枚举，不传绝对输出路径、命令或检查结论；
+	// 授权引用由主进程用权威对齐快照或最新用户轮复核。
+	documentWork: {
+		/** 建立工作记录（同一会话只有一件；重复提交幂等）。 */
+		create: (input: { requestId: string; sessionId: string; sourceTurnId: string; title?: string; outputRootId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkCreate, input) as Promise<DocumentWorkResult<DocumentWorkView>>,
+		/** 读取单件工作快照。 */
+		get: (input: { workId: string; sessionId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkGet, input) as Promise<DocumentWorkResult<DocumentWorkView>>,
+		/** 列出本会话工作快照（失败静默为空数组，读取路径不抛裸异常）。 */
+		list: (sessionId: string) => ipcRenderer.invoke(ipcChannels.documentWorkList, sessionId) as Promise<DocumentWorkView[]>,
+		/** 冻结本轮准备：不调模型，只落盘要求/材料/基稿/范围/输出位置。 */
+		prepare: (input: DocumentWorkPrepareInput) => ipcRenderer.invoke(ipcChannels.documentWorkPrepare, input) as Promise<DocumentWorkResult<PreparedWork>>,
+		/** 持久操作并分发：授权在主进程复核，渲染层不能自证批准。 */
+		start: (input: DocumentWorkStartInput) => ipcRenderer.invoke(ipcChannels.documentWorkStart, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
+		/** 明确改稿自动接续：主进程读真实用户当前轮后决定是否接续。 */
+		autoRevise: (input: { sessionId: string; requestId: string; sourceTurnId?: string }) => ipcRenderer.invoke(ipcChannels.documentWorkAutoRevise, input) as Promise<DocumentWorkResult<AutoReviseResult>>,
+		/** 查询原请求的分发/运行/检查结果；未知结果不重新制作。 */
+		operation: (input: { workId: string; requestId: string; sessionId: string }) => ipcRenderer.invoke(ipcChannels.documentWorkOperation, input) as Promise<DocumentWorkResult<DocumentWorkOperation>>,
+		/** 只取消本轮；不影响其他会话或轮次。 */
+		cancel: (input: { requestId: string; workId: string; expectedRevision: number; attemptId: string; expectedRuntime: SessionRuntimeTarget }) => ipcRenderer.invoke(ipcChannels.documentWorkCancel, input) as Promise<DocumentWorkResult<{ attemptId: string }>>,
+		/** 输出根授权：打开系统目录选择器，返回可复用的 ID 与显示名。 */
+		chooseOutputRoot: () => ipcRenderer.invoke(ipcChannels.documentWorkChooseOutputRoot) as Promise<DocumentWorkResult<{ outputRootId: string; label: string; path: string }>>,
+		/** 本轮材料授权：打开系统文件选择器（多选）。 */
+		chooseMaterials: (sessionId: string) => ipcRenderer.invoke(ipcChannels.documentWorkChooseMaterials, sessionId) as Promise<DocumentWorkResult<{ paths: string[]; count: number }>>,
+		/** 登记聊天里已经引用/拖入的材料路径：不必再选一次，但主进程会独立复核。 */
+		registerMaterials: (input: { sessionId: string; paths: string[] }) => ipcRenderer.invoke(ipcChannels.documentWorkRegisterMaterials, input) as Promise<DocumentWorkResult<{ paths: string[]; count: number }>>,
+		/** 工作变化推送；preload 返回退订函数。 */
+		onChanged: (callback: (event: DocumentWorkChangedEvent) => void) => subscribe<DocumentWorkChangedEvent>(ipcChannels.documentWorkChanged, callback),
 	},
 
 	// ── CUA 审批门 ──

@@ -1,3 +1,4 @@
+import { INTERNAL_CONTROL, sanitizeRendererPromptInput, type InternalPromptDelivery } from "./sessions/internalPromptDelivery";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -349,6 +350,10 @@ import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
 import { registerScratchPadIpc } from "./ipc/scratchPadIpc";
+import { registerDocumentWorkIpc } from "./ipc/documentWorkIpc";
+import { createDocumentWorkDomain, type DocumentWorkDomain } from "./document-work";
+import { isPathInsideAnyRoot } from "./document-work/DocumentWorkService";
+import { directoryLabel, resolveRealPath } from "./document-work/documentWorkPaths";
 import { registerPasteFilesIpc } from "./ipc/pasteFilesIpc";
 import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
@@ -467,6 +472,8 @@ let gitService: GitService;
 let gitRefsWatcher: GitRefsWatcher;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
+/** TPA 独立文稿域：自有元数据/归档/检查，只经既有 RPC 与既有会话协调器执行。 */
+let documentWorkDomain: DocumentWorkDomain | null = null;
 /** 全局模型 capability snapshot；仅在启动/配置变更时临时拉起 Pi。 */
 let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
@@ -714,6 +721,8 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 	};
 	sessionRuntimeCoordinator.observeRuntimeEvent(event);
 	automationRunCoordinator?.observeRuntimeEvent(event);
+	// 文稿域的稳定完成判据与服务端对齐快照都从这条既有事件流读取：不新增第二条通道。
+	if (sourceChannel === ipcChannels.agentsRuntimeState) documentWorkDomain?.observeRuntimeState(payload);
 	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
@@ -2348,7 +2357,7 @@ function currentFeishuLocale(): FeishuLocale {
 	return normalizeFeishuLocale(currentMainProcessLocale());
 }
 
-async function sendAgentPromptWithIntegrations(input: SendPromptInput): Promise<SendPromptResult> {
+async function sendAgentPromptWithIntegrations(input: SendPromptInput & InternalPromptDelivery): Promise<SendPromptResult> {
 	// 多后端路由：非 pi 后端（dsh/未来新增后端）不经过 pi 专属的飞书/扩展链路，
 	// 按 agentId 交给合成网关路由到所属后端网关（pi 后端继续走下方集成链路）。
 	const gateway = compositeAgentGateway;
@@ -2593,6 +2602,36 @@ function registerIpc() {
 	registerResourceImportIpc(resourceImportManager);
 
 	registerScratchPadIpc({ appLogger });
+
+	// TPA 独立文稿：输出根与材料路径都只能来自用户经系统选择器的授权结果。
+	registerDocumentWorkIpc({
+		service: documentWorkDomain!.service,
+		getWindow: () => mainWindow,
+		registerOutputRoot: async (realPath) => {
+			const resolved = await resolveRealPath(realPath);
+			if (!resolved) return undefined;
+			return documentWorkDomain?.store.registerOutputRoot(resolved, directoryLabel(resolved));
+		},
+		registerChatMaterials: async (sessionId, paths) => {
+			// 授权判据：路径必须逐字出现在本会话的用户消息里（用户自己贴的或拖入的），
+			// 且真实路径落在项目目录内。模型或渲染层凭空给出的路径拿不到授权。
+			const target = sessionRuntimeCoordinator?.getTarget(sessionId);
+			if (!target) return [];
+			const messages = agentManager.getMessages(target.agentId);
+			const userText = messages.filter((message) => message.role === "user").map((message) => message.text);
+			const record = sessionCatalog.getRecord(sessionId);
+			const projectPath = record ? projectStore.get(record.projectId)?.path : undefined;
+			const accepted: string[] = [];
+			for (const candidate of paths) {
+				if (!userText.some((text) => text.includes(candidate))) continue;
+				const resolved = await resolveRealPath(candidate);
+				if (!resolved) continue;
+				if (projectPath && (await isPathInsideAnyRoot([projectPath], resolved))) accepted.push(resolved);
+			}
+			if (accepted.length) documentWorkDomain?.service.allowMaterials(sessionId, accepted);
+			return accepted;
+		},
+	});
 
 	// 通知历史落盘：showNotice 单点记录后推送主进程，重启可回灌（渲染层环形缓冲只服务当次会话）
 	registerNoticeHistoryIpc(
@@ -4429,7 +4468,8 @@ app
 				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, undefined, { projectId: entry.projectId });
 			},
 			sendSessionPrompt: async (input) => {
-				const result = await sessionRuntimeCoordinator.send(input);
+				// Web/远程面的入参会把 HTTP body 摊进来：先过白名单，伪造的内部投递标记被丢弃。
+				const result = await sessionRuntimeCoordinator.send(sanitizeRendererPromptInput(input));
 				if (result.agentId) {
 					const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
 					if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
@@ -4860,6 +4900,66 @@ app
 		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
 		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
 		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
+
+		// 检查 worker 走 electron-vite 的 ?nodeWorker 产物：可 terminate，不做进程内回退。
+		const { installInspectionWorkerFactory } = await import("./document-work/inspectionWorkerBootstrap");
+		installInspectionWorkerFactory();
+		documentWorkDomain = createDocumentWorkDomain({
+			userDataPath: app.getPath("userData"),
+			runtimePort: {
+				readRuntime: async (sessionId) => {
+					const target = sessionRuntimeCoordinator.getTarget(sessionId);
+					if (!target) return undefined;
+					const result = await sessionRuntimeCoordinator.getRuntimeState(target);
+					if (!result.ok) return undefined;
+					const tab = agentManager.list().find((candidate) => candidate.id === target.agentId);
+					return {
+						target,
+						status: tab?.status ?? "idle",
+						state: result.value.value,
+						messages: agentManager.getMessages(target.agentId),
+						// 稳定 SessionRecord.id 与 pi 原生会话 id 不同：绑定载荷必须同时带两者。
+						...(tab?.sessionId ? { nativeSessionId: tab.sessionId } : {}),
+					};
+				},
+				dispatch: async (input) => {
+					// 文稿链路的宿主协议命令（/tpa-work bind|execute|release、/align approve）不是用户发言：
+					// 照常发送与触发模型，但不生成乐观用户气泡（主进程内部投递选项）。
+					const result = await sessionRuntimeCoordinator.send({ sessionId: input.sessionId, requestId: input.requestId, message: input.message, expectedRuntime: input.expectedRuntime, [INTERNAL_CONTROL]: true });
+					if (result.accepted) return { accepted: true, unknown: false };
+					// reason 是宿主给失败分类的唯一来源：文稿域据此结算错误码，不再一律写成「进程变了」。
+					return { accepted: false, unknown: result.delivery === "unknown", error: result.error, ...(result.reason ? { reason: result.reason } : {}) };
+				},
+				abort: async (input) => {
+					const result = await sessionRuntimeCoordinator.abortRuntime(input.expectedRuntime);
+					return result.ok ? { accepted: true, unknown: false } : { accepted: false, unknown: false, error: result.error.code };
+				},
+				hasDispatchInFlight: (sessionId) => sessionRuntimeCoordinator.hasDispatchInFlight(sessionId),
+				subscribeOutputs: (listener) => agentManager.onOutput(listener),
+				subscribePiEvents: (listener) => agentManager.addLocalEventListener(listener),
+			},
+			materials: {
+				// 材料路径只接受用户经文件选择器授权的结果，或会话项目目录内的文件。
+				isAllowed: async (sessionId, hostPath) => {
+					if (documentWorkDomain?.service.allowedMaterialPaths(sessionId).includes(hostPath)) return true;
+					const record = sessionCatalog.getRecord(sessionId);
+					const projectPath = record ? projectStore.get(record.projectId)?.path : undefined;
+					if (!projectPath) return false;
+					return isPathInsideAnyRoot([projectPath], hostPath);
+				},
+			},
+			onChanged: (event) => {
+				const window = mainWindow;
+				if (window && !window.isDestroyed()) window.webContents.send(ipcChannels.documentWorkChanged, event);
+			},
+			logger: appLogger,
+		});
+		// 进程重启后不自动重放：进行中的操作统一结算成 interrupted / unknown。
+		void documentWorkDomain.service.recoverOnStartup().catch((error) => appLogger.warn("document-work", "Startup recovery failed", { error: error instanceof Error ? error.message : String(error) }));
+		quitCleanup.register("document-work", () => {
+			void documentWorkDomain?.dispose();
+			documentWorkDomain = null;
+		});
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({

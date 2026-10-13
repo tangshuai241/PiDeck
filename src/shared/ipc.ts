@@ -1135,4 +1135,30 @@ export const ipcChannels = {
 	acpSessionConfigSet: "acp:session-config-set",
 	/** 主→渲染：configOptions 变更（set 响应/config_option_update 通知）。 */
 	acpSessionConfigChanged: "acp:session-config-changed",
+
+	// ===== TPA 独立文稿（工作/准备/成果归档） =====
+	/** 建立工作记录（幂等；不启动制作）。 */
+	documentWorkCreate: "document-work:create",
+	/** 读取单件工作的有界快照。 */
+	documentWorkGet: "document-work:get",
+	/** 列出本会话的工作快照。 */
+	documentWorkList: "document-work:list",
+	/** 冻结本轮准备（要求、材料、基稿、范围、输出位置），不调模型。 */
+	documentWorkPrepare: "document-work:prepare",
+	/** 持久操作并分发到当前 Pi；授权不在渲染层校验。 */
+	documentWorkStart: "document-work:start",
+	/** 普通聊天里的明确改稿：判定与接续都在主进程，渲染层只报告有新用户消息。 */
+	documentWorkAutoRevise: "document-work:auto-revise",
+	/** 查询原分发的运行与检查结果。 */
+	documentWorkOperation: "document-work:operation",
+	/** 只取消本轮尝试；不取消其他会话或轮次。 */
+	documentWorkCancel: "document-work:cancel",
+	/** 用户经系统选择器授权输出根。 */
+	documentWorkChooseOutputRoot: "document-work:choose-output-root",
+	/** 用户经系统选择器授权本轮材料。 */
+	documentWorkChooseMaterials: "document-work:choose-materials",
+	/** 登记聊天里已经引用/拖入的材料路径（主进程独立复核，不信任渲染层授权）。 */
+	documentWorkRegisterMaterials: "document-work:register-materials",
+	/** 主→渲染：工作记录变化（按 sessionId 过滤）。 */
+	documentWorkChanged: "document-work:changed",
 } as const;

@@ -1,0 +1,249 @@
+/**
+ * 文稿扩展（pi 侧）：绑定命令、成果候选汇报、改稿意图声明与上下文清理。
+ *
+ * 用假 pi API 驱动注册表；不启动真实 pi，也不调用模型。断言的是扩展的对外行为：
+ * 哪些载荷被接受、哪些必须拒绝、候选是否只落在本轮 staging。
+ */
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+
+const require = createRequire(import.meta.url);
+const ROOT = process.cwd();
+const types = loadTsCommonJs(`${ROOT}/resources/extensions/pi-deck-document-work-types.ts`);
+const extension = loadTsCommonJs(`${ROOT}/resources/extensions/pi-deck-document-work.ts`, { stubs: { typebox: require("typebox") } }).default;
+
+const plain = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const SESSION = "session-a";
+
+function binding(overrides = {}) {
+	return {
+		schemaVersion: 1,
+		workId: "dw_abc",
+		attemptId: "at_abc",
+		preparationId: "pr_abc",
+		digest: "a".repeat(64),
+		// 稳定 SessionRecord.id 与 pi 原生会话 id 不同：绑定校验必须用后者。
+		sessionId: "catalog_stable_session",
+		nativeSessionId: SESSION,
+		kind: "create_document",
+		workDirectory: "C:\\out\\dw_abc",
+		stagingDirectory: "C:\\out\\dw_abc\\staging\\at_abc",
+		materialCacheDirectory: "C:\\userData\\cache",
+		materials: [{ materialId: "m1", label: "材料.docx", path: "C:\\in\\材料.docx", digest: "b".repeat(64) }],
+		scope: { summary: "写第二章", sections: ["第二章"], preserve: ["保留结论"] },
+		requirements: { summary: "输出报告" },
+		...overrides,
+	};
+}
+
+/** 假 pi：只实现扩展真正用到的注册面，并保留 branch 供恢复路径使用。 */
+function harness({ entries = [], session = SESSION, stagingDirectory } = {}) {
+	const commands = new Map();
+	const tools = new Map();
+	const messages = [];
+	const entriesOut = [];
+	const notifications = [];
+	let branch = clone(entries);
+	let currentSession = session;
+	let active = [];
+	const ctx = {
+		hasUI: false,
+		mode: "rpc",
+		isIdle: () => true,
+		hasPendingMessages: () => false,
+		ui: { notify: (message) => notifications.push(message) },
+		sessionManager: {
+			getSessionId: () => currentSession,
+			getBranch: () => clone(branch),
+			// 真实 pi 的 `getEntries()` 返回整个会话文件的条目：执行权判定要用它核对历史。
+			getEntries: () => clone(branch),
+		},
+	};
+	extension({
+		on: () => {},
+		registerCommand: (name, value) => commands.set(name, value),
+		registerTool: (value) => tools.set(value.name, value),
+		getActiveTools: () => [...active],
+		setActiveTools: (names) => {
+			active = [...names];
+		},
+		appendEntry: (customType, data) => {
+			const entry = { type: "custom", customType, data: clone(data) };
+			entriesOut.push(entry);
+			branch.push(entry);
+		},
+		sendMessage: (message) => {
+			messages.push(clone(message));
+			branch.push(clone({ type: "custom_message", ...message }));
+		},
+	});
+	const fire = (name, params) => tools.get(name).execute("call", params, undefined, undefined, ctx);
+	return {
+		commands,
+		tools,
+		messages,
+		entriesOut,
+		notifications,
+		ctx,
+		fire,
+		command: (args) => commands.get("tpa-work").handler(args, ctx),
+		state: () => messages.filter((item) => item.customType === "pi-deck-document-work-state").at(-1)?.details.documentWork,
+		switch: (id, nextEntries) => {
+			currentSession = id;
+			branch = clone(nextEntries);
+		},
+		stagingDirectory,
+	};
+}
+
+test("绑定按 pi 原生会话 id 校验：稳定 SessionRecord.id 不同不影响，原生不一致才拒绝", () => {
+	const encode = (payload) => Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+	const sameNative = harness();
+	// sessionId（稳定目录 id）与原生 id 不同：这是新建草稿的正常形态，必须绑定成功。
+	sameNative.command(`bind ${encode(binding({ sessionId: "catalog_stable_session" }))}`);
+	assert.equal(sameNative.state().phase, "bound");
+	assert.equal(sameNative.state().sessionId, "catalog_stable_session");
+	assert.equal(sameNative.notifications.length, 0, "稳定 id 与原生 id 不同不应被当成跨会话");
+
+	const foreignNative = harness({ session: "session-b" });
+	foreignNative.command(`bind ${encode(binding())}`);
+	assert.equal(foreignNative.state(), undefined);
+	assert.equal(foreignNative.notifications.length, 1, "原生会话 id 不一致必须拒绝");
+});
+
+test("bind 命令接受主进程构造的载荷并发布绑定状态；越界或跨会话载荷被拒", () => {
+	const h = harness();
+	const encoded = types.encodeForTest ? undefined : undefined;
+	void encoded;
+	const command = (payload) => h.command(`bind ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`);
+	const valid = binding();
+	command(valid);
+	assert.equal(h.state().phase, "bound");
+	assert.equal(h.state().workId, "dw_abc");
+	assert.equal(h.entriesOut.filter((entry) => entry.customType === "tpa-document-work-binding").length, 1);
+
+	const broken = harness();
+	broken.command(`bind ${Buffer.from(JSON.stringify(binding({ stagingDirectory: "relative" })), "utf8").toString("base64url")}`);
+	assert.equal(broken.state(), undefined, "相对 staging 路径必须拒绝");
+});
+
+test("tpa_artifact_report 只接受本轮 staging 内的非空文件，且每次尝试只汇报一次", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-docwork-ext-"));
+	try {
+		const staging = join(root, "staging", "at_abc");
+		mkdirSync(staging, { recursive: true });
+		writeFileSync(join(staging, "out.md"), "# 成果\n", "utf8");
+		const h = harness({ stagingDirectory: staging });
+		h.command(`bind ${Buffer.from(JSON.stringify(binding({ stagingDirectory: staging })), "utf8").toString("base64url")}`);
+
+		const missing = await h.fire("tpa_artifact_report", { summary: "s", artifacts: [{ relativePath: "nope.md", role: "primary" }], risks: [] });
+		assert.equal(missing.details.documentWork.ok, false);
+		assert.equal(h.state().phase, "bound", "无效候选不得改写绑定状态");
+
+		const ok = await h.fire("tpa_artifact_report", { summary: "初稿", artifacts: [{ relativePath: "out.md", role: "primary" }], risks: ["未核对"] });
+		assert.equal(ok.details.documentWork.ok, true);
+		assert.equal(h.state().phase, "reported");
+		assert.equal(h.state().report.artifacts[0].relativePath, "out.md");
+		assert.equal(h.entriesOut.filter((entry) => entry.customType === "tpa-document-work-report").length, 1);
+
+		// 同一尝试不允许覆盖已被检查的候选。
+		const again = await h.fire("tpa_artifact_report", { summary: "改口径", artifacts: [{ relativePath: "out.md", role: "primary" }], risks: [] });
+		assert.equal(again.details.documentWork.ok, false);
+		assert.equal(again.details.documentWork.reason, "already_reported");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("未绑定时汇报工具如实返回失败，不伪造成功", async () => {
+	const h = harness();
+	const reported = await h.fire("tpa_artifact_report", { summary: "s", artifacts: [{ relativePath: "a.md", role: "primary" }], risks: [] });
+	assert.equal(reported.details.documentWork.ok, false);
+	assert.equal(reported.details.documentWork.reason, "no_work");
+	const intent = await h.fire("tpa_work_revise", { instruction: "改标题", sections: [], preserve: [] });
+	assert.equal(intent.details.documentWork.reason, "no_work");
+});
+
+test("tpa_work_revise 用最新用户轮正文指纹声明意图，并在无用户轮时不动作", async () => {
+	const h = harness();
+	const encodedBind = Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url");
+	h.command(`bind ${encodedBind}`);
+	h.switch(SESSION, [...h.ctx.sessionManager.getBranch(), { type: "message", id: "turn-7", message: { role: "user", content: [{ type: "text", text: "把第二节改短一点" }] } }]);
+	// 会话被 switch 置换了分支，重新绑定以恢复内存状态。
+	h.command(`bind ${encodedBind}`);
+	const result = await h.fire("tpa_work_revise", { instruction: "把第二节改短一点", sections: ["第二节"], preserve: ["保留结论"] });
+	assert.equal(result.details.documentWork.ok, true);
+	const intent = h.messages.filter((item) => item.customType === "pi-deck-document-revision-intent").at(-1);
+	assert.equal(intent.details.documentWorkIntent.sourceTurnId, "turn-7");
+	assert.match(intent.details.documentWorkIntent.sourceTurnHash, /^[0-9a-f]{64}$/);
+	assert.equal(intent.display, false, "意图消息不得出现在可见历史里");
+
+	const noTurn = harness();
+	noTurn.command(`bind ${encodedBind}`);
+	const blocked = await noTurn.fire("tpa_work_revise", { instruction: "改标题", sections: [], preserve: [] });
+	assert.equal(blocked.details.documentWork.ok, false);
+	assert.equal(blocked.details.documentWork.reason, "no_turn");
+});
+
+test("绑定与汇报记录可从活动分支恢复，并且恢复后重新发布状态", () => {
+	const h = harness();
+	h.command(`bind ${Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url")}`);
+	const history = h.ctx.sessionManager.getBranch();
+	const reopened = harness({ entries: history });
+	// 重新创建扩展后走 session 恢复路径：这里直接以同一分支构造新实例并重新绑定。
+	reopened.command(`bind ${Buffer.from(JSON.stringify(binding()), "utf8").toString("base64url")}`);
+	assert.equal(reopened.state().phase, "bound");
+	assert.equal(reopened.state().attemptId, "at_abc");
+	assert.match(reopened.messages.at(-1).customType, /pi-deck-document-work-state/);
+});
+
+test("扩展镜像的绑定与候选解析与主进程 shared 判定一致", () => {
+	assert.equal(types.decodeBinding(binding()).workId, "dw_abc");
+	assert.equal(types.decodeBinding(binding({ kind: "revise_document" })).kind, "revise_document");
+	assert.equal(types.decodeBinding(binding({ materials: [{ materialId: "m1", label: "x", path: "relative", digest: "b".repeat(64) }] })), undefined);
+	assert.equal(plain(types.decodeArtifactCandidate({ reportId: "rp", artifacts: [{ relativePath: "a/b.docx", role: "primary" }], summary: "", risks: [] })).artifacts.length, 1);
+	assert.equal(types.decodeArtifactCandidate({ reportId: "rp", artifacts: [{ relativePath: "../x.docx", role: "primary" }], summary: "", risks: [] }), undefined);
+});
+
+test("宿主守卫放行的元数据控制就是扩展处理的那几条，且共享编码的载荷能被扩展解开", () => {
+	const policy = loadTsCommonJs(`${ROOT}/src/shared/alignment.ts`);
+	const shared = loadTsCommonJs(`${ROOT}/src/shared/documentWork.ts`);
+	const h = harness();
+
+	// 共享编码器（主进程真实载荷来源）→ 扩展解码器：两端对同一份 wire 格式负责。
+	const encoded = shared.encodeBindingPayload(binding());
+	assert.equal(typeof encoded, "string");
+	assert.equal(shared.decodeBindingPayload(encoded).workId, "dw_abc");
+	h.command(`bind ${encoded}`);
+	assert.equal(h.state().phase, "bound", "主进程编码出的载荷必须能被扩展绑定");
+
+	// 守卫只放行这四种动作；扩展对 bind 之外的三条都必须有确定行为（status 会回执，release/unbind 静默清理）。
+	assert.equal(policy.parseDocumentWorkMetadataControl(`/tpa-work bind ${encoded}`)?.action, "bind");
+	for (const action of ["release", "unbind", "status"]) {
+		assert.equal(policy.parseDocumentWorkMetadataControl(`/tpa-work ${action}`)?.action, action);
+	}
+	const before = h.notifications.length;
+	h.command("status");
+	assert.equal(h.notifications.length, before + 1);
+	assert.match(h.notifications.at(-1), /dw_abc/);
+	h.command("release");
+	h.command("unbind");
+	// 守卫放行的动作都不得在扩展里变成「未知命令」类的静默失败：release/unbind 之后绑定仍在（发布状态可查）。
+	assert.equal(h.state().phase, "bound");
+
+	// 反向：守卫拒绝的形态，扩展侧也不该把它们当作有效绑定（多余参数/未知动作不产生绑定）。
+	const broken = harness();
+	broken.command(`bind ${encoded} extra`);
+	// 扩展会把多余参数拼回载荷（rest.join("")）；拼出来的字符串解不开 → 必须拒绝绑定。
+	assert.equal(broken.state(), undefined);
+	const unknownAction = harness();
+	unknownAction.command("unknown");
+	assert.equal(unknownAction.state(), undefined);
+	assert.equal(unknownAction.notifications.length, 0);
+});
