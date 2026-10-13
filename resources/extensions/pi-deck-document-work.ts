@@ -29,6 +29,8 @@ import {
 } from "./pi-deck-document-work-types";
 
 const CONTEXT_TYPE = "pi-deck-document-work-context";
+/** 非活动关联的协议提示（独立类型：活动轮/未绑定时都不注入）。 */
+const INACTIVE_TYPE = "pi-deck-document-work-inactive";
 const REPORT_BYTE_BUDGET = 64 * 1024 * 1024;
 
 /** 与主进程 `hashTurnText` 完全一致：用正文指纹绑定授权来源，而不是消息 ID 生成方案。 */
@@ -240,6 +242,38 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 只改声明的范围；成果写入本轮 staging 并调用 tpa_artifact_report 汇报候选。`;
 	}
 
+	/**
+	 * 非活动关联的协议提示：会话里有一件已知的文稿工作，但**当前没有活动执行轮**
+	 * （历史恢复、已释放或已汇报）。此时不再把旧尝试当活动执行，但也必须让模型知道
+	 * 「别自己找路径/写文件/汇报，真正授权的新轮由桌面端冻结并派发」。
+	 *
+	 * 真机缺陷：恢复的会话里用户发明确改稿要求，模型拿不到任何说明，于是去翻桌面元数据、
+	 * 猜 staging 路径、用历史绑定汇报成果，把官方改稿轮卡死。
+	 * 这段提示只描述协议，不是执行许可，也不声称任何文件系统隔离。无路径、无身份细节。
+	 */
+	function inactiveProtocolMessage(): Record<string, unknown> | undefined {
+		if (!binding || attemptLive) return undefined;
+		return {
+			role: "custom",
+			customType: INACTIVE_TYPE,
+			display: false,
+			content: `This session also has a document association (work ${binding.workId}), but no attempt is active for it: that round is settled, or it was restored from history. This note concerns only that document work: do not search its desktop metadata, do not look for or create its staging directory, do not write its deliverables, and do not report its artifacts. If the user asked to revise that document, the desktop freezes the base and starts the round itself: declare the intent with tpa_work_revise if useful, then stop and wait; never reuse the previous attempt. Nothing else changes: unrelated requests keep working normally with the usual tools and their existing permissions.`,
+			details: { workId: binding.workId, attemptId: binding.attemptId },
+			timestamp: Date.now(),
+		};
+	}
+
+	/**
+	 * 同一条请求里只保留一条非活动协议提示，且必须是**当前关联**的那条：
+	 * 换过工作/尝试之后，旧尝试的提示必须丢弃并重新生成，不能把过期关联留在上下文里。
+	 */
+	function isCurrentInactiveMessage(message: unknown): boolean {
+		if (!binding || attemptLive || !isRecord(message) || message.customType !== INACTIVE_TYPE) return false;
+		const details = message.details;
+		if (!isRecord(details)) return false;
+		return details.workId === binding.workId && details.attemptId === binding.attemptId;
+	}
+
 	/** 只有「本轮仍在制作」才产出上下文；结算/释放后连旧消息一起去掉。 */
 	function currentContextMessage(): Record<string, unknown> | undefined {
 		if (!binding || !attemptLive) return undefined;
@@ -316,7 +350,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "tpa_artifact_report",
 		label: "TPA artifact report",
-		description: "Report this attempt's document artifacts from the bound staging directory. Paths are relative to the staging directory. This only publishes a candidate; the desktop independently verifies files, inspects them and archives a version. Calling this tool never approves or completes anything.",
+		description: "Report this attempt's document artifacts from the bound staging directory. Paths are relative to the staging directory. This only publishes a candidate; the desktop independently verifies files, inspects them and archives a version. Calling this tool never approves or completes anything. It works only while an attempt is active: a restored, released or already-reported association is refused and must wait for the desktop to start the next round.",
 		parameters: Type.Object(
 			{
 				summary: Type.String({ maxLength: 2000 }),
@@ -328,6 +362,14 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureSession(ctx);
 			if (!binding) return { content: [{ type: "text", text: "No document work is bound to this session; nothing was reported." }], details: { documentWork: { ok: false, reason: "no_work" } } };
+			// 非活动关联（历史恢复/已释放/已汇报过）：拒绝发生在任何文件校验与持久化之前，
+			// 并给出可执行的下一步，避免模型继续猜路径或反复诊断。
+			if (!attemptLive) {
+				return {
+					content: [{ type: "text", text: "Nothing was reported: no attempt is active in this session right now (the previous round is settled or was restored from history). Do not search for a staging directory, do not write files here, and do not reuse the previous attempt. If the user asked for a revision, the desktop freezes the base and starts the new round itself; stop and wait for it." }],
+					details: { documentWork: { ok: false, reason: "inactive_attempt" } },
+				};
+			}
 			if (reportCache) return { content: [{ type: "text", text: `This attempt already reported ${reportCache.reportId}; candidates are not replaced.` }], details: { documentWork: { ok: false, reason: "already_reported" } } };
 			const candidate = decodeArtifactCandidate({ reportId: `rp_${randomUUID().replace(/-/g, "").slice(0, 20)}`, artifacts: params.artifacts, summary: params.summary, risks: params.risks });
 			if (!candidate) return { content: [{ type: "text", text: "The artifact report was rejected: use bounded relative staging paths only." }], details: { documentWork: { ok: false, reason: "invalid" } } };
@@ -346,7 +388,7 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "tpa_work_revise",
 		label: "TPA document revision intent",
-		description: "Declare that the user's latest message is an explicit instruction to revise the bound document. Use only when the user clearly asked for a change to the current document; the desktop verifies the latest user turn itself and prepares the revision. This never approves scope expansion or an ambiguous base.",
+		description: "Declare that the user's latest message is an explicit instruction to revise the bound document. Use only when the user clearly asked for a change to the current document; the desktop verifies the latest user turn itself, freezes the base and starts the round. After declaring, stop and wait: do not look for a staging directory, do not write files and do not report artifacts for the previous attempt. This never approves scope expansion or an ambiguous base.",
 		parameters: Type.Object(
 			{
 				instruction: Type.String({ maxLength: 2000 }),
@@ -491,7 +533,8 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		// 用用户提示词开新回合的路径：这里返回的消息会落成一条 custom_message（可审计）。
 		// 但 pi.sendMessage(triggerTurn: true) 的续跑路径不会触发本钩子，因此真正的保底在
 		// 下面的 `context`：每个模型请求都会经过它。
-		const message = currentContextMessage();
+		// 活动轮 → 执行上下文；只有已知关联但无活动轮 → 非活动协议提示。
+		const message = currentContextMessage() ?? inactiveProtocolMessage();
 		return message ? { message } : undefined;
 	});
 
@@ -505,12 +548,21 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		// 模型只能去翻旧输出/源码猜 staging。
 		const messages: unknown[] = [];
 		let kept = false;
+		let keptInactive = false;
 		for (const message of event.messages) {
 			if (!isRecord(message)) {
 				messages.push(message);
 				continue;
 			}
 			if (message.customType === DOCUMENT_WORK_STATE_TYPE || message.customType === DOCUMENT_WORK_REVISION_INTENT_TYPE) continue;
+			if (message.customType === INACTIVE_TYPE) {
+				// 非活动提示只在「有关联且确实没有活动轮」时保留一条；其余一律丢弃。
+				if (!keptInactive && isCurrentInactiveMessage(message)) {
+					keptInactive = true;
+					messages.push(message);
+				}
+				continue;
+			}
 			if (message.customType === DOCUMENT_WORK_EXECUTION_TYPE) {
 				// 执行提示只在「本轮仍在制作且完整四元组都匹配」时进入请求；release 之后
 				// 它不得继续留在上下文里驱动下一轮普通聊天。
@@ -541,6 +593,11 @@ export default function piDeckDocumentWorkExtension(pi: ExtensionAPI): void {
 		const live = currentContextMessage();
 		// 续跑路径没有现成条目：补到末尾，紧贴本轮要求，且不动前面的前缀（对提示缓存友好）。
 		if (!kept && live) messages.push(live);
+		// 没有活动轮但存在已知关联时，注入一条（且只一条）非活动协议提示。
+		if (!live && !keptInactive) {
+			const inactive = inactiveProtocolMessage();
+			if (inactive) messages.push(inactive);
+		}
 		return { messages };
 	});
 

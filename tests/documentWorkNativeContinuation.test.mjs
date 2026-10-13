@@ -73,7 +73,9 @@ function createHost(options = {}) {
 	const turns = [];
 	let active = [];
 	let session = options.session ?? SESSION;
-	const counters = { beforeAgentStart: 0, requests: 0 };
+	const counters = { beforeAgentStart: 0, requests: 0, setActiveTools: 0 };
+	/** 扩展是否动过工具面：非活动提示不得改变可用工具。 */
+	const activeToolCalls = [];
 	const ctx = {
 		hasUI: false,
 		mode: "rpc",
@@ -106,6 +108,8 @@ function createHost(options = {}) {
 		registerTool: (value) => tools.set(value.name, value),
 		getActiveTools: () => [...active],
 		setActiveTools: (names) => {
+			counters.setActiveTools += 1;
+			activeToolCalls.push([...names]);
 			active = [...names];
 		},
 		appendEntry: (customType, data) => {
@@ -124,7 +128,7 @@ function createHost(options = {}) {
 			return undefined;
 		},
 	};
-	extension(pi);
+	(options.extensionModule ?? extension)(pi);
 
 	/** 分支里可进入请求的消息（与 pi 的消息装配同形：custom 条目带 role:"custom"）。 */
 	function branchMessages() {
@@ -145,7 +149,9 @@ function createHost(options = {}) {
 
 	/** 用户提示词路径：before_agent_start → 返回的 message 落成 custom_message → 模型请求。 */
 	async function prompt(text) {
-		branch.push({ type: "message", message: { role: "user", content: [{ type: "text", text }] } });
+		// 真实 pi 的用户条目带稳定 id：意图工具按「最新用户轮 id + 正文」声明来源。
+		const turnId = `user-${branch.length + 1}`;
+		branch.push({ type: "message", id: turnId, message: { role: "user", id: turnId, content: [{ type: "text", text }] } });
 		await fire("before_agent_start", { type: "before_agent_start", prompt: text });
 		return request();
 	}
@@ -171,6 +177,8 @@ function createHost(options = {}) {
 		notifications,
 		turns,
 		counters,
+		activeTools: () => [...active],
+		activeToolCalls,
 		request,
 		prompt,
 		fire,
@@ -615,4 +623,161 @@ test("自身标记畸形/不可分类：一律 fail-closed，不得当成全新�
 	await unreadable.command(bindCommand(revisionBinding()));
 	await unreadable.command(executeCommand());
 	assert.equal(executionTurns(unreadable), 0, "无法验证身份的标记必须 fail-closed");
+});
+
+/* ------------------------------------------------------------------ 非活动关联的协议（真机缺陷） */
+
+const INACTIVE_TYPE = "pi-deck-document-work-inactive";
+const REPORT_ENTRY_TYPE = "tpa-document-work-report";
+const INSTRUCTION_TEXT = "把第二节改短，改成“布设传感器后每日检查。”，第一节保持不变，不改任何格式。";
+const reportEntry = (staging) => ({
+	type: "custom",
+	customType: REPORT_ENTRY_TYPE,
+	data: { sessionId: SESSION, attemptId: "at_dc62c11fac92421dbcc1b90d", preparationId: "pr_dc62c11fac92421dbcc1b90d", report: { reportId: "rp_old", artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "旧轮候选", risks: [] } },
+});
+const bindingEntry = (staging) => ({ type: "custom", customType: "tpa-document-work-binding", data: { sessionId: SESSION, binding: revisionBinding({ stagingDirectory: staging }) } });
+
+/** 非活动提示：模型看得到的文本（不含历史 staging/base 路径，也不是执行许可）。 */
+const inactiveGuidance = (list) => list.filter((text) => text.includes("no attempt is active"));
+
+/** 恢复/释放之后：报告必须零 I/O、零持久化地拒绝，并给出可执行的下一步。 */
+async function assertReportRefusedWhenInactive(host, staging) {
+	const before = { branch: host.branch.length, state: host.state()?.phase, turns: host.turns.length };
+	const existing = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "新候选", risks: [] });
+	assert.equal(existing.details.documentWork.ok, false, "非活动关联不得汇报成功");
+	assert.equal(existing.details.documentWork.reason, "inactive_attempt", JSON.stringify(existing.details.documentWork));
+	assert.match(existing.content[0].text, /no attempt is active/i, "要给出可执行的下一步，而不是让模型继续找路径");
+	assert.equal(host.branch.length, before.branch, "零持久化：不得写入汇报条目");
+	assert.equal(host.state()?.phase, before.state, "状态不得改变");
+	assert.equal(host.turns.length, before.turns, "不得触发模型回合");
+	// 不存在的路径必须落在同一个拒绝原因上：证明拒绝发生在任何文件校验之前。
+	const missing = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "does-not-exist.docx", role: "primary" }], summary: "新候选", risks: [] });
+	assert.equal(missing.details.documentWork.reason, "inactive_attempt", "不得先 stat 再拒绝");
+	void staging;
+}
+
+test("恢复的已汇报绑定：普通改稿轮只得到非活动协议，报告被拒且零副作用", async () => {
+	const staging = mkdtempSync(join(tmpdir(), "pideck-inactive-"));
+	writeFileSync(join(staging, "桥梁监测安排.docx"), "synthetic docx bytes");
+	const host = createHost({ entries: [bindingEntry(staging), reportEntry(staging)] });
+	await host.fire("session_start", { type: "session_start" });
+	assert.equal(host.state()?.phase, "reported", "夹具前提：恢复出已汇报的旧绑定");
+
+	const seen = await host.prompt(INSTRUCTION_TEXT);
+	assert.equal(contextMessages(seen).length, 0, "恢复的旧尝试不得作为活动执行上下文注入");
+	const guidance = inactiveGuidance(seen);
+	assert.equal(guidance.length, 1, "非活动关联必须给出协议提示");
+	assert.equal(guidance[0].includes(staging), false, "提示不得包含历史 staging 路径");
+	assert.equal(guidance[0].includes("Write every deliverable"), false, "提示不是执行许可");
+	assert.equal(host.branch.filter((entry) => entry.customType === INACTIVE_TYPE).length, 1, "非活动提示以独立条目注入");
+	await assertReportRefusedWhenInactive(host, staging);
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("恢复的未汇报绑定：报告同样被拒（即使历史 staging 里真有文件）", async () => {
+	const staging = mkdtempSync(join(tmpdir(), "pideck-inactive-unreported-"));
+	writeFileSync(join(staging, "桥梁监测安排.docx"), "synthetic docx bytes");
+	const host = createHost({ entries: [bindingEntry(staging)] });
+	await host.fire("session_start", { type: "session_start" });
+	assert.equal(host.state()?.phase, "bound", "夹具前提：恢复出未汇报的旧绑定");
+	await assertReportRefusedWhenInactive(host, staging);
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("释放后的绑定：报告被拒，且不把释放的尝试当活动执行", async () => {
+	const staging = mkdtempSync(join(tmpdir(), "pideck-released-"));
+	writeFileSync(join(staging, "桥梁监测安排.docx"), "synthetic docx bytes");
+	const host = createHost();
+	const withStaging = revisionBinding({ stagingDirectory: staging });
+	await host.command(bindCommand(withStaging));
+	await host.command(executeCommand(withStaging));
+	await host.command("release");
+	assert.equal(contextMessages(await host.request()).length, 0, "释放后不得注入执行上下文");
+	await assertReportRefusedWhenInactive(host, staging);
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("非活动提示不是执行许可：意图工具只声明、报告仍被拒、真实新轮照常", async () => {
+	const staging = mkdtempSync(join(tmpdir(), "pideck-guidance-perm-"));
+	writeFileSync(join(staging, "桥梁监测安排.docx"), "synthetic docx bytes");
+	const host = createHost({ entries: [bindingEntry(staging)] });
+	await host.fire("session_start", { type: "session_start" });
+	const seen = await host.prompt(INSTRUCTION_TEXT);
+	assert.equal(inactiveGuidance(seen).length, 1);
+	// 意图工具只声明（零回合、零执行）；报告仍被拒。
+	const intent = await host.tool("tpa_work_revise", { instruction: INSTRUCTION_TEXT, sections: ["第二节"], preserve: ["第一节"] });
+	assert.equal(intent.details.documentWork.ok, true, "明确改稿要求下意图声明仍可用（主进程另行复核）");
+	assert.equal(host.turns.length, 0, "意图声明不得触发模型回合");
+	await assertReportRefusedWhenInactive(host, staging);
+	// 真正获授权的新一轮（新 attemptId）照常拿到上下文并成功汇报一次。
+	const fresh = revisionBinding({ attemptId: "at_fresh", preparationId: "pr_fresh", digest: "9".repeat(64), stagingDirectory: staging });
+	await host.command(bindCommand(fresh));
+	await host.command(executeCommand(fresh));
+	const activeSeen = await host.request();
+	const activeContexts = contextMessages(activeSeen);
+	assert.equal(activeContexts.length, 1, "新一轮必须重新注入执行上下文（不再是旧轮）");
+	assert.equal(activeContexts[0].includes(staging), true, "新一轮必须给出冻结 staging");
+	assert.equal(executionMessages(activeSeen).length, 1, "新一轮必须带上执行指令");
+	assert.equal(inactiveGuidance(activeSeen).length, 0, "活动轮不得再出现非活动协议提示");
+	const reported = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "本轮候选", risks: [] });
+	assert.equal(reported.details.documentWork.ok, true, JSON.stringify(reported.details.documentWork));
+	assert.equal(host.state()?.phase, "reported");
+	const again = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "重复候选", risks: [] });
+	assert.equal(again.details.documentWork.reason, "already_reported", "同一轮只允许汇报一次");
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("非活动汇报零 stat：带 stat 间谍的真实扩展实例一次文件系统调用都没有", async () => {
+	const statCalls = [];
+	const spied = loadTsCommonJs(`${ROOT}/resources/extensions/pi-deck-document-work.ts`, {
+		stubs: {
+			"node:fs/promises": {
+				stat: async (target) => {
+					statCalls.push(String(target));
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+				},
+			},
+		},
+	}).default;
+	const staging = mkdtempSync(join(tmpdir(), "pideck-zero-io-"));
+	const host = createHost({ entries: [bindingEntry(staging)], extensionModule: spied });
+	await host.fire("session_start", { type: "session_start" });
+	await host.prompt(INSTRUCTION_TEXT);
+	const refused = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "新候选", risks: [] });
+	assert.equal(refused.details.documentWork.reason, "inactive_attempt");
+	assert.deepEqual(statCalls, [], "非活动关联的汇报必须在任何 stat 之前被拒");
+	// 间谍本身可观测：活动轮汇报缺失文件时确实会去 stat（证明上面不是「间谍没生效」）。
+	const fresh = revisionBinding({ attemptId: "at_fresh", preparationId: "pr_fresh", digest: "9".repeat(64), stagingDirectory: staging });
+	await host.command(bindCommand(fresh));
+	await host.command(executeCommand(fresh));
+	const active = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "本轮候选", risks: [] });
+	assert.equal(active.details.documentWork.reason, "missing_file", "活动轮会走文件校验（间谍可见）");
+	assert.equal(statCalls.length > 0, true, "活动轮必须真的 stat 过");
+	rmSync(staging, { recursive: true, force: true });
+});
+
+test("非活动提示不改变工具面，且旧尝试的过期提示会被丢弃重建", async () => {
+	const staging = mkdtempSync(join(tmpdir(), "pideck-tools-"));
+	// 夹具：一条属于**上一个尝试**的过期非活动提示混在历史里。
+	const staleAttempt = "at_stale";
+	const stale = { role: "custom", customType: INACTIVE_TYPE, display: false, content: "stale guidance", details: { workId: "dw_stale", attemptId: staleAttempt }, timestamp: 1 };
+	const host = createHost({ entries: [bindingEntry(staging), { type: "custom_message", ...stale }] });
+	await host.fire("session_start", { type: "session_start" });
+	const toolsBefore = host.activeTools();
+	const seen = await host.prompt("随便聊聊：这个方案你觉得怎么样？");
+	// 过期提示必须被丢掉，换成当前关联的一条。
+	const guidance = inactiveGuidance(seen);
+	assert.equal(guidance.length, 1, "必须重建为当前关联的一条");
+	assert.equal(guidance[0].includes("stale guidance"), false, "旧尝试的提示不得残留");
+	assert.equal(seen.includes("stale guidance"), false);
+	// 措辞必须把约束限定在「这份文稿」上，并显式允许无关请求照常使用工具。
+	assert.match(guidance[0], /unrelated requests keep working normally/i, "必须显式允许无关请求照常工作");
+	assert.match(guidance[0], /existing permissions/i, "必须说明沿用既有权限");
+	assert.doesNotMatch(guidance[0], /sandbox|isolat/i, "不得把提示说成文件系统隔离");
+	// 提示不得改变工具面，也不得把普通对话变成执行许可：没有活动轮、没有执行指令。
+	assert.deepEqual(host.activeTools(), toolsBefore, "工具面必须保持不变");
+	assert.equal(host.counters.setActiveTools, 0, "扩展不得调用 setActiveTools");
+	const asked = await host.tool("tpa_artifact_report", { artifacts: [{ relativePath: "桥梁监测安排.docx", role: "primary" }], summary: "新候选", risks: [] });
+	assert.equal(asked.details.documentWork.reason, "inactive_attempt", "普通对话不构成执行许可");
+	rmSync(staging, { recursive: true, force: true });
 });

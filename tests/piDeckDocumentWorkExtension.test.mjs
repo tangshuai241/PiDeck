@@ -58,7 +58,12 @@ function harness({ entries = [], session = SESSION, stagingDirectory } = {}) {
 		isIdle: () => true,
 		hasPendingMessages: () => false,
 		ui: { notify: (message) => notifications.push(message) },
-		sessionManager: { getSessionId: () => currentSession, getBranch: () => clone(branch) },
+		sessionManager: {
+			getSessionId: () => currentSession,
+			getBranch: () => clone(branch),
+			// 真实 pi 的 `getEntries()` 返回整个会话文件的条目：执行权判定要用它核对历史。
+			getEntries: () => clone(branch),
+		},
 	};
 	extension({
 		on: () => {},

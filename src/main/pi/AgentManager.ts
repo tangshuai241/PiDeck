@@ -43,6 +43,7 @@ import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
+import { INTERNAL_CONTROL, type InternalPromptDelivery } from "../sessions/internalPromptDelivery";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
@@ -1882,7 +1883,7 @@ export class AgentManager {
 		return runtime.tab;
 	}
 
-	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
+	async sendPrompt(input: SendPromptInput & InternalPromptDelivery): Promise<SendPromptResult> {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
@@ -1996,7 +1997,12 @@ export class AgentManager {
 			// 删除按钮仍拿着乐观 id，不能再另起 UUID 导致 Message not found。
 			...(input.requestId ? { requestId: input.requestId } : {}),
 		};
-		this.addMessage(input.agentId, "user", trimmed || this.translate("session.imagePlaceholder"), Object.keys(optimisticMeta).length > 0 ? optimisticMeta : undefined, input.images);
+		// 主进程内部控制的协议命令（`/tpa-work …`、`/align approve …`）：照常校验、照常发送、
+		// 照常触发模型，但不生成乐观用户气泡——它们是宿主元数据与编码载荷，不是用户说的话。
+		// 只允许主进程内部调用方设置该选项；渲染层经 IPC 伪造的同名字段在边界被丢弃。
+		if (input[INTERNAL_CONTROL] !== true) {
+			this.addMessage(input.agentId, "user", trimmed || this.translate("session.imagePlaceholder"), Object.keys(optimisticMeta).length > 0 ? optimisticMeta : undefined, input.images);
+		}
 
 		// streamingBehavior 只在 agent 忙碌时需要；UI 可以显式传 steer/followUp 以复用 pi 队列语义。
 		// 当前端排队 flush 连续发送多条消息时，第一条会触发 agent_start 使 agent 变忙碌，

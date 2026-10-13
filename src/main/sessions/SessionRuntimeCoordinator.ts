@@ -37,6 +37,7 @@ import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
 import type { BridgeEvent } from "../../shared/types/bridge";
 import type { SessionCatalogEntry } from "./SessionCatalog";
 import { sessionFileSizeMb } from "./sessionFileSizeCopy";
+import { INTERNAL_CONTROL, type InternalPromptDelivery } from "./internalPromptDelivery";
 
 export interface SessionCatalogGateway {
 	get(sessionId: string): SessionCatalogEntry | undefined;
@@ -62,7 +63,7 @@ export interface SessionAgentGateway {
 	readonly capabilities: ReadonlySet<AgentGatewayCapability>;
 	list(): AgentTab[];
 	/** 发送提示词到 agent（pi: stdio RPC；dsh: session.prompt）。 */
-	sendPrompt(input: SendPromptInput): Promise<SendPromptResult>;
+	sendPrompt(input: SendPromptInput & InternalPromptDelivery): Promise<SendPromptResult>;
 	getMessages(agentId: string): ChatMessage[];
 	create(input: CreateAgentInput): Promise<AgentTab>;
 	/** 可选能力：standby 池认领（pi 提供；dsh 无进程池概念不实现）。命中返回已握手 idle tab。 */
@@ -292,7 +293,7 @@ export class SessionRuntimeCoordinator {
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
 		private readonly agents: SessionAgentGateway,
-		private readonly sendAgentPrompt: (input: SendPromptInput) => Promise<SendPromptResult>,
+		private readonly sendAgentPrompt: (input: SendPromptInput & InternalPromptDelivery) => Promise<SendPromptResult>,
 		private readonly logger?: SessionRuntimeLogger,
 	) {}
 
@@ -307,7 +308,7 @@ export class SessionRuntimeCoordinator {
 		return this.focusedSessionId;
 	}
 
-	send(input: SendSessionPromptInput): Promise<SendSessionPromptResult> {
+	send(input: SendSessionPromptInput & InternalPromptDelivery): Promise<SendSessionPromptResult> {
 		const sessionId = input.sessionId.trim();
 		const requestId = input.requestId.trim();
 		if (!sessionId) return Promise.resolve(this.rejected(input, "Session ID is required"));
@@ -1232,7 +1233,7 @@ export class SessionRuntimeCoordinator {
 		}
 	}
 
-	private async sendOnce(input: SendSessionPromptInput): Promise<SendSessionPromptResult> {
+	private async sendOnce(input: SendSessionPromptInput & InternalPromptDelivery): Promise<SendSessionPromptResult> {
 		const pipelineStartedAt = Date.now();
 		void this.logger?.info("session-perf", "Prompt pipeline started", {
 			sessionId: input.sessionId,
@@ -1290,6 +1291,8 @@ export class SessionRuntimeCoordinator {
 					agentMessage: input.agentMessage,
 					description: input.description,
 					requestId: input.requestId,
+					// 主进程内部投递选项：只影响乐观气泡，不影响守卫/租约/幂等与模型触发。
+					...(input[INTERNAL_CONTROL] === true ? { [INTERNAL_CONTROL]: true as const } : {}),
 				});
 				void this.logger?.info("session-perf", "Prompt dispatch completed", {
 					sessionId: input.sessionId,

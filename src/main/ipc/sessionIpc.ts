@@ -47,6 +47,7 @@ import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
 import { getCachedModelList } from "../pi/modelListCache";
 import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "../sessions/launchDefaults";
+import { sanitizeRendererPromptInput } from "../sessions/internalPromptDelivery";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImport";
 import type { DirectorySessionImporter } from "../sessions/DirectorySessionImporter";
@@ -1490,7 +1491,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			imageCount: input.images?.length ?? 0,
 		});
 		try {
-			const result = await sessionRuntimeCoordinator.send(input);
+			// 渲染层入参过白名单：伪造的投递选项（例如 internalControl）在这里被丢弃，
+			// 渲染层永远不能请求隐藏的时间线消息。
+			const result = await sessionRuntimeCoordinator.send(sanitizeRendererPromptInput(input));
 			if (result.agentId) {
 				const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
 				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);

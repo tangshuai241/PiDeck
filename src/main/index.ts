@@ -1,3 +1,4 @@
+import { INTERNAL_CONTROL, sanitizeRendererPromptInput, type InternalPromptDelivery } from "./sessions/internalPromptDelivery";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -2356,7 +2357,7 @@ function currentFeishuLocale(): FeishuLocale {
 	return normalizeFeishuLocale(currentMainProcessLocale());
 }
 
-async function sendAgentPromptWithIntegrations(input: SendPromptInput): Promise<SendPromptResult> {
+async function sendAgentPromptWithIntegrations(input: SendPromptInput & InternalPromptDelivery): Promise<SendPromptResult> {
 	// 多后端路由：非 pi 后端（dsh/未来新增后端）不经过 pi 专属的飞书/扩展链路，
 	// 按 agentId 交给合成网关路由到所属后端网关（pi 后端继续走下方集成链路）。
 	const gateway = compositeAgentGateway;
@@ -4467,7 +4468,8 @@ app
 				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, undefined, { projectId: entry.projectId });
 			},
 			sendSessionPrompt: async (input) => {
-				const result = await sessionRuntimeCoordinator.send(input);
+				// Web/远程面的入参会把 HTTP body 摊进来：先过白名单，伪造的内部投递标记被丢弃。
+				const result = await sessionRuntimeCoordinator.send(sanitizeRendererPromptInput(input));
 				if (result.agentId) {
 					const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
 					if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
@@ -4921,7 +4923,9 @@ app
 					};
 				},
 				dispatch: async (input) => {
-					const result = await sessionRuntimeCoordinator.send({ sessionId: input.sessionId, requestId: input.requestId, message: input.message, expectedRuntime: input.expectedRuntime });
+					// 文稿链路的宿主协议命令（/tpa-work bind|execute|release、/align approve）不是用户发言：
+					// 照常发送与触发模型，但不生成乐观用户气泡（主进程内部投递选项）。
+					const result = await sessionRuntimeCoordinator.send({ sessionId: input.sessionId, requestId: input.requestId, message: input.message, expectedRuntime: input.expectedRuntime, [INTERNAL_CONTROL]: true });
 					if (result.accepted) return { accepted: true, unknown: false };
 					// reason 是宿主给失败分类的唯一来源：文稿域据此结算错误码，不再一律写成「进程变了」。
 					return { accepted: false, unknown: result.delivery === "unknown", error: result.error, ...(result.reason ? { reason: result.reason } : {}) };
