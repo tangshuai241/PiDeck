@@ -42,14 +42,23 @@ test("cached pi version is silently revalidated once per session (stale-while-re
 	assert.match(hook, /if \(!next\.installed\) return;/);
 });
 
+/**
+ * 找某个 `<SettingsSection>` 在文件里的起始偏移。
+ * 不要用字面量 `'<SettingsSection title={t("...")}>'` 做 indexOf：锚点补全（20fdfcf40）给这些
+ * 分区都加了 `id="settings-section-…"`，属性一多/一换位、或多个空格就永远找不到（红灯）。
+ */
+function sectionStart(source, titleKey) {
+	return source.search(new RegExp(`<SettingsSection[^>]*t\\(\\s*"${titleKey}"\\s*\\)[^>]*>`));
+}
+
 test("Pi CLI update notice is anchored to its controls", () => {
 	const devTab = readFileSync("src/renderer/src/components/app/settings/DevTab.tsx", "utf8");
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-	const environmentStart = devTab.indexOf('<SettingsSection title={t("settings.environment")}>');
+	const environmentStart = sectionStart(devTab, "settings.environment");
 	const piNoticeStart = devTab.indexOf("{piUpdateNotice &&");
-	const updatesStart = devTab.indexOf('<SettingsSection title={t("settings.sectionUpdates")}>');
+	const updatesStart = sectionStart(devTab, "settings.sectionUpdates");
 
 	assert.ok(environmentStart >= 0, "environment section must exist");
 	assert.ok(piNoticeStart > environmentStart && piNoticeStart < updatesStart, "Pi CLI update notice must appear in the environment section beside its action buttons");

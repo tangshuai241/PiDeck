@@ -65,6 +65,20 @@ test("session tab uses AnimatedBadge instead of raw pulse dot", () => {
 	assert.doesNotMatch(source, /INDICATOR_BASE_WIDTH/);
 });
 
+test("session tab active background is instant (no shared-layout slide between tabs)", () => {
+	const source = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
+	// 用户明确要求去掉切 Tab 时「选中底色从旧 Tab 滑到新 Tab」的移动动画：栏内不再引入
+	// motion 共享投影（layoutId/layoutRoot），底色改为激活 Tab 自身的普通 span，切换瞬时出现。
+	assert.doesNotMatch(source, /from "motion\/react"/);
+	assert.doesNotMatch(source, /layoutId=\{/);
+	assert.doesNotMatch(source, /layoutRoot/);
+	// 三种 Tab（会话 / 文件 / 插件伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。
+	const backgrounds = source.match(/pointer-events-none\s+absolute\s+inset-0\s+rounded-md\s+bg-accent/g) ?? [];
+	assert.equal(backgrounds.length, 3, "会话/文件/插件伪 Tab 各保留一处静态选中底色");
+	assert.match(source, /\{active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
+	assert.match(source, /\{tab\.active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
+});
+
 test("sidebar SessionTree still uses its own status dot (unchanged)", () => {
 	const source = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
 	assert.match(source, /sessionStatusDotClass/);

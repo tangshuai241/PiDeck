@@ -25,12 +25,3 @@ test("只有 package-project 发现条目计入，settings/祖先/全局包不�
 	const sources = projectInstalledExtensionSources([], [discoveryItem("npm:user-package", "package-user"), discoveryItem("/abs/settings-ext.ts", "settings-project"), discoveryItem("/abs/ancestor.ts", "ancestor-agents")]);
 	assert.deepEqual([...sources], []);
 });
-
-test("商店卡片判据走 installedSources 集合，ExtensionsTab 按作用域计算", () => {
-	const storeTab = read("src/renderer/src/config/ExtensionStoreTab.tsx");
-	assert.match(storeTab, /props\.installedSources\.has\(item\.installSource\)/, "商店卡片必须用 installedSources 集合判断已安装");
-	assert.doesNotMatch(storeTab, /installedExtensions/, "旧 installedExtensions 列表判据应已下线");
-	const extensionsTab = read("src/renderer/src/config/ExtensionsTab.tsx");
-	assert.match(extensionsTab, /installedSources=\{storeInstalledSources\}/, "ExtensionsTab 必须把计算结果传给商店卡片");
-	assert.match(extensionsTab, /props\.scope === "project"\s*\?\s*projectInstalledExtensionSources\(props\.data\.extensions,\s*props\.discoveryExtensions\)/, "项目作用域必须并入 package-project 发现条目");
-});

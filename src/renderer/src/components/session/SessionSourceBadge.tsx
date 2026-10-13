@@ -4,7 +4,7 @@ import { ImageIcon, Terminal as TerminalIcon } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui-shadcn/badge";
-import { PiTuiLogoMark, useLogoStyle } from "../app/PiTuiLogo";
+import { PiTuiLogoMark, useBrandGlyph } from "../app/PiTuiLogo";
 
 const SOURCE_LABELS: Record<SessionSource, string> = {
 	pi: t("sessionSource.pi"),
@@ -144,9 +144,13 @@ function SourceLogo(props: { source: SessionSource }) {
 	return <PiLogo />;
 }
 
-/** pi 后端 / 来源标记：订阅统一 Logo 风格；经典保留单色，pi-tui 复用官方三色位图。 */
+/** pi 后端 / 来源标记：订阅统一 Logo 风格；经典保留单色，pi-tui 复用官方三色位图，自定义风格用用户上传的图。 */
 export function PiLogo(props: { className?: string }) {
-	const logoStyle = useLogoStyle();
+	const { style: logoStyle, customLogo } = useBrandGlyph();
+	// 自定义图按调用方给的尺寸缩放（徽标位多为 size-3.5）；没有图时按 logoStyle 回落内置标。
+	if (customLogo) {
+		return <img src={customLogo} alt="" className={cn(props.className ?? "size-3.5", "object-contain")} />;
+	}
 	if (logoStyle === "pi-tui") {
 		return <PiTuiLogoMark size={14} className={props.className ?? "size-3.5"} />;
 	}

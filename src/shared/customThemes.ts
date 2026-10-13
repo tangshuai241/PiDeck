@@ -44,7 +44,13 @@ export type CustomThemeSnapshot = {
 /** 主题目录列表项（内置示例 + 用户文件；解析失败的用户文件以 parseError 呈现，便于发现与修复） */
 export type CustomThemeListItem = {
 	source: "builtin" | "user";
+	/** 包内 id：展示与「应用」写快照用；内置示例与用户文件可能同 id（用户手改文件名/内容） */
 	id: string;
+	/**
+	 * 用户文件的磁盘主键（文件名去 .json）；读取/删除必须用它定位文件，
+	 * 不能拿包内 id 当路径——两者可以不一致。内置示例无文件，字段缺席。
+	 */
+	fileId?: string;
 	name: string;
 	version?: string;
 	author?: string;

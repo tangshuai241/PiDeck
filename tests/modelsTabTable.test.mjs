@@ -17,6 +17,9 @@ test("ModelsTable renders model list as shadcn Table (header + body)", () => {
 	assert.match(tableSource, /<TableHead className="w-24">\{t\("config\.thinkingLevels"\)\}/);
 	assert.match(tableSource, /<TableHead className="w-24">\{t\("config\.capabilities"\)\}/);
 	assert.match(tableSource, /<TableHead className="w-20 text-right pr-3">\{t\("config\.actions"\)\}<\/TableHead>/);
+	// ID 与名称同宽（用户反馈：不一致时表格看着歪）
+	assert.match(tableSource, /<TableHead className="w-48 min-w-0">\{t\("config\.modelId"\)\}<\/TableHead>\s*<TableHead className="w-48 min-w-0">\{t\("config\.modelDisplayName"\)\}<\/TableHead>/);
+
 	// 表头顺序：thinkingLevels 必须在 capabilities 之前
 	const headOrder = tableSource.indexOf('t("config.thinkingLevels")');
 	const capOrder = tableSource.indexOf('t("config.capabilities")');
@@ -104,6 +107,8 @@ test("edit-provider page reaches feature parity with the expanded card", () => {
 	// 保存勾选的获取结果时同样按 pi-ai 目录补全（与卡片流程一致）
 	assert.match(dialogSource, /computeModelSpecPatches\(m, results\[i\]\)/);
 	assert.match(dialogSource, /config\.modelsSavedWithSpecs/);
+	// 上移/下移 / 隐藏 / 逐模型 UA / 每模型默认档位 / Pi 探测这些行内操作，两条入口的完整 prop
+	// 集合由 tests/modelTableEntryParity.test.mjs 做集合级对齐断言（新增操作必须两条入口同时接线）。
 });
 
 test("model batch mode uses a tri-state select column and one confirmation callback", () => {
@@ -118,7 +123,6 @@ test("model batch mode uses a tri-state select column and one confirmation callb
 	assert.match(tableSource, /t\("config\.selectAllModels"\)/);
 	assert.match(tableSource, /t\("config\.selectModel"/);
 	assert.match(tableSource, /onToggleAll\?\.\(models\.length\)/);
-	assert.match(tableSource, /onDeleteSelected\?:/);
 });
 
 test("adaptive auto-fill writes fields directly, no capability card", () => {
@@ -142,6 +146,16 @@ test("reset-to-adaptive button lives in the model actions column", () => {
 	assert.match(tabSource, /onResetModel=\{\(i\) => props\.onResetModel\(name, i\)\}/);
 });
 
+test("两个 token 数字列宽度一致且加宽一档（数字不再被裁）", () => {
+	// 用户反馈：这两列的数字常被右侧原生步进器挤掉 → 只加宽列，输入框样式保持原生不动。
+	assert.match(tableSource, /<TableHead className="w-28">\{t\("config\.contextWindow"\)\}<\/TableHead>\s*<TableHead className="w-28">\{t\("config\.maxTokens"\)\}<\/TableHead>/);
+	// 输入框是最初的写法：原生 type=number + 原始样式（不自定义箭头、不加内边距）
+	assert.match(tableSource, /value=\{m\.contextWindow \?\? ""\}[\s\S]{0,300}className="h-8 min-w-0"/);
+	assert.match(tableSource, /value=\{m\.maxTokens \?\? ""\}[\s\S]{0,300}className="h-8 min-w-0"/);
+	// 不留自绘步进器 / 自定义样式常量的痕迹
+	assert.doesNotMatch(tableSource, /TOKEN_NUMBER_INPUT_CLASS|ConfigNumberInput/);
+});
+
 test("reasoning and image checkboxes share one capabilities column", () => {
 	// 同列堆叠（flex flex-col），不再各占一列
 	assert.match(tableSource, /<div className="flex flex-col gap-1">/);
@@ -152,31 +166,37 @@ test("reasoning and image checkboxes share one capabilities column", () => {
 	assert.match(tableSource, /const base = m\.input \?\? \["text", "image"\]/);
 });
 
-test("thinking levels open in a Popover from a single button", () => {
-	// 一个按钮（摘要 + Brain 图标），点击弹 Popover 内两个下拉
+test("thinking levels are picked with checkboxes over Pi's canonical levels", () => {
+	// 一个按钮（范围摘要 + Brain 图标），点击弹 Popover：档位勾选列表 + 每模型默认档位
 	assert.match(tableSource, /<Popover>/);
 	assert.match(tableSource, /<PopoverTrigger asChild>/);
 	assert.match(tableSource, /<Brain className="size-3\.5 shrink-0 opacity-60"/);
-	// 摘要 = 每模型默认档位 · 上游映射（xhigh/max）；两者都空时回落“关闭”。
-	// 旧的「只拼映射」表达式已被 thinkingSummary 取代（每模型默认档位成为摘要首段）。
-	assert.match(tableSource, /const\s+thinkingSummaryParts\s*=\s*\[thinkingDefaultValue,\s*thinkingMappingSummary\]\.filter\(Boolean\)/);
-	assert.match(tableSource, /const\s+thinkingSummary\s*=\s*thinkingSummaryParts\.length\s*>\s*0\s*\?\s*thinkingSummaryParts\.join\(" · "\)\s*:\s*t\("config\.xhighOff"\)/);
-	assert.doesNotMatch(tableSource, /xhighValue \|\| maxValue \? \[xhighValue, maxValue\]\.filter\(Boolean\)\.join\(" \/ "\) : t\("config\.xhighOff"\)/);
-	// 弹窗加宽以容纳「默认档位」编辑块
-	assert.match(tableSource, /<PopoverContent align="start" className="w-56 p-2">/);
-	// 两个级别仍是 ConfigSelect + 白名单收窄（项目禁 as 强转）；源码中一处字面量经 map 渲染两行
-	assert.match(tableSource, /<ConfigSelect/);
-	assert.match(tableSource, /if \(v === "" \|\| v === "xhigh" \|\| v === "max"\)/);
-	assert.match(tableSource, /onUpdateModelThinkingLevel\(i, key, v\)/);
-	// 不再有行内两组三按钮
+	// 勾选列表：Pi 的 7 个规范档位逐个 Checkbox；勾选态由共享纯函数判定（不在行内重写 pi 的可用档位规则）
+	assert.match(tableSource, /thinkingLevelOptions\s*=\s*MODEL_THINKING_LEVELS\.map\(\(level\) => \(\{ level, state: modelThinkingLevelState\(m, level\) \}\)\)/);
+	assert.match(tableSource, /const\s+enabledThinkingLevels\s*=\s*enabledModelThinkingLevels\(m\)/);
+	assert.match(tableSource, /thinkingLevelOptions\.map\(\(\{ level, state \}\)[\s\S]*?<Checkbox[\s\S]*?checked=\{state\.enabled\}[\s\S]*?onUpdateModelThinkingLevel\(i, level, enabled\)/);
+	// 非恒等上游值（目录补全 / 手改配置）只读展示为 `→ 值`；旧的两个 xhigh/max ConfigSelect 已被勾选取代
+	assert.match(tableSource, /state\.wireValue/);
+	assert.match(tableSource, /t\("config\.thinkingLevelsWireValue"\)/);
+	assert.doesNotMatch(tableSource, /config-thinking-levels-cell/);
+	assert.doesNotMatch(tableSource, /config\.xhighOff/);
+	// 单元格摘要 = 范围折叠（CC Switch 风格，如 `off → max`），全部未勾选时回落「未设置」
+	assert.match(tableSource, /const\s+thinkingSummary\s*=\s*enabledThinkingLevels\.length > 0 \? formatModelThinkingLevelsSummary\(enabledThinkingLevels\) : t\("config\.thinkingLevelsNotSet"\)/);
+	// 悬停补充完整清单 + 每模型默认档位（单元格只放得下摘要）
+	assert.match(tableSource, /title=\{thinkingSummaryTitle\}/);
+	// 弹层加宽以容纳勾选列表
+	assert.match(tableSource, /<PopoverContent align="start" className="w-64 p-2">/);
+	// 旧的 xhigh/max 取值变量与行内两组三按钮都不再存在
+	assert.doesNotMatch(tableSource, /xhighValue/);
+	assert.doesNotMatch(tableSource, /maxValue/);
 	assert.doesNotMatch(tableSource, /config-thinking-levels-segmented/);
 	assert.doesNotMatch(tableSource, /config-thinking-level-option/);
 	assert.doesNotMatch(tableSource, /aria-pressed=\{value === option\}/);
 });
 
 test("per-model default thinking level is edited from the same Popover", () => {
-	// 每模型默认档位（settings.json 的 modelThinkingLevels）：写入口在思考级别 Popover 顶部，
-	// 与 xhigh/max 映射同处一弹层（不新开列，不撑行高）。
+	// 每模型默认档位（settings.json 的 modelThinkingLevels）：写入口在思考级别 Popover 底部，
+	// 与档位勾选同处一弹层（不新开列，不撑行高）。
 	assert.match(tableSource, /onUpdateModelThinkingLevelDefault\?: \(index: number, value: string\) => void;/);
 	assert.match(tableSource, /getModelThinkingLevelDefault\?: \(index: number\) => string;/);
 	assert.match(tableSource, /const\s+canEditThinkingDefault\s*=\s*Boolean\(props\.onUpdateModelThinkingLevelDefault\s*&&\s*props\.getModelThinkingLevelDefault\)/);
@@ -185,20 +205,24 @@ test("per-model default thinking level is edited from the same Popover", () => {
 	assert.match(tableSource, /t\("config\.thinkingLevelDefaultHint"\)/);
 	assert.match(tableSource, /props\.onUpdateModelThinkingLevelDefault!\(i, v\)/);
 
-	// 能力列表只读展示：未知（undefined）→ 展示「未知」且仍可编辑；权威空数组 → 禁用编辑（写了也会被 pi clamp）。
-	assert.match(tableSource, /availableThinkingLevels === undefined \? t\("config\.thinkingLevelsUnknown"\)/);
-	assert.match(tableSource, /t\("config\.thinkingLevelsNone"\)/);
-	assert.match(tableSource, /t\("config\.thinkingLevelsAvailable"/);
-	assert.match(tableSource, /const\s+thinkingDefaultDisabled\s*=\s*availableThinkingLevels !== undefined\s*&&\s*availableThinkingLevels\.length === 0/);
-	assert.match(tableSource, /<ConfigSelect value=\{thinkingDefaultValue\}[\s\S]*?disabled=\{thinkingDefaultDisabled\}/);
-	// 有可用档位时下拉按 pi 规范顺序排列；未知时列全量常量兜底
-	assert.match(tableSource, /orderModelThinkingLevels\(availableThinkingLevels\)/);
-	assert.match(tableSource, /\.\.\.MODEL_THINKING_LEVELS\]/);
+	// 候选档位 = 已勾选档位（默认档位必须落在可用档位里）；一个都没勾时禁用编辑。当前值不在候选里时
+	// 由 ConfigSelect 的「自定义」项兜底展示（不丢用户旧值）。
+	assert.match(tableSource, /const\s+thinkingDefaultOptions\s*=\s*\[\{ value: "", label: t\("config\.thinkingLevelDefaultInherit"\) \}, \.\.\.enabledThinkingLevels\.map\(\(level\) => \(\{ value: level, label: level \}\)\)\]/);
+	assert.match(tableSource, /const\s+thinkingDefaultDisabled\s*=\s*enabledThinkingLevels\.length === 0/);
+	assert.match(tableSource, /<ConfigSelect value=\{thinkingDefaultValue\} options=\{thinkingDefaultOptions\} onChange=\{\(v\) => props\.onUpdateModelThinkingLevelDefault\!\(i, v\)\} disabled=\{thinkingDefaultDisabled\}/);
+	// 取消勾选的档位正是当前默认档位时一并清掉（否则默认档位指向不可用档位，pi 只能 clamp）。
+	assert.match(tableSource, /if \(!enabled && canEditThinkingDefault && thinkingDefaultValue === level\) props\.onUpdateModelThinkingLevelDefault\!\(i, ""\)/);
+	// Pi 的探测结果只读展示（未知 / 权威空 / 范围折叠），不再充当默认档位的候选来源。
+	assert.match(tableSource, /t\("config\.thinkingLevelsProbed", \{ levels: formatModelThinkingLevelsSummary\(orderModelThinkingLevels\(availableThinkingLevels\)\) \}\)/);
 
 	// ModelsTab 经能力目录（provider/modelId 键）取该行模型的可用档位，并把回调收敛到 provider 上下文。
 	assert.match(tabSource, /const availableThinkingLevels = useAvailableThinkingLevels\(\);/);
 	assert.match(tabSource, /availableThinkingLevels\.get\(modelThinkingLevelsKey\(name, model\.id\)\)/);
-	assert.match(tabSource, /onUpdateModelThinkingLevelDefault=\{props\.onUpdateModelThinkingLevelDefault && props\.getModelThinkingLevelDefault \? \(i, value\) => props\.onUpdateModelThinkingLevelDefault!\(name, i, value\) : undefined\}/);
+	// 逐模型设置按 modelId（不是行下标）建键：卡片负责把行下标翻译成 provider.models[i].id 再交给父级。
+	assert.match(tabSource, /onUpdateModelThinkingLevelDefault=\{props\.onUpdateModelThinkingLevelDefault && props\.getModelThinkingLevelDefault \? \(i, value\) => props\.onUpdateModelThinkingLevelDefault!\(name, provider\.models\[i\]\?\.id \?\? "", value\) : undefined\}/);
+	assert.match(tabSource, /getModelThinkingLevelDefault=\{props\.onUpdateModelThinkingLevelDefault && props\.getModelThinkingLevelDefault \? \(i\) => props\.getModelThinkingLevelDefault!\(name, provider\.models\[i\]\?\.id \?\? ""\) : undefined\}/);
+	// 档位勾选回调按 provider 上下文透传（level + enabled，不再是 xhigh/max 的白名单值）
+	assert.match(tabSource, /onUpdateModelThinkingLevel=\{\(i, level, enabled\) => props\.onUpdateModelThinkingLevel\(name, i, level, enabled\)\}/);
 });
 
 test("cost config opens in a Dialog per model", () => {
@@ -244,12 +268,12 @@ test("dead CSS rules removed, kept rules intact", () => {
 	assert.doesNotMatch(surfaces, /\.config-thinking-levels-segmented/);
 	assert.doesNotMatch(surfaces, /\.config-thinking-level-option/);
 	assert.doesNotMatch(surfaces, /\.config-cost-cell/);
-	// 保留：计费字段布局 / 图片 label / 级别行与 key 样式（Popover 内使用）
+	// 思考档位改勾选列表后，xhigh/max 两行下拉留下的 legacy 样式全部下线
+	assert.doesNotMatch(surfaces, /\.config-thinking-levels/);
+	// 保留：计费字段布局 / 图片 label
 	assert.doesNotMatch(surfaces, /\.config-model-cost \{/);
 	assert.match(surfaces, /\.config-model-cost-field \{/);
 	assert.match(surfaces, /\.config-input-option \{/);
-	assert.match(surfaces, /\.config-thinking-levels-cell \{/);
-	assert.match(surfaces, /\.config-thinking-levels-row \.config-select-trigger > span/);
 });
 
 test("逐模型 UA 不再占独立列，改由操作列图标 + 弹框编辑", () => {

@@ -196,14 +196,21 @@ export class PetSystem {
 			const prev = settingsStore.get();
 			await this.reactToSettings(prev, await settingsStore.update({ petId: id }));
 		});
-		ipcMain.handle(C.petMoveWindow, async (_e, pos: { x: number; y: number }) => this.petWindow.moveTo(pos.x, pos.y));
+		// 渲染层入参一律不可信：NaN/缺字段会让 setBounds 抛 TypeError（unhandledRejection），边界处拦掉
+		ipcMain.handle(C.petMoveWindow, async (_e, pos: { x: number; y: number }) => {
+			if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+			this.petWindow.moveTo(pos.x, pos.y);
+		});
 		ipcMain.handle(C.petMoveBy, async (_e, delta: { dx: number; dy: number }) => {
+			if (!delta || !Number.isFinite(delta.dx) || !Number.isFinite(delta.dy)) return;
 			if (!this.petWindow.exists) return;
 			const [x, y] = this.petWindow.window!.getPosition();
 			// ipcMain.handle 对同一通道是串行执行的，setPosition 是同步的，不会产生增量竞争
 			this.petWindow.moveTo(x + delta.dx, y + delta.dy);
 		});
 		ipcMain.handle(C.petPreviewMode, async (_e, mode: string) => {
+			// 预览模式是渲染层内部枚举，只做形态校验白名单不做：新增预览模式不改主进程
+			if (typeof mode !== "string" || mode.length === 0 || mode.length > 64) return;
 			const win = this.petWindow.window;
 			if (win && !win.isDestroyed()) win.webContents.send(C.petPreviewMode, mode);
 		});

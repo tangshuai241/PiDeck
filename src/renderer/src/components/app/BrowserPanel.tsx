@@ -421,11 +421,22 @@ export function BrowserPanel(props: {
 
 	return (
 		<div className={panelClass} onClick={(event) => event.stopPropagation()}>
-			<div className="flex shrink-0 items-stretch overflow-x-auto overflow-y-hidden border-b border-border/40 bg-bg-subtle [scrollbar-width:thin]">
+			<div className="flex shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-border/40 px-2 py-1 [scrollbar-width:thin]" role="tablist" aria-label={t("browser.tabsAriaLabel")}>
 				{tabs.map((tab) => (
 					<div
 						key={tab.id}
-						className={`flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1 border-r border-border/30 px-2.5 py-1 text-xs whitespace-nowrap select-none text-text-tertiary${tab.id === activeTabId ? " border-b-2 border-primary -mb-px bg-bg-panel text-text-primary" : ""}`}
+						/* 标签页可键盘到达：tablist/tab 语义 + Enter/Space 激活（焦点环沿仓库惯例 shadow-[var(--focus-ring)]） */
+						role="tab"
+						aria-selected={tab.id === activeTabId}
+						tabIndex={0}
+						/* 外观对齐中间栏文件 tab（rounded + 选中底色，不用侧边框/下缘指示条） */
+						className={`flex max-w-48 shrink-0 cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs whitespace-nowrap select-none focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none${tab.id === activeTabId ? " bg-bg-active text-text-primary" : " text-muted-foreground hover:bg-bg-hover hover:text-text-primary"}`}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								switchTab(tab.id);
+							}
+						}}
 						onClick={() => switchTab(tab.id)}
 					>
 						<span className="min-w-0 truncate">{tab.title || tab.url}</span>

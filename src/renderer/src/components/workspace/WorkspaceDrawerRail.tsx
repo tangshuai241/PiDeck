@@ -33,7 +33,9 @@ export type WorkspaceDrawerRailAction = {
 export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[]; addLabel: string }) {
 	if (props.actions.length === 0) return null;
 	const optionalActions = props.actions.filter((action) => action.canRemove && action.onTogglePinned);
-	const visibleActions = props.actions.filter((action) => (action.pinned ?? false) || !action.canRemove);
+	// 活动面板必须在 rail 里可见：外部入口（消息里的「在浏览器打开」、插件打开本地服务 UI）只切内容
+	// 不钉住 tab，漏掉 active 会让面板内容看起来「没有归属 tab」（2026-10 用户反馈）。
+	const visibleActions = props.actions.filter((action) => (action.pinned ?? false) || !action.canRemove || action.active);
 	return (
 		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2" role="tablist" aria-orientation="horizontal">
 			{visibleActions.map((action) => (

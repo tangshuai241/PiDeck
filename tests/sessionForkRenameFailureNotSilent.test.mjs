@@ -109,3 +109,23 @@ test("通知文案存在于主进程 i18n（渲染层经 ...mainProcess 展开�
 	assert.equal((zh.match(/notice\.sessionSuffixRenameFailed/g) ?? []).length, 0, "渲染层不得重复声明主进程通知 key");
 	assert.equal((en.match(/notice\.sessionSuffixRenameFailed/g) ?? []).length, 0, "renderer dictionary must not redeclare main-process notice keys");
 });
+
+/**
+ * fork/clone/copy 注册必须携带命令层权威标题（titleAuthority: "command"）。
+ *
+ * 现场（2026-10-11）：复制 12MB 会话时扫描抢在 (fork) 名落盘前先索引了新文件，标题被锁成
+ * 正文兜底；随后 rename 把权威名追加在文件尾部，而大文件只读头/尾 64KB 窗口（后续消息很快
+ * 把它推出尾窗），fallback→权威名的升级再也触发不了 —— 侧栏永久显示首条消息正文、没有 (fork)。
+ * 单元行为由 sessionCatalogTitleOrigin.test.mjs 覆盖；这里守住两处装配不丢参数（丢了就是静默回归）。
+ */
+test("fork/copy 注册必须把命令层标题授权传给 catalog（titleAuthority）", () => {
+	const copyBody = functionBody(indexSource, "async function copyCatalogSession");
+	assert.match(copyBody, /titleAuthority:\s*"command"/, "copy 静态复制路径必须授权命令层标题");
+	const forkBody = functionBody(indexSource, "resolveTargetSessionId: async () => {");
+	assert.match(forkBody, /titleAuthority:\s*"command"/, "fork/clone 换绑路径必须授权命令层标题");
+
+	const catalogSource = readFileSync("src/main/sessions/SessionCatalog.ts", "utf8");
+	assert.match(catalogSource, /titleAuthority === "command"/, "ensureRuntimeTarget 必须实现命令层覆盖规则");
+	// 覆盖范围：只允许改写未确认（undefined）与内容派生（fallback）的标题，manual/auto/legacy 不动。
+	assert.match(catalogSource, /currentOrigin === undefined \|\| currentOrigin === "fallback"/);
+});

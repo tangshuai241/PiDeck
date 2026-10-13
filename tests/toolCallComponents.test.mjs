@@ -113,7 +113,6 @@ test("thinking and tool logos keep a distinct color even on the default zinc the
 	const css = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 	const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
 	const cards = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
-	const web = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
 	assert.match(foundation, /--color-thinking:\s*#6366f1/);
 	assert.match(foundation, /--color-thinking:\s*#818cf8/);
 	assert.match(css, /\.thinking-row-icon \{[\s\S]*?color:\s*var\(--color-thinking\)/);
@@ -125,7 +124,6 @@ test("thinking and tool logos keep a distinct color even on the default zinc the
 	assert.match(skillIcon, /color:\s*var\(--color-thinking\)/);
 	assert.doesNotMatch(skillIcon, /--color-brand-purple/);
 	assert.match(cards, /className="thinking-row-icon shrink-0"/);
-	assert.match(web, /className="thinking-row-icon"/);
 	assert.match(toolCalls, /className="tool-card-icon inline-flex shrink-0 items-center justify-center"/);
 	assert.doesNotMatch(toolCalls, /className="tool-card-icon[^"\n]*text-text-tertiary/);
 });

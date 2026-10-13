@@ -82,6 +82,7 @@ function createSendHarness(initial = {}) {
 		sessionQuotesByIdAtom: {},
 		sessionComposerModeByIdAtom: {},
 		sessionRuntimeByIdAtom: {},
+		sessionSendStateByIdAtom: {},
 		sessionRecordsAtom: {},
 		setSessionDraftAtom: {},
 		setSessionAttachmentsAtom: {},
@@ -99,6 +100,7 @@ function createSendHarness(initial = {}) {
 		[atoms.sessionQuotesByIdAtom, { ...(initial.quotes ?? {}) }],
 		[atoms.sessionComposerModeByIdAtom, { ...(initial.modes ?? {}) }],
 		[atoms.sessionRuntimeByIdAtom, { ...(initial.runtimes ?? {}) }],
+		[atoms.sessionSendStateByIdAtom, {}],
 		[atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
 		[atoms.dshRuntimeStatusAtom, { state: "installed" }],
 	]);
@@ -132,6 +134,7 @@ function createSendHarness(initial = {}) {
 			if (input.state.status === "idle") delete next[input.sessionId];
 			else next[input.sessionId] = input.state;
 			state.set("sendStates", next);
+			state.set(atoms.sessionSendStateByIdAtom, next);
 		}
 	};
 	const module = compile("src/renderer/src/hooks/useSessionSend.ts", {
@@ -284,7 +287,14 @@ test("a pre-send Chat surface promotes once and only sends through its real Sess
 		ensureSessionId: async (sourceSessionId) => {
 			promotionCalls += 1;
 			assert.equal(sourceSessionId, bootstrapId);
-			return promotion.promise;
+			const targetSessionId = await promotion.promise;
+			// 与真实 ensureSessionId 一致：提升会同步搬迁在途 requestId，而不只返回 ID。
+			const sendStates = { ...harness.state.get(harness.atoms.sessionSendStateByIdAtom) };
+			sendStates[targetSessionId] = sendStates[sourceSessionId];
+			delete sendStates[sourceSessionId];
+			harness.state.set(harness.atoms.sessionSendStateByIdAtom, sendStates);
+			harness.state.set("sendStates", sendStates);
+			return targetSessionId;
 		},
 		sendPrompt: async (input) => {
 			submitted = input;
@@ -321,8 +331,8 @@ test("A/B switching cannot clear or restore the other Session draft", () => {
 	assert.match(source, /clearComposerSnapshot\(sessionId, keepDraft\)/);
 	// 拒绝恢复用原始草稿（rawDraft，含引用 token）：保留 chip 形态供用户修改重发；
 	// unknown 快照仍存展开后文本（已实际投递的内容）
-	assert.match(source, /restoreRejectedPrompt\(sessionId, keepDraft, rawDraft, imageSnapshot\)/);
-	assert.match(source, /restoreRejectedSnapshot\(targetSessionId, message, imageSnapshot\)/);
+	assert.match(source, /restoreRejectedPrompt\(\s*sessionId\s*,\s*keepDraft\s*,\s*rawDraft\s*,\s*imageSnapshot\s*,\s*quoteMap\s*\)/);
+	assert.match(source, /restoreRejectedSnapshot\(\s*targetSessionId\s*,\s*message\s*,\s*imageSnapshot\s*,\s*quoteSnapshot\s*\)/);
 	// 输入框临时 UI（↑ 历史、DOM 草稿镜像）同样必须留 keepDraft 出口，否则直发会把用户草稿镜像置空
 	assert.match(source, /function resetComposerEphemeralUi\(keepDraft: boolean\) \{\s*if \(keepDraft\) return;/);
 	assert.equal(source.match(/options\.resetComposerUi\?\.\(\)/g)?.length, 1, "resetComposerUi 必须统一走 resetComposerEphemeralUi 收口");

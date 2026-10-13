@@ -19,12 +19,21 @@ export type GitRepoInfo = {
 };
 
 /** AI 生成提交摘要的结果：结构化错误码供渲染层区分“未配置/忙碌/超时”，避免透传 pi 英文错误。 */
+/**
+ * AI 生成提交摘要的结果。
+ * 失败原因必须能区分：
+ * - 没配置模型 / 上一份还在生成 / 超时 / 模型调用失败（GIT_COMMIT_*）
+ * - 仓库目录没解析出来（GIT_COMMIT_NO_REPO）
+ * - 没有暂存内容（GIT_COMMIT_EMPTY_DIFF）——最容易被误报成「模型没返回」，用户会白查模型配置
+ * - 读暂存 diff 失败（GIT_COMMIT_DIFF_FAILED，message 为 git 原始报错）
+ * 只有 `{ ok: true, message: "" }` 才表示「模型返回了空串」。
+ */
 export type GitGenerateCommitMessageResult =
 	| { ok: true; message: string }
 	| {
 			ok: false;
-			/** 渲染层据此决定提示形态（如未配置时带“去设置”按钮） */
-			code: "GIT_COMMIT_MODEL_REQUIRED" | "GIT_COMMIT_BUSY" | "GIT_COMMIT_TIMEOUT" | "GIT_COMMIT_GENERATE_FAILED";
+			/** 渲染层据此决定提示形态（如未配置时带“去设置”按钮、空暂存区提示先暂存并刷新状态） */
+			code: "GIT_COMMIT_MODEL_REQUIRED" | "GIT_COMMIT_BUSY" | "GIT_COMMIT_TIMEOUT" | "GIT_COMMIT_GENERATE_FAILED" | "GIT_COMMIT_NO_REPO" | "GIT_COMMIT_EMPTY_DIFF" | "GIT_COMMIT_DIFF_FAILED";
 			message: string;
 	  };
 

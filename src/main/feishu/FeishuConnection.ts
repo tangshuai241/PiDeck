@@ -111,7 +111,11 @@ export class FeishuConnection {
 				},
 			});
 			this.wsClient = ws;
-			ws.start({ eventDispatcher: dispatcher });
+			// SDK 的 start() 返回 Promise：连接建立是异步的，不 await 但必须兜 rejection，
+			// 否则握手失败会变成 unhandledRejection（onError 只覆盖建立后的连接异常）。
+			void ws.start({ eventDispatcher: dispatcher }).catch((startErr: unknown) => {
+				logErr("[飞书 Bridge] WSClient 启动失败:", startErr);
+			});
 			// 对外建立常驻长连接（带机器人凭据），起停必须落应用日志而不只是 console
 			getAppLogger()?.info("feishu", "Feishu connection started", { appId });
 			log("[飞书 Bridge] WSClient 已启动");

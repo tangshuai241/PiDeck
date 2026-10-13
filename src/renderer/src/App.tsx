@@ -59,12 +59,14 @@ import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
 import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
 import { useArchMismatchNotice } from "./hooks/useArchMismatchNotice";
-import { useAnnouncementNotifier } from "./hooks/useAnnouncementNotifier";
+
 import { useModelsVerifyNotifier } from "./hooks/useModelsVerifyNotifier";
 import { useBackgroundAskPatrol } from "./hooks/useBackgroundAskPatrol";
-import { announcementCenterOpenAtom, announcementNotificationEnabledAtom } from "./atoms/announcement-atoms";
-import { logoStyleAtom } from "./atoms/app-ui-atoms";
+
+import { appDisplayNameAtom, customLogoAtom, logoStyleAtom } from "./atoms/app-ui-atoms";
 import { LOGO_STYLE_STORAGE_KEY, resolveLogoStyle } from "./components/app/piTuiLogoData";
+import { writeBootBrandCache } from "./components/app/bootBrandCache";
+import { resolveAppDisplayName } from "../../shared/types/settings";
 import { openProviderLoginAtom } from "./atoms/providerLoginAtoms";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
@@ -77,11 +79,12 @@ import { resolveTerminalOwner, terminalOwnerKey } from "./terminalDockState";
 import { useImportFlow } from "./hooks/useImportFlow";
 import { useDirectoryImport } from "./hooks/useDirectoryImport";
 import { useQueuedPrompt } from "./hooks/useQueuedPrompt";
+import { useComposerStateSessionPrune } from "./hooks/useComposerStateSessionPrune";
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
 import { isLiveRuntimeStatus, sessionCommandFailureToast, type SessionRunCapabilities, type SessionRunAction } from "./utils/sessionCommands";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
 import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
@@ -133,8 +136,6 @@ import {
 	setSessionDraftAtom,
 	cacheSessionMessagesAtom,
 	upsertSessionAtom,
-	acpToolsAtom,
-	acpEnabledAtom,
 } from "./atoms";
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
@@ -356,27 +357,7 @@ export function App() {
 			})
 			.catch(() => undefined);
 	}, [showToast]);
-	// ACP 工具表（settings.acpTools 快照）：挂载时拉一次供新建会话菜单/设置页共享；
-	// 后续变更由设置页保存后整表回写 acpToolsAtom，不做事件订阅（改动频率极低）。
-	// 同一次拉取顺带同步 acpEnabled 快照：菜单组仅在开关开启时渲染（主进程同规则门控注册）。
-	useEffect(() => {
-		let cancelled = false;
-		void api.acp
-			.listTools()
-			.then((tools) => {
-				if (!cancelled) store.set(acpToolsAtom, tools);
-			})
-			.catch(() => undefined);
-		void api.settings
-			.get()
-			.then((settings) => {
-				if (!cancelled) store.set(acpEnabledAtom, settings.acpEnabled === true);
-			})
-			.catch(() => undefined);
-		return () => {
-			cancelled = true;
-		};
-	}, [store]);
+
 	// 历史命令：按 agent 隔离，agent 关闭即清除（不持久化）
 	const promptHistoryRef = useRef<Record<string, string[]>>({});
 
@@ -873,6 +854,9 @@ export function App() {
 		unknownDeliveryMessage: t("app.queuedUnknown"),
 		dispatchPromptSnapshot,
 	});
+	// composer 域 per-session 状态（草稿/引用全文仓/发送态等）的外部删除清理，
+	// 与 queue 同一所有权模式：records+runtime 双双消失才回收，引导页虚拟会话豁免。
+	useComposerStateSessionPrune(store);
 	useSessionRuntimeBridge({
 		onRuntimeCapabilityChanged: ({ sessionId, previous, current, patch }) => {
 			if (previous?.isExecutingTool && !current.isExecutingTool && (patch.toolStateSequence == null || previous.toolStateSequence == null || patch.toolStateSequence >= previous.toolStateSequence) && queue.isSessionRuntimeBusy(sessionId)) {
@@ -909,20 +893,24 @@ export function App() {
 		}
 	}, [settings.logoStyle, setLogoStyle]);
 
+	// 自定义品牌（显示名称 / 自定义 logo 图）→ 渲染层镜像 atom：品牌区、关于弹层、空态 LogoMark 订阅即时切换；
+	// 同时写 localStorage 开屏缓存，让下次启动的开屏（React 挂载前）用同一套品牌值。
+	// 自定义图只在 custom 风格下进缓存：切回内置风格时要把上一张图清掉，否则开屏会残留旧图。
+	const setAppDisplayName = useSetAtom(appDisplayNameAtom);
+	const setCustomLogo = useSetAtom(customLogoAtom);
+	useEffect(() => {
+		const displayName = resolveAppDisplayName(settings.appDisplayName);
+		const customLogo = resolveLogoStyle(settings.logoStyle) === "custom" ? (settings.logoCustomImage ?? "") : "";
+		setAppDisplayName(displayName);
+		setCustomLogo(settings.logoCustomImage ?? "");
+		writeBootBrandCache(displayName, customLogo);
+	}, [settings.appDisplayName, settings.logoCustomImage, settings.logoStyle, setAppDisplayName, setCustomLogo]);
+
 	// 公告通知开关 → 渲染层镜像 atom：通知调度与侧栏入口显隐共用同一数据源，
 	// 设置保存后即时生效（settings.get 首拉与 onSettingsApplied 都经此处同步）
-	const setAnnouncementNotifyEnabled = useSetAtom(announcementNotificationEnabledAtom);
-	useEffect(() => {
-		setAnnouncementNotifyEnabled(settings.announcementNotificationEnabled);
-		// 关闭通知时若公告弹窗恰好开着（弹窗与设置弹窗互斥，理论少见），一并收起，
-		// 避免重新开启后残留的 open=true 让弹窗自动弹开
-		if (!settings.announcementNotificationEnabled) {
-			store.set(announcementCenterOpenAtom, false);
-		}
-	}, [settings.announcementNotificationEnabled, setAnnouncementNotifyEnabled, store]);
 
 	// 公告通知调度（读镜像 atom）：输入/Agent 运行中/模态打开/窗口不活跃时自动延后弹出（不打扰操作，见 hook 注释）
-	useAnnouncementNotifier();
+
 	// toast 展示时长同步给 notice helper（全局统一口径；保存设置即时生效）
 	useEffect(() => {
 		configureNoticeDefaults({ toastDurationMs: settings.toastDurationMs });
@@ -1182,6 +1170,7 @@ export function App() {
 		setPendingAgents,
 		queueFlushBySessionRef,
 		queuedPromptsRef: queue.queuedPromptsRef,
+		suppressQueueAutoDrain: queue.suppressSessionQueueAutoDrain,
 	});
 
 	// 终端 IPC 目标：Agent 会话优先绑定当前 runtime；未启动或已停止时回退到项目 cwd。
@@ -1202,8 +1191,14 @@ export function App() {
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
+	// 外部链接与本地服务 Web UI 共用同一个出口：强制打开 browser 抽屉 + 内置浏览器新建 tab。
+	const openInBrowser = (url: string) => {
+		workspace.openDrawerForce("browser");
+		navigateTo(url);
+	};
+
 	// 桌面插件发起的会话导航：broker 已验权限/归属，这里只注入现有选中动作（复用唯一选中路径）
-	useHostPluginNavigation(selectSessionCommand);
+	useHostPluginNavigation(selectSessionCommand, openInBrowser);
 
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
@@ -1318,7 +1313,7 @@ export function App() {
 				// 选了 dsh 但 DSH runtime 不可用时按 effectiveAgentBackendAtom 同一条
 				// 钳制规则回落 pi，避免首次发送才在 createDraft 门控上抛错。
 				// 与 ComposerArea 的展示用同一纯函数：展示的后端和创建的后端必须一致。
-				const draftBackend = resolveGuidePageBackend({ override: readWelcomeBackendPreference(), acpToolId: readWelcomeAcpToolPreference(), effectiveDefault: effectiveAgentBackend });
+				const draftBackend = resolveGuidePageBackend({ override: readWelcomeBackendPreference(), effectiveDefault: effectiveAgentBackend });
 				// 模型偏好按后端分开取（issue #253）：DSH 的模型是 host route 名，不在 models.json，
 				// 必须作为显式 model 直接带给 host；pi 的偏好走 welcomeModel（launchDefaults 会按
 				// models.json 校验存在性）。历史上 DSH 侧不读偏好，点选因此永远不生效。
@@ -1335,7 +1330,7 @@ export function App() {
 					projectId: project.id,
 					title: draftBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
 					backend: draftBackend,
-					...(draftBackend === "acp" ? { acpToolId: readWelcomeAcpToolPreference() } : {}),
+
 					...(welcomeModel ? (draftBackend === "dsh" ? { model: welcomeModel } : { welcomeModel }) : {}),
 					...(welcomeThinking ? { thinkingLevel: welcomeThinking } : {}),
 				});
@@ -1405,12 +1400,7 @@ export function App() {
 			setSettings(next);
 			showToast(t("settings.restartNotice"));
 		},
-		onOpenInBrowser: (url: string) => {
-			// 外部链接必须强制打开 browser 面板（openDrawer 是 toggle 语义，
-			// 已是 browser 展开时会关抽屉，导致首次点击关抽屉、二次重复入栈）
-			workspace.openDrawerForce("browser");
-			navigateTo(url);
-		},
+		onOpenInBrowser: openInBrowser,
 		onTrustRequest: overlays.setTrustRequest,
 		// 主进程焦点目标（通知点击/右键打开项目）：sessionId 走旧链路选中会话；
 		// projectId/projectPath 由 useSessionWorkspaceChrome 的订阅处理（本回调只透传不重复消费）。
@@ -1847,15 +1837,14 @@ export function App() {
 		}
 	}
 
-	// 设置写入域（updateSettings/restartWebService + webServiceChanging 态）收口到 useSettingsUpdater
-	const { updateSettings, restartWebService, webServiceChanging } = useSettingsUpdater({
+	// 设置写入域（保存与配置联动）收口到 useSettingsUpdater
+	const { updateSettings } = useSettingsUpdater({
 		showToast,
 		piUpdate,
 		onSettingsApplied: setSettings,
 		onProjectsChanged: setProjects,
 		activeProjectId,
 		refreshProjectSessions,
-		webServiceEnabled: settings.webServiceEnabled,
 	});
 
 	const switchBranch = useCallback(
@@ -2029,20 +2018,7 @@ export function App() {
 			createAnonymous: async (projectId) => {
 				await createAnonymousSessionWithTab(projectId);
 			},
-			// ACP 工具会话：backend 固定 acp、acpToolId 指向 settings.acpTools 条目。
-			// 工具表已加载进 acpToolsAtom，此处只按 id 取名称作草稿标题；找不到（刚被删）
-			// 提示引导而不是静默失败。创建后与 createDraft 同一条选中/登记链。
-			createAcp: async (projectId, toolId) => {
-				const tool = store.get(acpToolsAtom).find((candidate) => candidate.id === toolId);
-				if (!tool) {
-					showToast(t("app.acpNoTools"), 3000);
-					return;
-				}
-				const session = await api.sessions.createDraft({ projectId, title: tool.name, backend: "acp", acpToolId: tool.id });
-				upsertSession(session);
-				selectSessionCommand(projectId, session.id, false);
-				workspaceChrome.registerOpenSession(session.id, "permanent");
-			},
+
 			deleteDraft: deleteDraftSession,
 			rename: rename.openSessionRename,
 			export: runExportSidebarSession,
@@ -2364,11 +2340,7 @@ export function App() {
 		onNewSessionInProject: (projectId: string) => {
 			void createSessionDraftWithTab(projectId);
 		},
-		// ACP 工具会话入口（Tab 栏 + 下拉尾部，工具→项目二级）：走 sidebarActions.createAcp，
-		// 与设置页共用同一条创建链（backend=acp + acpToolId）。
-		onNewAcpSession: (projectId: string, toolId: string) => {
-			void sidebarActions.sessions.createAcp(projectId, toolId);
-		},
+
 		onTogglePin: workspaceChrome.togglePin,
 		onReorder: workspaceChrome.reorderTab,
 		// 分屏组胶囊：分屏内会话聚合为组（颜色标记 + 展开/收起）
@@ -2467,6 +2439,7 @@ export function App() {
 			queueRetract: queue.retractQueuedPromptForEdit,
 			queueDiscard: queue.discardQueuedPrompt,
 			queueChangeBehavior: queue.setQueuedPromptBehavior,
+			queueSuppressAutoDrain: queue.suppressSessionQueueAutoDrain,
 			queueFlushBySessionRef,
 			restartingAgentId,
 			sessionDurationByAgent,
@@ -2519,6 +2492,7 @@ export function App() {
 			queue.discardQueuedPrompt,
 			queue.queuedPrompts,
 			queue.retractQueuedPromptForEdit,
+			queue.suppressSessionQueueAutoDrain,
 			queueFlushBySessionRef,
 			restartActiveAgent,
 			restartingAgentId,
@@ -3305,7 +3279,7 @@ export function App() {
 							}}
 						/>
 					</EnvironmentOverlay>
-					<SettingsFeatureRoot settings={settings} piUpdate={piUpdate} webServiceChanging={webServiceChanging} onRestartWebService={restartWebService} appInfo={appInfo} onChange={updateSettings} projects={projects} projectId={activeProject?.id} projectKind={activeProject?.kind} projectName={activeProject?.name} />
+					<SettingsFeatureRoot settings={settings} piUpdate={piUpdate} appInfo={appInfo} onChange={updateSettings} projects={projects} projectId={activeProject?.id} projectKind={activeProject?.kind} projectName={activeProject?.name} />
 					{/*
 					 * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），
 					 * 在装配层组合：useOverlayActions 只持开关状态，会话创建与预填在此处注入。

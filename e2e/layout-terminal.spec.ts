@@ -1,4 +1,5 @@
 import { test, expect } from "./mock-pi-fixture";
+import { openFirstSession } from "./open-session";
 
 /**
  * 终端 Dock（#113 3.3-12）：开合、xterm 就绪、shell 菜单。
@@ -9,9 +10,8 @@ import { test, expect } from "./mock-pi-fixture";
 test("layout: terminal dock open/shell/collapse", async ({ window }) => {
 	test.setTimeout(120_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	await window.getByRole("button", { name: "启动 Agent" }).click();
-	const composer = window.locator(".composer .rich-input");
-	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+	// 未激活 agent 时挂的是项目终端；UI 2.0 起欢迎页无「启动 Agent」，改用侧栏「新建会话」建草稿会话。
+	const composer = await openFirstSession(window);
 
 	// 发送一条让 agent 进程真实运行，再打开终端
 	await composer.click();
@@ -76,9 +76,7 @@ test("layout: terminal dock open/shell/collapse", async ({ window }) => {
 test("layout: terminal stays open while the agent streams", async ({ window }) => {
 	test.setTimeout(120_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	await window.getByRole("button", { name: "启动 Agent" }).click();
-	const composer = window.locator(".composer .rich-input");
-	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+	const composer = await openFirstSession(window);
 
 	// 先完成一轮，确保 outline 已有 activeAgentId 和终端入口。
 	await composer.click();

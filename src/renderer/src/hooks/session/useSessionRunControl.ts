@@ -36,6 +36,8 @@ export interface SessionRunControlDeps {
 	setPendingAgents: (updater: PendingAgentTab[] | ((current: PendingAgentTab[]) => PendingAgentTab[])) => void;
 	queueFlushBySessionRef: MutableRefObject<Set<string>>;
 	queuedPromptsRef: MutableRefObject<Record<string, QueuedPrompt[]>>;
+	/** 「停止响应」时抑制排队消息的自动投递（App 注入 queue.suppressSessionQueueAutoDrain；可选以便测试装配）。 */
+	suppressQueueAutoDrain?: (sessionId: string) => void;
 }
 
 /**
@@ -45,7 +47,23 @@ export interface SessionRunControlDeps {
  * - runSessionControl 是全状态统一入口（start/abort/restart/reload 按能力分派）；
  * - pendingAgents 状态留在 App（创建流程与重启流程共享），经 ref+setter 注入。
  */
-export function useSessionRunControl({ agents, activeAgent, activeAgentId, activeProjectId, showToast, overlays, refreshProjectSessions, selectSessionCommand, registerOpenSession, getSessionRecord, pendingAgentsRef, setPendingAgents, queueFlushBySessionRef, queuedPromptsRef }: SessionRunControlDeps) {
+export function useSessionRunControl({
+	agents,
+	activeAgent,
+	activeAgentId,
+	activeProjectId,
+	showToast,
+	overlays,
+	refreshProjectSessions,
+	selectSessionCommand,
+	registerOpenSession,
+	getSessionRecord,
+	pendingAgentsRef,
+	setPendingAgents,
+	queueFlushBySessionRef,
+	queuedPromptsRef,
+	suppressQueueAutoDrain,
+}: SessionRunControlDeps) {
 	const store = useStore();
 	const applyRuntimeEvent = useSetAtom(applySessionRuntimeEventAtom);
 	const setMutationOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
@@ -222,7 +240,11 @@ export function useSessionRunControl({ agents, activeAgent, activeAgentId, activ
 		}
 		const overlay = store.get(sessionHistoryMutationOverlayByIdAtom)[target.sessionId];
 		const closingActivation = activatingSessionIdsRef.current.has(target.sessionId) && store.get(sessionRuntimeBySessionIdAtomFamily(target.sessionId))?.status === "starting" && (!overlay || overlay === "activating");
-		if (stoppingSessionIdsRef.current.has(target.sessionId) || (!closingActivation && (replacingSessionIdsRef.current.has(target.sessionId) || overlay))) return;
+		if (stoppingSessionIdsRef.current.has(target.sessionId) || (!closingActivation && (replacingSessionIdsRef.current.has(target.sessionId) || overlay))) {
+			// 同轮已有互斥操作（停止/重启/重载/编辑在途）：这是可重试的拒绝，不能静默丢弃点击。
+			showToast(t("sessionCommand.runtimeBusy"), 3000);
+			return;
+		}
 		stoppingSessionIdsRef.current.add(target.sessionId);
 		// 不以 capabilities.pending 挡 starting：关闭进程仍是卡在握手中的会话的恢复出口。
 		setStoppingAgentId(agentId);
@@ -230,12 +252,35 @@ export function useSessionRunControl({ agents, activeAgent, activeAgentId, activ
 		try {
 			requireSessionCommand(await api.sessions.stopRuntime(target));
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : String(error), 5000);
+			// 主进程报「运行实例不可用」= 渲染层快照过期：主进程对终态（error/closed）且进程已死的
+			// agent 会在查询路径里惰性解绑（SessionRuntimeCoordinator.getAgentId → unbindTerminalAgent），
+			// 且不推 detach。此时本地收敛这条过期绑定，否则红点常亮、菜单停在 error/关闭态，
+			// 用户点几次「关闭 Agent」都只拿到一句「没有可用的运行实例」，Agent 永远关不掉。
+			if (error instanceof SessionCommandFailure && error.code === "SESSION_RUNTIME_UNAVAILABLE") {
+				const reconciled = reconcileDetachedRuntime(target);
+				// 已收敛 → 明确告知状态已同步；期间换绑 → 可重试；条目已消失 → 原「不可用」提示
+				const message = reconciled === "reconciled" ? t("app.runtimeAlreadyGone") : reconciled === "rebound" ? t("sessionCommand.runtimeChanged") : t("sessionCommand.runtimeUnavailable");
+				showToast(message, 3000);
+			} else {
+				showToast(error instanceof Error ? error.message : String(error), 5000);
+			}
 		} finally {
 			stoppingSessionIdsRef.current.delete(target.sessionId);
 			setStoppingAgentId((current) => (current === agentId ? null : current));
 			if (store.get(sessionHistoryMutationOverlayByIdAtom)[target.sessionId] === "stopping") setMutationOverlay({ sessionId: target.sessionId, kind: null });
 		}
+	}
+
+	/**
+	 * 本地收敛过期绑定（与主进程 sessions:runtime-detach 同语义）：清掉 agentId 与运行状态 UI，
+	 * 会话回到「可启动」。返回收敛结论：期间已换绑/条目消失时不得覆盖新状态。
+	 */
+	function reconcileDetachedRuntime(target: SessionRuntimeTarget): "reconciled" | "rebound" | "missing" {
+		const current = store.get(sessionRuntimeBySessionIdAtomFamily(target.sessionId));
+		if (!current) return "missing";
+		if (current.agentId !== target.agentId || current.runtimeGeneration !== target.runtimeGeneration) return "rebound";
+		applyRuntimeEvent({ ...target, kind: "detach", sourceChannel: "sessions:runtime-detach", payload: null });
+		return "reconciled";
 	}
 
 	function requestCloseAgent(agent: Pick<AgentTab, "id" | "noSession">): Promise<void> {
@@ -292,6 +337,9 @@ export function useSessionRunControl({ agents, activeAgent, activeAgentId, activ
 		if (previous) {
 			applyAgentRuntimeState(agentId, { ...previous, isStreaming: false });
 		}
+		// 用户意图先落地（先于 IPC）：abort 结算后队列不得自动续发，也风掉等待期间到达的 tool-end steer drain；
+		// 会话再次变忙（用户直发/重发新回合）时由 useQueuedPrompt 自动解除抑制。
+		suppressQueueAutoDrain?.(target.sessionId);
 		try {
 			requireSessionCommand(await api.sessions.abortRuntime(target));
 		} catch (error) {

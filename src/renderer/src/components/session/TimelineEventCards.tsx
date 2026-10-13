@@ -13,6 +13,7 @@ import { MarkdownStream } from "./MarkdownStream";
 import { ShimmerText } from "./ShimmerText";
 import { ReasoningText } from "../agents/loading-states/reasoning-text";
 import { Loader } from "../motion/loader";
+import { RespondingTips } from "./RespondingTips";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import { SingleLinePreview } from "./SingleLinePreview";
 import { RowText } from "./RowText";
@@ -257,6 +258,9 @@ export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
+			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
+			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
+			<RespondingTips />
 		</div>
 	);
 }

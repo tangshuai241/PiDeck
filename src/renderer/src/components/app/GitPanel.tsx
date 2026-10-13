@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtom, useSetAtom } from "jotai";
-import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, List, ListTree, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { useAnimationWindow } from "../../hooks/useAnimationWindow";
@@ -16,6 +16,7 @@ import { GitStatus } from "../../../../shared/types";
 import { EMPTY_GIT_COMMIT_COMPOSER, gitCommitComposerByScopeAtom, gitCommitScopeKey, openSettingsAtom, patchGitCommitComposer, type GitCommitComposerState } from "../../atoms";
 import { t } from "../../i18n";
 import { fileNameOnly, FileTree, getCollapsibleChangeDirs, ResourceGroup, ResourceRow } from "./git/GitResourceTree";
+import { collectChangeTreeDirPaths, type GitChangeViewMode } from "./git/changeTree";
 import { GitCompactFilter, PaneHeader } from "./git/GitPanelControls";
 import { SourceControlGraph } from "./git/GitGraph";
 import { getViewportBoundMenuPlacement } from "./git/floatingMenuPosition";
@@ -301,6 +302,27 @@ function writeSmartCommitPreference(projectId: string, value: SmartCommitPrefere
 	}
 }
 
+/** 变更列表视图模式：全局偏好（不按项目分），同一台机器上各项目共享同一观感 */
+const GIT_CHANGES_VIEW_MODE_STORAGE_KEY = "pideck:git-panel:changes-view-mode:v1";
+
+/** 读取变更列表视图模式；无缓存/非法值回落平铺（默认不变观感，升级后与旧版一致，树形需用户主动开启） */
+function readChangesViewMode(): GitChangeViewMode {
+	try {
+		return localStorage.getItem(GIT_CHANGES_VIEW_MODE_STORAGE_KEY) === "tree" ? "tree" : "flat";
+	} catch {
+		return "flat";
+	}
+}
+
+/** 写入视图模式；存储不可用时静默跳过（本轮会话仍生效） */
+function writeChangesViewMode(mode: GitChangeViewMode): void {
+	try {
+		localStorage.setItem(GIT_CHANGES_VIEW_MODE_STORAGE_KEY, mode);
+	} catch {
+		// 无存储环境（预览页）只影响持久化
+	}
+}
+
 function defaultPaneState(): PaneState {
 	return {
 		heights: { changes: 100, graph: 200, compare: 160 },
@@ -522,6 +544,8 @@ export function GitPanel(props: GitPanelProps) {
 	});
 	/** 变更文件树的目录折叠态（merge/staged/working 共享，供「收起/展开全部」） */
 	const [collapsedChangeDirs, setCollapsedChangeDirs] = useState<Set<string>>(() => new Set());
+	/** 变更列表视图模式：树形（默认）/ 平铺，持久化在 localStorage */
+	const [changesViewMode, setChangesViewMode] = useState<GitChangeViewMode>(() => readChangesViewMode());
 	const [paneState, setPaneState] = useState<PaneState>(() => readPaneState(props.projectId, repoScopeKey, layout));
 
 	useEffect(() => {
@@ -892,16 +916,16 @@ export function GitPanel(props: GitPanelProps) {
 	const canCommit = Boolean(commitMessage.trim()) && hasChangesToCommit && !hasUnresolvedConflicts && !committing && !mutating;
 	const total = groups.merge.length + stagedCount + workingChanges.length;
 
-	// 合并 merge/staged/working 的可折叠目录，驱动顶部「收起/展开全部」按钮状态
+	// 合并 merge/staged/working 的可折叠目录，驱动顶部「收起/展开全部」按钮状态。
+	// 两种视图的折叠键不同：扁平是一级目录名，树形是每个可见目录的完整相对路径。
 	const collapsibleChangeDirs = useMemo(() => {
 		const dirs = new Set<string>();
 		for (const list of [groups.merge, groups.index, workingChanges]) {
-			for (const dir of getCollapsibleChangeDirs(list, props.projectRoot)) {
-				dirs.add(dir);
-			}
+			const entries = changesViewMode === "tree" ? collectChangeTreeDirPaths(list, props.projectRoot) : getCollapsibleChangeDirs(list, props.projectRoot);
+			for (const dir of entries) dirs.add(dir);
 		}
 		return dirs;
-	}, [groups.merge, groups.index, workingChanges, props.projectRoot]);
+	}, [groups.merge, groups.index, workingChanges, props.projectRoot, changesViewMode]);
 
 	const canCollapseChangeDirs = collapsibleChangeDirs.size > 0;
 	const allChangeDirsCollapsed = canCollapseChangeDirs && [...collapsibleChangeDirs].every((dir) => collapsedChangeDirs.has(dir));
@@ -921,6 +945,16 @@ export function GitPanel(props: GitPanelProps) {
 	}, [collapsibleChangeDirs]);
 
 	const expandAllChangeDirs = useCallback(() => {
+		setCollapsedChangeDirs(new Set());
+	}, []);
+
+	/** 切换树形/平铺：同时清空折叠态——两种视图的折叠键含义不同，留旧键会出现「看不见却被折叠」的行 */
+	const toggleChangesViewMode = useCallback(() => {
+		setChangesViewMode((current) => {
+			const next: GitChangeViewMode = current === "tree" ? "flat" : "tree";
+			writeChangesViewMode(next);
+			return next;
+		});
 		setCollapsedChangeDirs(new Set());
 	}, []);
 
@@ -1061,10 +1095,16 @@ export function GitPanel(props: GitPanelProps) {
 					finishCommitGen(scopeKey, { message });
 					showNotice(t("git.generateCommitMessageDone"), 2500);
 				} else {
-					// 主进程空 diff / 模型空输出都走 ok+空串；用户侧必须看到失败，否则会以为还在转
+					// 现在只有「模型返回空串」走到这里：空暂存区 / 无仓库 / 读 diff 失败都有独立错误码（#338）
 					finishCommitGen(scopeKey);
 					showNotice(t("git.generateCommitMessageEmpty"), 5000, "warning");
 				}
+			} else if (result.code === "GIT_COMMIT_EMPTY_DIFF") {
+				finishCommitGen(scopeKey);
+				// 后端以真实暂存区为准判定为空：本地 UI 分组可能是旧快照（#338 的误报场景），
+				// 提示先暂存后顺便走一次静默刷新，否则按钮守卫会继续放行、用户反复点出同一提示。
+				showNotice(t("git.stageBeforeGenerateCommitMessage"), 5000, "warning");
+				void refresh(true);
 			} else if (result.code === "GIT_COMMIT_MODEL_REQUIRED") {
 				finishCommitGen(scopeKey);
 				// 未配置：提示 + “去设置”直达常用设置的 Git 摘要栏（覆盖上次记住的其它 tab）
@@ -1091,7 +1131,7 @@ export function GitPanel(props: GitPanelProps) {
 			finishCommitGen(scopeKey);
 			showNotice(commitGenNoticeText(err instanceof Error ? err.message : undefined, t("git.generateCommitMessageFailed")), 5000, "error");
 		}
-	}, [openSettings, props.generateCommitMessage, props.projectId, repoScopeKey, groups.index.length]);
+	}, [openSettings, props.generateCommitMessage, props.projectId, repoScopeKey, groups.index.length, refresh]);
 
 	const doPush = async () => {
 		if (!props.push || mutationRunningRef.current) return;
@@ -1251,6 +1291,19 @@ export function GitPanel(props: GitPanelProps) {
 	const changeToolbar = (
 		<>
 			{loading && <Loader2 size={14} className="animate-pideck-spin" aria-label={t("common.loading")} />}
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				className="size-7"
+				aria-pressed={changesViewMode === "tree"}
+				title={changesViewMode === "tree" ? t("git.viewModeFlat") : t("git.viewModeTree")}
+				aria-label={changesViewMode === "tree" ? t("git.viewModeFlat") : t("git.viewModeTree")}
+				onClick={toggleChangesViewMode}
+			>
+				{/* 图标表示当前视图（与 aria-pressed 同义），title 表示点击后的动作 */}
+				{changesViewMode === "tree" ? <ListTree size={14} /> : <List size={14} />}
+			</Button>
 			<Button type="button" variant="ghost" size="icon-sm" className="size-7" title={t("drawer.collapseAllDirs")} aria-label={t("drawer.collapseAllDirs")} disabled={!canCollapseChangeDirs || allChangeDirsCollapsed} onClick={collapseAllChangeDirs}>
 				<ChevronsDownUp size={14} />
 			</Button>
@@ -1504,7 +1557,7 @@ export function GitPanel(props: GitPanelProps) {
 								<div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
 									{groups.merge.length > 0 && (
 										<ResourceGroup title={t("git.mergeChanges")} count={groups.merge.length} open={resourceOpen.merge} onToggle={() => toggleResource("merge")}>
-											<FileTree resources={groups.merge} groupType="merge" onOpenWorkspaceFileDiff={props.onOpenWorkspaceFileDiff} mutating={mutating || committing} projectRoot={props.projectRoot} collapsedDirs={collapsedChangeDirs} onToggleDir={toggleChangeDir} />
+											<FileTree resources={groups.merge} groupType="merge" onOpenWorkspaceFileDiff={props.onOpenWorkspaceFileDiff} mutating={mutating || committing} projectRoot={props.projectRoot} viewMode={changesViewMode} collapsedDirs={collapsedChangeDirs} onToggleDir={toggleChangeDir} />
 										</ResourceGroup>
 									)}
 									{groups.index.length > 0 && (
@@ -1533,6 +1586,7 @@ export function GitPanel(props: GitPanelProps) {
 												deleteFile={props.deleteFiles ? (path) => setDeleteTarget(path) : undefined}
 												onOpenFile={props.onOpenFile}
 												projectRoot={props.projectRoot}
+												viewMode={changesViewMode}
 												collapsedDirs={collapsedChangeDirs}
 												onToggleDir={toggleChangeDir}
 											/>
@@ -1566,6 +1620,7 @@ export function GitPanel(props: GitPanelProps) {
 												onOpenFile={props.onOpenFile}
 												stagedPaths={stagedPathSet}
 												projectRoot={props.projectRoot}
+												viewMode={changesViewMode}
 												collapsedDirs={collapsedChangeDirs}
 												onToggleDir={toggleChangeDir}
 												stageDir={(paths) => act(() => props.stageFiles(props.projectId, paths))}

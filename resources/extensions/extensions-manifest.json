@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "3b240a33e96bedb0b05e0404c91c4caa1d70e4bed569142390f08aa3aac7fbdd",
+  "bundleSha256": "959c9cceabf767807399d9c23bbbc124f28e104bca614c1d9310fb18188a933a",
   "fileCount": 31,
   "files": [
     {
       "name": "pi-deck-alignment-mode.ts",
-      "sha256": "296b432c6e7715a6c9702ac5ddfc59ec97ebb5bfc7b8e15c287e122f45a09c85",
-      "bytes": 15320
+      "sha256": "7b78d4cd4300764fa82f8337ae9aba3f63f44669347ae9ba674a165f43ebc60a",
+      "bytes": 15050
     },
     {
       "name": "pi-deck-alignment-state.ts",
@@ -136,8 +136,8 @@
     },
     {
       "name": "pi-deck-subagents.ts",
-      "sha256": "14d7929dee69923732f11f54c5792cb4ee2fc6e37141255f0f142dcb8b10b8d6",
-      "bytes": 24206
+      "sha256": "a8979f143e84a59044eae234a571a2dcd291e97a74df9443dec8e9a270552a77",
+      "bytes": 34320
     },
     {
       "name": "pi-deck-todo-state.ts",

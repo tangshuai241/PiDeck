@@ -81,5 +81,7 @@ test("startDshHostInBackground logs failures without surfacing an unhandled reje
 	assert.equal(warnings.length, 1);
 	assert.equal(warnings[0]?.[0], "dsh-host");
 	assert.equal(warnings[0]?.[1], "Background DSH host startup failed");
-	assert.equal(warnings[0]?.[2]?.error, "Error: host boot failed");
+	// 生产侧只记 error.message（结构化日志不再带 "Error: " 前缀）；用例关心的是
+	// rejection 被捕获并记录，不关心字符串形态。
+	assert.equal(warnings[0]?.[2]?.error, "host boot failed");
 });

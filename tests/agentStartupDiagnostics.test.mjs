@@ -44,7 +44,7 @@ test("agent startup writes diagnostics across renderer IPC and pi launch boundar
 	assert.match(mainSource, /rpcMs/);
 	assert.match(mainSource, /Agent create failed/);
 	assert.match(sessionIpcSource, /Session prompt IPC received/);
-	assert.match(sessionIpcSource, /sessionRuntimeCoordinator\.send\(input\)/);
+	assert.match(sessionIpcSource, /sessionRuntimeCoordinator\.send\(sanitizeRendererPromptInput\(input\)\)/);
 	assert.match(sessionIpcSource, /Session prompt IPC completed/);
 	assert.match(sessionIpcSource, /Session prompt IPC failed/);
 	assert.doesNotMatch(appSource, /api\.agents\.create\(/);

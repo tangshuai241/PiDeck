@@ -88,11 +88,10 @@ const surface = [
 	read("src/renderer/src/components/session/TimelineEventCards.tsx"),
 	read("src/renderer/src/components/session/MessageShareModal.tsx"),
 ].join("\n");
-const skillStore = read("src/renderer/src/config/SkillStoreTab.tsx");
+
 const yaoStore = read("src/renderer/src/config/YaoPromptTab.tsx");
-const skillHub = read("src/renderer/src/config/SkillHubStorePanel.tsx");
-const promptStore = read("src/renderer/src/config/PromptStoreTab.tsx");
-const extensions = read("src/renderer/src/config/ExtensionsTab.tsx") + "\n" + read("src/renderer/src/config/extensionsRecommendedPackages.tsx");
+
+const extensions = read("src/renderer/src/config/ExtensionsTab.tsx");
 const configShared = read("src/renderer/src/config/ConfigShared.tsx");
 const providerHeaders = read("src/renderer/src/config/providerHeaders.ts");
 // UA 预设清单已从 providerHeaders.ts 迁到 userAgentPresets.ts（纯函数 + 分组元数据，可单测）；
@@ -155,16 +154,14 @@ test("reachable renderer surfaces use i18n without changing their UI structure",
 	assert.match(settings, /t\("settings\.saveAndClose"\)/);
 	assert.match(settingsStorage, /t\("settings\.storage\.clearConfirm"/);
 	assert.match(surface, /t\("activity\.executionSummary", \{ summary:/);
-	assert.match(skillStore, /className="prompt-store-tab"[\s\S]*?t\("config\.skillStoreSearchPlaceholder"\)/);
+
 	assert.match(yaoStore, /className="store-sub-tab"[\s\S]*?t\("config\.yaoSearchPlaceholder"\)/);
-	assert.match(skillHub, /className="skillhub-installed-badge"[\s\S]*?t\("config\.installed"\)/);
-	assert.match(promptStore, /value: "yao", label: t\("config\.promptStoreChinesePicks"\)/);
-	assert.match(extensions, /className="extensions-recommended-desc">[\s\S]*?t\(pkg\.descriptionKey\)/);
+
 	assert.match(configShared, /getApiTypeDescription\(option\)/);
 	assert.match(userAgentPresets, /labelKey: "config\.userAgentBrowser"/);
 	assert.match(queuedPrompt, /unknownDeliveryMessage = t\("app\.queuedDeliveryUnknown"\)/);
 
-	for (const source of [fileDiffViewer, timeline, drawer, settingsStorage, surface, skillStore, yaoStore, skillHub, promptStore, extensions, providerHeaders, userAgentPresets, queuedPrompt]) {
+	for (const source of [fileDiffViewer, timeline, drawer, settingsStorage, surface, yaoStore, extensions, providerHeaders, userAgentPresets, queuedPrompt]) {
 		assert.doesNotMatch(source, /" · 未保存"|"加载中\.\.\."|`加载更多历史消息|"复制安装命令"|"消息可能未送达"|>中文精选</);
 	}
 });
@@ -174,22 +171,11 @@ test("renderer async failures log diagnostics and expose stable localized copy",
 	assert.match(devTab, /console\.error\("\[Settings\] WSL validation failed", err\)/);
 	assert.match(devTab, /error: t\("settings\.wsl\.validationFailed"\)/);
 
-	assert.match(skillStore, /console\.error\("\[SkillStore\] Search failed", err\)/);
-	assert.match(skillStore, /setError\(t\("config\.skillStoreImportError"\)\)/);
-	assert.doesNotMatch(skillStore, /setError\(err instanceof Error/);
-
 	assert.match(yaoStore, /console\.error\("\[YaoPrompts\] Preview failed", err\)/);
 	assert.match(yaoStore, /setError\(t\("config\.yaoImportError"\)\)/);
 	assert.doesNotMatch(yaoStore, /setError\(err instanceof Error/);
 
-	assert.match(skillHub, /console\.error\("\[SkillHub\] Search failed", err\)/);
 	// 安装失败 toast 带主进程返回的真实错误（npx 输出/网络/权限原因），不再只给通用文案
-	assert.match(skillHub, /showNotice\(t\("config\.skillHubInstallError", \{ error: result\.error \}\), 5000, "error"\)/);
-	assert.match(skillHub, /t\("config\.skillHubInstallError", \{ error: err instanceof Error \? err\.message : String\(err\) \}\)/);
-
-	assert.match(promptStore, /console\.error\("\[PromptStore\] Import failed", err\)/);
-	assert.match(promptStore, /setError\(t\("config\.promptStoreImportError"\)\)/);
-	assert.doesNotMatch(promptStore, /setError\(err instanceof Error/);
 
 	assert.match(extensions, /showNotice\([\s\S]*config\.extensionOperationFailed[\s\S]*formatExtensionError\(e\)/);
 	assert.doesNotMatch(extensions, /\balert\(/);

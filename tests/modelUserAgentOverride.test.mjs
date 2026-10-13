@@ -9,7 +9,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // providerHeaders.ts 经 ../i18n（目录 import）依赖时，裸 node --test 会报
 // ERR_UNSUPPORTED_DIR_IMPORT，因此走完整依赖图加载 helper。
-const { getModelUserAgentOverride, getProviderHeaders, setModelUserAgentOverride, setHeaderValue, PROVIDER_API_OPTIONS, DSH_PROVIDER_API_OPTIONS, API_TYPE_LABELS, getApiTypeDescription } = loadTsCommonJs("src/renderer/src/config/providerHeaders.ts");
+const { getModelUserAgentOverride, getProviderHeaders, setModelUserAgentOverride, setHeaderValue, pruneModelOverrides, PROVIDER_API_OPTIONS, DSH_PROVIDER_API_OPTIONS, API_TYPE_LABELS, getApiTypeDescription } = loadTsCommonJs("src/renderer/src/config/providerHeaders.ts");
 
 /**
  * API 类型下拉必须覆盖 pi 1.0.4 pi-ai 的聊天协议全集（BUILTIN_APIS 里的非 image/
@@ -118,4 +118,14 @@ test("getProviderHeaders: 非对象输入返回 undefined 而不是抛", () => {
 	assert.equal(getProviderHeaders(undefined), undefined);
 	assert.equal(getProviderHeaders("bad"), undefined);
 	assert.equal(getProviderHeaders([]), undefined);
+});
+
+test("pruneModelOverrides: 清掉不在当前模型列表里的孤儿键", () => {
+	const overrides = { a: { headers: { "User-Agent": "ua-a" } }, gone: { headers: { "User-Agent": "ua-gone" } } };
+	assert.deepEqual(pruneModelOverrides(overrides, ["a"]), { a: { headers: { "User-Agent": "ua-a" } } });
+	// 没命中孤儿 → 返回同一引用（调用方可跳过改写）；全是孤儿 → undefined（删字段）
+	assert.equal(pruneModelOverrides(overrides, ["a", "gone"]), overrides);
+	assert.equal(pruneModelOverrides(overrides, []), undefined);
+	// 同一条目的其它覆盖字段（如 maxTokens）保留在存活键里
+	assert.deepEqual(pruneModelOverrides({ a: { maxTokens: 1 }, gone: { maxTokens: 2 } }, ["a"]), { a: { maxTokens: 1 } });
 });

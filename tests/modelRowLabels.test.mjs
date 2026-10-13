@@ -37,13 +37,3 @@ test("name 带首尾空白：trim 后拼接", () => {
 test("name 与 id 相同：仍显示 provider/id", () => {
 	assert.equal(labelOf({ provider: "openai", id: "gpt-4o", name: "gpt-4o" }), "openai/gpt-4o");
 });
-
-test("Web 选择器同样用保存名称显示，identity 信息在弹层行内可见", () => {
-	// WebHeader 第三批瘦身把模型选择迁到 WebModelSheet：pill 只显示保存名称（provider 在弹层内呈现），
-	// identity（item.id）从旧版的 title tooltip 改为行内 caption ——信息仍可见，形式随 UI 迁移。
-	const source = readFileSync("src/renderer/src/web/WebModelSheet.tsx", "utf8");
-	assert.match(source, /resolveModelDisplayName\(model\.modelName,\s*model\.modelId\)/);
-	assert.match(source, /const pillLabel\s*=\s*selectedName \?\? t\("web\.model"\);/);
-	assert.match(source, /const name = resolveModelDisplayName\(item\.name, item\.id\);/);
-	assert.match(source, /\{name\}[\s\S]{0,120}\{item\.id\}/);
-});

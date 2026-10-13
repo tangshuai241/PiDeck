@@ -21,6 +21,11 @@ export const PROJECT_PASTE_DIR = ".pideck-paste";
 export const USER_PASTE_DIR = "paste-files";
 /** 启动清理保留期：超过 7 天的粘贴文件视为失效（会话结束后一般不再需要）。 */
 const PASTE_FILE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** 单次粘贴写入上界（字节）：与剪贴板图像写入上限（CLIPBOARD_IMAGE_MAX_CHARS）同族的资源护栏。
+ * 发送侧内联只读 PASTE_FILE_CONTENT_MAX_BYTES（2MiB），超限内容本就送不进 prompt；
+ * 写入侧拦到 25MiB 只是防病态剪贴板（数百 MB 文本）一次性撑爆 userData，正常长日志远够用。
+ * 超限拒绝后渲染层回退原样插入（pasteTextToFile 的 catch 分支），内容不丢。 */
+export const PASTE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 function isSamePath(left: string, right: string): boolean {
 	return resolve(left) === resolve(right);
@@ -96,6 +101,10 @@ export function registerPasteFilesIpc({ projectStore, settingsStore, appLogger }
 		if (!input || typeof input.content !== "string") {
 			throw new Error("Invalid paste-file input");
 		}
+		const bytes = Buffer.byteLength(input.content, "utf8");
+		if (bytes > PASTE_FILE_MAX_BYTES) {
+			throw new Error(`Paste content too large: ${bytes} bytes (max ${PASTE_FILE_MAX_BYTES})`);
+		}
 		const root = resolvePasteRoot(input.projectPath ?? "");
 		await mkdir(toWindowsPath(root), { recursive: true });
 		const fileName = generatePasteFileName();
@@ -103,10 +112,10 @@ export function registerPasteFilesIpc({ projectStore, settingsStore, appLogger }
 		await writeFile(toWindowsPath(path), input.content, "utf8");
 		void appLogger.info("paste-file", "Pasted text written to file", {
 			path,
-			bytes: Buffer.byteLength(input.content, "utf8"),
+			bytes,
 		});
 		// 新写入一律在 userData，pi 工作区读不到，发送必须内联原文（inProject=false）。
-		return { path, fileName, bytes: Buffer.byteLength(input.content, "utf8"), inProject: false };
+		return { path, fileName, bytes, inProject: false };
 	});
 
 	ipcMain.handle(ipcChannels.pasteFilesDelete, async (_event, path: string): Promise<void> => {

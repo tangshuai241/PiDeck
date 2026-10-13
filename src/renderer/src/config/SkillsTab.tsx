@@ -3,12 +3,11 @@ import { Switch } from "../components/ui-shadcn/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui-shadcn/select";
 import { useEffect, useState, type ReactNode } from "react";
-import { ContentTabs } from "./ContentTabs";
+
 import { Check, FileEdit, Pencil, ShoppingBag, Sparkles, Trash2, X, Store, Globe } from "lucide-react";
 import type { CreatePiSkillInput, PiSkillListResult, PiSkillLocation, PiSkillSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
-import { SkillStoreTab } from "./SkillStoreTab";
-import { SkillHubStorePanel } from "./SkillHubStorePanel";
+
 import { ContentStoreUpdatePanel } from "./ContentStoreUpdatePanel";
 import { desktopApi } from "../desktopApi";
 import { Input } from "../components/ui-shadcn/input";
@@ -92,9 +91,9 @@ export function SkillsTab(props: {
 	const localSkillNames = new Set(visibleSkills.map((skill) => skill.name.toLowerCase()));
 	const uniqueDiscoverySkills = props.discoverySkills.filter((item) => !localSkillNames.has(item.name.toLowerCase()));
 	// 一级 tab：本地 / 商店
-	const [skillTab, setSkillTab] = useState<"local" | "store">("local");
+
 	// 二级 tab（商店内）：选择供应商
-	const [storeSource, setStoreSource] = useState<"promptchat" | "skillhub">("skillhub");
+
 	const canCreate = props.newName.trim() && props.newDescription.trim();
 	// 新建技能的位置只影响保存目标，不应把其他目录已有的技能从列表中隐藏。
 	const selectedLocation = availableLocations.find((location) => location.id === props.newLocationId) ?? availableLocations[0];
@@ -102,42 +101,12 @@ export function SkillsTab(props: {
 		<div className="skills-tab">
 			<div className="mb-3 flex items-center justify-between gap-3">
 				{/* Scope stays in the page header while Local/Store content changes below. */}
-				<ContentTabs
-					value={skillTab}
-					onValueChange={(v) => {
-						if (v !== "local" && v !== "store") return;
-						setSkillTab(v);
-						// 切回本地时刷新列表：原 TabsTrigger onClick 行为迁到这里统一处理
-						// （beui trigger 不接收 onClick，且只在真正切换时触发，更符合预期）。
-						if (v === "local") props.onRefresh();
-					}}
-					items={[
-						{ value: "local", label: t("config.nav.skills") },
-						{ value: "store", label: t("config.skillStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> },
-					]}
-				/>
+				<span className="text-control font-medium">{t("config.nav.skills")}</span>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
 
-			{skillTab === "store" ? (
-				<div className="skills-store-content">
-					{/* 二级 tab：供应商切换（内容级下划线，compact 版） */}
-					<ContentTabs
-						compact
-						fill={false}
-						value={storeSource}
-						onValueChange={(v) => {
-							if (v === "skillhub" || v === "promptchat") setStoreSource(v);
-						}}
-						items={[
-							{ value: "skillhub", label: t("config.tabs.skillHub"), icon: <Store size={14} strokeWidth={1.8} /> },
-							{ value: "promptchat", label: "Prompt.chat", icon: <Globe size={14} strokeWidth={1.8} /> },
-						]}
-					/>
-					{storeSource === "skillhub" ? <SkillHubStorePanel projectId={props.scope === "project" ? props.projectId : undefined} /> : <SkillStoreTab projectId={props.scope === "project" ? props.projectId : undefined} onImported={props.onRefresh} locationId={props.newLocationId} />}
-				</div>
-			) : (
+			{
 				<>
 					{/* 内置技能热更新面板：随包技能可同步远端最新版（覆盖层优先），刷新列表即时生效 */}
 					<ContentStoreUpdatePanel
@@ -259,7 +228,7 @@ export function SkillsTab(props: {
 						)}
 					</div>
 				</>
-			)}
+			}
 		</div>
 	);
 }

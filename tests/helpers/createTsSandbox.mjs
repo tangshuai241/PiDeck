@@ -109,6 +109,7 @@ export function createTsSandbox(options = {}) {
 				TextDecoder,
 				TextEncoder,
 				AbortController,
+				AbortSignal,
 				setTimeout,
 				clearTimeout,
 				setInterval,

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getI18nLocale, t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import type { AppSettings } from "../../../../../shared/types";
-import { CUSTOM_THEME_TEMPLATE, serializeCustomThemePackage, type CustomThemeListItem } from "../../../../../shared/customThemes";
+import { CUSTOM_THEME_TEMPLATE, DEMO_CUSTOM_THEME, serializeCustomThemePackage, type CustomThemeListItem } from "../../../../../shared/customThemes";
 import { Button } from "../../ui-shadcn/button";
 import { Badge } from "../../ui-shadcn/badge";
 import { Textarea } from "../../ui-shadcn/textarea";
@@ -36,13 +36,18 @@ function SchemeSwatch({ tokens, dark }: { tokens: Record<string, string>; dark: 
 /** 编辑器弹窗状态：title 仅展示；raw 为当前编辑文本 */
 type EditorState = { title: string; raw: string };
 
+/** 行主键 / 磁盘操作键：用户文件用 fileId（文件名），内置示例没有文件、用包内 id */
+function themeRowKey(item: CustomThemeListItem): string {
+	return item.source === "builtin" ? item.id : (item.fileId ?? item.id);
+}
+
 export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionProps) {
 	const [dir, setDir] = useState("");
 	const [themes, setThemes] = useState<CustomThemeListItem[]>([]);
 	const [editor, setEditor] = useState<EditorState | null>(null);
 	const [errors, setErrors] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
-	// 删除二段确认： armed=待再次点击确认的条目 id；超时自动解除，避免误删
+	// 删除二段确认：armed=待再次点击确认的条目主键（themeRowKey）；超时自动解除，避免误删
 	const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
 	const disarmTimer = useRef<number | undefined>(undefined);
 
@@ -85,8 +90,21 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 
 	const handleNew = () => openEditor(t("settings.customThemesNew"), serializeCustomThemePackage(CUSTOM_THEME_TEMPLATE));
 
+	// 复制内置示例：改 id/name 后落成用户文件（内置示例的 id 保留，不与它共用）
+	const handleCopyDemo = () => {
+		const copy = serializeCustomThemePackage(DEMO_CUSTOM_THEME)
+			.replace(/"id":\s*"[^"]+"/, '"id": "my-berry-theme"')
+			.replace(/"name":\s*"[^"]+"/, '"name": "我的莓果主题"');
+		openEditor(t("settings.customThemesCopyDemo"), copy);
+	};
+
 	const handleEdit = async (item: CustomThemeListItem) => {
-		const raw = await desktopApi.customThemes.read(item.id);
+		// 内置示例不在磁盘上、也无法就地保存，其入口是工具栏「复制示例」
+		if (!item.fileId) {
+			toast.error(t("settings.customThemesReadFailed"));
+			return;
+		}
+		const raw = await desktopApi.customThemes.read(item.fileId);
 		if (raw === null) {
 			toast.error(t("settings.customThemesReadFailed"));
 			void refresh();
@@ -121,15 +139,23 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 	const handleDelete = async (item: CustomThemeListItem) => {
 		// 内置示例不可删（常量随包分发，不在磁盘上）
 		if (item.source !== "user") return;
-		if (armedDeleteId !== item.id) {
+		const fileId = item.fileId ?? item.id;
+		if (armedDeleteId !== fileId) {
 			// 第一段：进入待确认；3 秒无动作自动解除
-			setArmedDeleteId(item.id);
+			setArmedDeleteId(fileId);
 			if (disarmTimer.current !== undefined) window.clearTimeout(disarmTimer.current);
 			disarmTimer.current = window.setTimeout(() => setArmedDeleteId(null), 3000);
 			return;
 		}
 		setArmedDeleteId(null);
-		await desktopApi.customThemes.remove(item.id);
+		try {
+			await desktopApi.customThemes.remove(fileId);
+		} catch {
+			// 删除失败（文件已被外部移除、回收站不可用）必须显式报错：不能弹「已删除」却什么都没删
+			toast.error(t("settings.customThemesDeleteFailed", { id: item.name }));
+			await refresh();
+			return;
+		}
 		await refresh();
 		toast(t("settings.customThemesDeletedToast", { id: item.id }));
 	};
@@ -161,20 +187,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 					<Plus className="size-3.5" />
 					{t("settings.customThemesNew")}
 				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					title={t("settings.customThemesCopyDemoHint")}
-					onClick={async () => {
-						const demo = themes.find((item) => item.source === "builtin");
-						if (!demo) return;
-						const raw = await desktopApi.customThemes.read(demo.id);
-						if (raw === null) return;
-						// 复制为新主题：改 id/name 避免覆盖内置示例（内置不可写）
-						const copy = raw.replace(/"id":\s*"[^"]+"/, '"id": "my-berry-theme"').replace(/"name":\s*"[^"]+"/, '"name": "我的莓果主题"');
-						openEditor(t("settings.customThemesCopyDemo"), copy);
-					}}
-				>
+				<Button variant="outline" size="sm" title={t("settings.customThemesCopyDemoHint")} onClick={handleCopyDemo}>
 					<Copy className="size-3.5" />
 					{t("settings.customThemesCopyDemo")}
 				</Button>
@@ -192,9 +205,10 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 			<div className="flex flex-col gap-1.5">
 				{themes.length === 0 ? <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">{t("settings.customThemesEmpty")}</div> : null}
 				{themes.map((item) => {
+					const rowKey = themeRowKey(item);
 					const applied = appliedId === item.id && !item.parseError;
 					return (
-						<div key={`${item.source}:${item.id}`} className={cn("flex items-center gap-2 rounded-md border px-2.5 py-2", applied ? "border-[var(--color-accent)]" : "border-border", item.parseError ? "border-[var(--color-danger)]/60" : "")}>
+						<div key={`${item.source}:${rowKey}`} className={cn("flex items-center gap-2 rounded-md border px-2.5 py-2", applied ? "border-[var(--color-accent)]" : "border-border", item.parseError ? "border-[var(--color-danger)]/60" : "")}>
 							{item.parseError ? (
 								// 解析失败条目：展示首个错误 + 文件名，供定位坏文件
 								<div className="flex min-w-0 flex-1 items-start gap-2">
@@ -233,11 +247,14 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 												{t("settings.customThemesApply")}
 											</Button>
 										)}
-										<Button variant="ghost" size="sm" onClick={() => void handleEdit(item)} title={t("settings.customThemesEdit")}>
-											<Pencil className="size-3.5" />
-										</Button>
+										{/* 内置示例不在磁盘上：编辑入口是工具栏「复制示例」（就地保存会被保留 id 拦下） */}
 										{item.source === "user" ? (
-											<Button variant="ghost" size="sm" className={cn(armedDeleteId === item.id ? "text-[var(--color-danger)]" : "text-muted-foreground")} onClick={() => void handleDelete(item)} title={armedDeleteId === item.id ? t("settings.customThemesDeleteConfirmAgain") : t("settings.customThemesDelete")}>
+											<Button variant="ghost" size="sm" onClick={() => void handleEdit(item)} title={t("settings.customThemesEdit")}>
+												<Pencil className="size-3.5" />
+											</Button>
+										) : null}
+										{item.source === "user" ? (
+											<Button variant="ghost" size="sm" className={cn(armedDeleteId === rowKey ? "text-[var(--color-danger)]" : "text-muted-foreground")} onClick={() => void handleDelete(item)} title={armedDeleteId === rowKey ? t("settings.customThemesDeleteConfirmAgain") : t("settings.customThemesDelete")}>
 												<Trash2 className="size-3.5" />
 											</Button>
 										) : null}
@@ -249,22 +266,32 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 				})}
 			</div>
 
-			{/* JSON 编辑器：保存走主进程校验（同目录扫描同源），错误就地列出 */}
+			{/*
+			 * JSON 编辑器：保存走主进程校验（同目录扫描同源），错误就地列出。
+			 * 编辑器高度跟视口走（56dvh），再由弹窗 max-h 兜底：长主题此前会把底部按钮顶出屏幕。
+			 * field-sizing-content 自撑高会无视限高，这里显式改回固定高度，超过部分由 textarea 自身滚动。
+			 */}
 			<Dialog open={editor !== null} onOpenChange={(open) => (open ? undefined : setEditor(null))}>
-				<DialogContent className="max-w-2xl">
-					<DialogHeader>
+				<DialogContent className="flex max-h-[calc(100dvh-64px)] max-w-2xl flex-col gap-4 overflow-hidden">
+					<DialogHeader className="shrink-0">
 						<DialogTitle>{editor?.title ?? ""}</DialogTitle>
 					</DialogHeader>
-					<Textarea value={editor?.raw ?? ""} onChange={(event) => setEditor((prev) => (prev ? { ...prev, raw: event.target.value } : prev))} className="min-h-[320px] font-mono text-xs leading-relaxed" spellCheck={false} aria-label={t("settings.customThemesEditorTitle")} />
+					<Textarea
+						value={editor?.raw ?? ""}
+						onChange={(event) => setEditor((prev) => (prev ? { ...prev, raw: event.target.value } : prev))}
+						className="h-[min(56dvh,560px)] min-h-[160px] shrink field-sizing-fixed resize-none font-mono text-xs leading-relaxed"
+						spellCheck={false}
+						aria-label={t("settings.customThemesEditorTitle")}
+					/>
 					{errors.length > 0 ? (
-						<div className="max-h-28 overflow-y-auto rounded-md border border-[var(--color-danger)]/50 bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
+						<div className="max-h-28 shrink-0 overflow-y-auto rounded-md border border-[var(--color-danger)]/50 bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
 							{errors.map((error, index) => (
 								// eslint-disable-next-line react/no-array-index-key -- 错误清单为静态展示，无重排
 								<div key={index}>{error}</div>
 							))}
 						</div>
 					) : null}
-					<DialogFooter>
+					<DialogFooter className="shrink-0">
 						<Button variant="ghost" size="sm" onClick={() => setEditor(null)}>
 							{t("common.cancel")}
 						</Button>

@@ -47,6 +47,7 @@ type SessionScanMessage = {
 type SessionScanLine = {
 	type?: string;
 	customType?: string;
+	timestamp?: string;
 	name?: string;
 	sessionName?: string;
 	cwd?: string;
@@ -88,6 +89,46 @@ function cleanScanTitle(value?: string): string | undefined {
 	return text;
 }
 
+/** fork/clone 产物头部边界：复制来的父历史行时间戳必然早于本文件头。 */
+type ForkHistoryBoundary = { parentSession: boolean; headerTimestamp?: string };
+
+/** 在头部行序列里找本文件的 session 头，取出 parentSession 与头部时间戳。 */
+function readForkHistoryBoundary(lines: string[]): ForkHistoryBoundary {
+	for (const line of lines) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (!isSessionScanLine(parsed) || parsed.type !== "session") continue;
+		return {
+			parentSession: Boolean(parsed.parentSession ?? parsed.header?.parentSession),
+			headerTimestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+		};
+	}
+	return { parentSession: false };
+}
+
+/**
+ * 判定 session_info 是否属于「复制来的父会话历史」（fork/clone 产物的文件头带 parentSession，
+ * 且该 name 的时间戳早于本文件头）。
+ *
+ * 为什么需要：pi/PiDeck 的 fork/clone 都是复制父会话文件再追加自己的 session_info；复制进来的
+ * 那条是**父会话的名字**，不是本文件的名字，但读取端「取最后一条 session_info」的规则会把它
+ * 当成权威名——新克隆文件在被命名前被扫描（几百毫秒竞态）就会出现「复制出来的会话名丢了
+ * (fork) 后缀」或停在父名上再也升不回来（2026-10-11 复现）。这里降级为弱候选：显示兜底可用，
+ * 但不能锁定所有权，等 pi 追加的权威名或 PiDeck 命令写入的标题来升级。
+ * 头部截断/读不到（parentSession 或时间戳缺失）时不判定，保持旧行为。
+ */
+function isCopiedParentSessionInfo(entry: SessionScanLine, boundary: ForkHistoryBoundary): boolean {
+	const headerTimestamp = boundary.headerTimestamp;
+	if (!boundary.parentSession || !headerTimestamp) return false;
+	const timestamp = entry.timestamp;
+	if (!timestamp) return false;
+	return timestamp < headerTimestamp;
+}
+
 /**
  * 从已解析的 JSONL 行序列推断会话标题（与 readSummary 的 inferredName 同一优先级：
  * session_info 名 > 旧版私有 sessionName > 首条 user 文本 > 首条 assistant 文本）。
@@ -97,9 +138,13 @@ function cleanScanTitle(value?: string): string | undefined {
  * 首次发现标题推断使用。PiDeck catalog 已有记录后不再接受任何 JSONL 名称反向写入。
  * fallbackName 是本文件的弱兜底候选（首条 user 文本，其次首条 assistant 文本），
  * 与最终 name 取谁无关：#266 存量自愈要用它判断 catalog 里存的这一行是不是当年被误锁的首句。
+ * 注意 fromSessionInfo 的例外：fork/clone 产物里复制进来的父会话名时间戳早于本文件头，
+ * 只能当弱候选（见 isCopiedParentSessionInfo）。
  */
 function inferScanNameFromLines(lines: string[], extractText: (content: unknown) => string): { name?: string; fromSessionInfo: boolean; fallbackName?: string } {
+	const forkBoundary = readForkHistoryBoundary(lines);
 	let latestSessionInfoName: string | undefined;
+	let copiedParentInfoName: string | undefined;
 	let name: string | undefined;
 	let firstUserText = "";
 	let firstAssistantText = "";
@@ -115,9 +160,15 @@ function inferScanNameFromLines(lines: string[], extractText: (content: unknown)
 		const entry = parsed;
 		if (entry.type === "session_info") {
 			// Forked sessions may contain an older copied name; only the latest marker is authoritative.
-			latestSessionInfoName = typeof entry.name === "string" ? entry.name : entry.data?.name;
+			const candidate = typeof entry.name === "string" ? entry.name : entry.data?.name;
+			// 复制来的父会话名（时间戳早于本文件头）不是本文件的名字：只能当弱候选。
+			// 否则新克隆出来的文件在 PiDeck 写 (fork) 名的几百毫秒窗口里被扫描时，
+			// 标题会被锁成父会话名（没有 (fork) 后缀）或首条消息，且大文件下再也升不回来。
+			if (isCopiedParentSessionInfo(entry, forkBoundary)) copiedParentInfoName ??= candidate;
+			else latestSessionInfoName = candidate;
+		} else {
+			name ||= entry.sessionName || entry.name || entry.data?.name || entry.header?.name || entry.session?.name;
 		}
-		name ||= entry.sessionName || entry.name || entry.data?.name || entry.header?.name || entry.session?.name;
 		const nested = entry.message ?? entry.data?.message;
 		const message: SessionScanMessage = nested ?? { role: entry.role, content: entry.content };
 		if (message.role) {
@@ -128,12 +179,15 @@ function inferScanNameFromLines(lines: string[], extractText: (content: unknown)
 	}
 	// 取出 clean 前先保留来源标记：清洗后也可能是 timestamp/stem，
 	// 此时它不再能作为 session_info 标题使用。
-	const infoName = cleanScanTitle(latestSessionInfoName) || cleanScanTitle(name);
+	// 弱候选的次序仍是「本文件 session_info 名 > 复制来的父会话名 > 其它字段名」：
+	// 复制来的父名虽然不能当权威名，但作为显示兜底仍比首条消息更像会话名。
+	const authoritativeInfoName = cleanScanTitle(latestSessionInfoName);
+	const infoName = authoritativeInfoName || cleanScanTitle(copiedParentInfoName) || cleanScanTitle(name);
 	// 首条 user 可能是展开后的 `/模板名` / `&会话引用` 块：先剥块正文，只拿用户自己写的字当回退标题，
 	// 否则重开/扫描会把 `<prompt_template …>` 原文写回 catalog（与 inferTitleFromMessages 同一套清洗）。
 	// 弱兜底候选先算出来，权威名赢的时候也要带出去（#266 指纹修复的比对基准）。
 	const fallback = cleanScanTitle(textForSessionTitle(firstUserText)) || cleanScanTitle(firstAssistantText);
-	if (infoName) return { name: infoName, fromSessionInfo: true, fallbackName: fallback };
+	if (infoName) return { name: infoName, fromSessionInfo: Boolean(authoritativeInfoName), fallbackName: fallback };
 	if (fallback) return { name: fallback, fromSessionInfo: false, fallbackName: fallback };
 	return { name: undefined, fromSessionInfo: false };
 }
@@ -1995,7 +2049,7 @@ export class SessionScanner {
 	 * 小会话精确取最后一条 session_info，避免头/尾两个窗口之间的最新改名被遗漏。
 	 * 使用流式扫描而非 readFile：即便阈值调整也不会把整份 JSONL 放进主进程堆。
 	 */
-	private async inferLatestSessionInfoFromSmallFile(filePath: string, end: number): Promise<string | undefined> {
+	private async inferLatestSessionInfoFromSmallFile(filePath: string, end: number, boundary: ForkHistoryBoundary): Promise<string | undefined> {
 		let latestName: string | undefined;
 		await scanJsonlLines(
 			this.hostPathFor(filePath),
@@ -2007,6 +2061,8 @@ export class SessionScanner {
 					return;
 				}
 				if (!isSessionScanLine(parsed) || parsed.type !== "session_info") return;
+				// 复制来的父会话名同样只能当弱候选（见 isCopiedParentSessionInfo）。
+				if (isCopiedParentSessionInfo(parsed, boundary)) return;
 				const candidate = typeof parsed.name === "string" ? parsed.name : parsed.data?.name;
 				const title = cleanScanTitle(candidate);
 				if (title) latestName = title;
@@ -2039,7 +2095,7 @@ export class SessionScanner {
 			// 头/尾窗口边界可能截断半行；inferScanNameFromLines 会跳过不可解析行。
 			const inferred = inferScanNameFromLines(titleText.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
 			if (version.size <= SessionScanner.SUMMARY_NAME_FULL_SCAN_MAX_BYTES && version.size > windowBytes) {
-				const latestSessionInfoName = await this.inferLatestSessionInfoFromSmallFile(filePath, version.size);
+				const latestSessionInfoName = await this.inferLatestSessionInfoFromSmallFile(filePath, version.size, readForkHistoryBoundary(head.split(/\r?\n/).filter(Boolean)));
 				if (latestSessionInfoName) {
 					// 权威名赢，但弱兜底候选仍要带出去（legacy 存量条目的指纹比对基准）。
 					return { raw: head, name: latestSessionInfoName, nameFromSessionInfo: true, fallbackName: inferred.fallbackName };

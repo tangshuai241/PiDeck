@@ -59,6 +59,10 @@ function renderComposer(run, options = {}) {
 			"./ComposerParts": { ComposerBottomBar: hidden, ImagePreviewModal: hidden, PromptSuggestions: hidden },
 			"./composer": { TipTapComposer: () => createElement("textarea", { "data-testid": "composer-editor", defaultValue: "保留的草稿" }) },
 			"../app/SessionReferenceModal": { SessionReferenceModal: hidden },
+			// ComposerComponents → ../app/AppParts → ConfirmDialog → ui-shadcn/alert-dialog 会 require
+			// "@/components/ui-shadcn/button"（路径别名，vm CJS 加载器解析不到）；本测试只验证建议 chips
+			// 的位置与投递，确认弹窗不在关注面内，直接拦掉整条链路。
+			"../app/AppParts": { ConfirmDialog: hidden },
 			// SessionContextMeter 依赖链拉进 MarkdownStream → streamdown（ESM-only，vm CJS 加载不了）；
 			// 本测试只验证建议 chips 的位置与投递，圆环渲染不在关注面内。
 			"./SessionContextMeter": { SessionContextMeter: hidden },

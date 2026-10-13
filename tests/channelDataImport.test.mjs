@@ -56,6 +56,17 @@ test("planImportItems 按存在性过滤并展开 feishu glob", (t) => {
 	assert.ok(!rels.includes("pi-desktop/feishu-notes.txt"));
 });
 
+test("新 feishu 目录和历史子目录都能导入，不漏掉升级前的绑定", (t) => {
+	const root = makeTempDir(t, "pideck-import-feishu-");
+	for (const dir of ["feishu", "pi-desktop"]) {
+		mkdirSync(join(root, dir));
+		writeFileSync(join(root, dir, "feishu-bindings-bot.json"), "[]");
+		writeFileSync(join(root, dir, "unrelated.json"), "{}");
+	}
+	const rels = Array.from(planImportItems(root), (item) => item.relPath);
+	assert.deepEqual(rels, ["feishu/feishu-bindings-bot.json", "pi-desktop/feishu-bindings-bot.json"]);
+});
+
 test("estimateImportBytes 汇总文件与目录字节数", (t) => {
 	const root = makeTempDir(t, "pideck-import-bytes-");
 	writeFileSync(join(root, "settings.json"), "0123456789", "utf8"); // 10 字节

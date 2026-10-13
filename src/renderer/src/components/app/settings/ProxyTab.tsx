@@ -195,7 +195,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 					<small>{t("settings.proxyApplyHint")}</small>
 				</div>
 			)}
-			<SettingsSection title={t("settings.piProxy")} description={t("settings.piProxyDesc")}>
+			<SettingsSection id="settings-section-proxy-pi-agent" title={t("settings.piProxy")} description={t("settings.piProxyDesc")}>
 				<SettingSwitchRow anchor="proxy-enable-pi" title={t("settings.enablePiProxy")} description={t("settings.enablePiProxyDesc")} checked={draft.piProxyEnabled} onChange={(checked) => updateDraft({ piProxyEnabled: checked })} />
 				{/* 配置与开关解耦：地址/绕过/测试始终可编辑，关闭开关时仅保存配置不启用——
             单会话「会话代理」的 on 模式会复用下方地址，无需全局开启。 */}
@@ -371,7 +371,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 					</SettingRow>
 				</div>
 			</SettingsSection>
-			<SettingsSection title={t("settings.desktopProxy")} description={t("settings.desktopProxyDesc")}>
+			<SettingsSection id="settings-section-proxy-desktop" title={t("settings.desktopProxy")} description={t("settings.desktopProxyDesc")}>
 				<SettingSwitchRow anchor="proxy-enable-desktop" title={t("settings.enableDesktopProxy")} description={t("settings.desktopProxyDesc")} checked={draft.desktopProxyEnabled} onChange={(checked) => updateDraft({ desktopProxyEnabled: checked })} />
 				{draft.desktopProxyEnabled && (
 					<div className="setting-proxy-panel">

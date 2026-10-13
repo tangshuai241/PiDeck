@@ -61,7 +61,8 @@ test("model-picker restart must light the SessionView overlay via restartActiveA
 	assert.match(runtimeInjector, /isRestarting=\{runtime\.isRestartingThisAgent\}/);
 	assert.match(controller, /isRestartingThisAgent = restartingAgentId === activeAgentId/);
 	assert.match(runControl, /setRestartingAgentId\(restartingAgent\.id\)/);
-	assert.match(picker, /await restartActiveAgent\(intent\.agentId\)/);
+	assert.match(picker, /await restartActiveAgent\(intent\.handle\.agentId\)/);
+	// 564689b42 起 intent 携带 handle 封装（sessionId+agentId）并加了会话归属守卫：重启授权不得跨会话。
 	assert.doesNotMatch(picker, /desktopApi\.sessions\.restartRuntime/);
 });
 

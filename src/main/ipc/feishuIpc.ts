@@ -209,8 +209,11 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 		const updated = updateFeishuBot(botId, patch);
 		void logger()?.info("feishu", "Feishu bot config updated", { botId, keys: Object.keys(patch) });
 		// 只热更新当前在线 Bot；修改其它 Bot 配置不应污染正在运行的 bridge。
+		// appSecret 一律剥离：密文已入库，运行时内存不需要第二份（bridge 连接时
+		// 经 getDecryptedBotAppSecret 现取），避免密钥生命周期超出必要范围。
 		if (feishuBridgeRef.current && feishuBridgeRef.current.getStatus().status === "connected" && feishuBridgeRef.current.getStatus().botId === botId) {
-			feishuBridgeRef.current.updateBotConfig(patch);
+			const { appSecret: _stripped, ...hotPatch } = patch;
+			feishuBridgeRef.current.updateBotConfig(hotPatch);
 			void logger()?.info("feishu", "bot config hot-reloaded", { botId, keys: Object.keys(patch).join(", ") });
 		}
 		if (updated) {

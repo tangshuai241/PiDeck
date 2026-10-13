@@ -5,7 +5,7 @@ import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import type { ModelItem, ModelsFile, ProviderConfig } from "./configTypes";
 import { openDocsInSystemBrowser } from "./ConfigShared";
-import { getHeaderValue, setHeaderValue } from "./providerHeaders";
+import { getHeaderValue, readModelOverrides, setHeaderValue } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 // 排序键收敛到 shared：与模型下拉列表 / 主进程写入保持同一顺序。
 import { compareModelRows } from "../../../shared/modelOrder";
@@ -32,6 +32,7 @@ import { ModelsExportPanel } from "./ModelsExportPanel";
 import { ModelsImportPanel } from "./ModelsImportPanel";
 import { useAvailableThinkingLevels } from "./useAvailableThinkingLevels";
 import { modelThinkingLevelsKey } from "../../../shared/modelThinkingLevels";
+import type { ModelThinkingLevel } from "../../../shared/modelThinkingLevels";
 import type { MutableRefObject } from "react";
 
 /** 把现有 provider 配置转成编辑弹窗的预填值（名字/字段/模型列表）。 */
@@ -45,6 +46,8 @@ function providerDialogInitial(provider: ProviderConfig | undefined, name: strin
 		userAgent: getHeaderValue(provider.headers, "User-Agent"),
 		compat: provider.compat,
 		models: provider.models,
+		// 逐模型 UA 覆盖随 provider 配置走（弹窗内可编辑，确认时由 mergeProviderDraft 合并）
+		modelOverrides: readModelOverrides(provider.modelOverrides),
 	};
 }
 
@@ -112,15 +115,15 @@ export function ModelsTab(props: {
 	onDeleteProviders: (names: string[]) => void;
 	onAddModel: (providerName: string) => void;
 	onUpdateModel: (providerName: string, index: number, field: string, value: unknown) => void;
-	onUpdateModelThinkingLevel: (providerName: string, index: number, key: "xhigh" | "max", value: "" | "xhigh" | "max") => void;
-	/** 逐模型 User-Agent 覆盖（落到 provider.modelOverrides），可选。 */
-	onUpdateModelUserAgent?: (providerName: string, index: number, value: string) => void;
-	/** 读取某模型当前的 UA 覆盖值（可选；与上一个回调成对出现才渲染操作列的 UA 按钮）。 */
-	getModelUserAgentOverride?: (providerName: string, index: number) => string;
+	onUpdateModelThinkingLevel: (providerName: string, index: number, level: ModelThinkingLevel, enabled: boolean) => void;
+	/** 逐模型 User-Agent 覆盖（落到 provider.modelOverrides，可选；按 modelId 建键）。 */
+	onUpdateModelUserAgent?: (providerName: string, modelId: string, value: string) => void;
+	/** 读取某模型的 UA 覆盖值（可选；与上一个回调成对出现才渲染操作列的 UA 按钮）。 */
+	getModelUserAgentOverride?: (providerName: string, modelId: string) => string;
 	/** 每模型默认思考档位（settings.json 的 modelThinkingLevels），可选：成对出现才渲染编辑入口。 */
-	onUpdateModelThinkingLevelDefault?: (providerName: string, index: number, value: string) => void;
+	onUpdateModelThinkingLevelDefault?: (providerName: string, modelId: string, level: string) => void;
 	/** 读取某模型当前的默认思考档位（空串 = 跟随全局设置）。 */
-	getModelThinkingLevelDefault?: (providerName: string, index: number) => string;
+	getModelThinkingLevelDefault?: (providerName: string, modelId: string) => string;
 	onDeleteModel: (providerName: string, index: number) => void;
 	onDeleteModels: (providerName: string, indexes: number[]) => void;
 	/** 重置为自适应：显式刷新 endpoint /models 后按模板清空并重填能力字段。 */
@@ -168,12 +171,8 @@ export function ModelsTab(props: {
 			props.onUpdateModel(providerName, index, field, value);
 		}
 		if (updates.length > 0) {
-			showNotice(
-				t("config.modelSpecAutoFilled", {
-					model: spec?.matchedId ?? trimmed,
-				}),
-				3000,
-			);
+			// 命中目录才报「已按目录填充」；未命中时只补了默认思考档位，据实说明而不是谎报名录值。
+			showNotice(spec?.matchedId ? t("config.modelSpecAutoFilled", { model: spec.matchedId }) : t("config.modelSpecUnmatched", { model: trimmed }), 3000);
 		}
 	};
 
@@ -733,11 +732,11 @@ export function ModelsTab(props: {
 												<ModelsTable
 													models={provider.models}
 													onUpdateModel={(i, field, value) => props.onUpdateModel(name, i, field, value)}
-													onUpdateModelThinkingLevel={(i, key, value) => props.onUpdateModelThinkingLevel(name, i, key, value)}
-													onUpdateModelUserAgent={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i, value) => props.onUpdateModelUserAgent!(name, i, value) : undefined}
-													getModelUserAgentOverride={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i) => props.getModelUserAgentOverride!(name, i) : undefined}
-													onUpdateModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i, value) => props.onUpdateModelThinkingLevelDefault!(name, i, value) : undefined}
-													getModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i) => props.getModelThinkingLevelDefault!(name, i) : undefined}
+													onUpdateModelThinkingLevel={(i, level, enabled) => props.onUpdateModelThinkingLevel(name, i, level, enabled)}
+													onUpdateModelUserAgent={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i, value) => props.onUpdateModelUserAgent!(name, provider.models[i]?.id ?? "", value) : undefined}
+													getModelUserAgentOverride={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i) => props.getModelUserAgentOverride!(name, provider.models[i]?.id ?? "") : undefined}
+													onUpdateModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i, value) => props.onUpdateModelThinkingLevelDefault!(name, provider.models[i]?.id ?? "", value) : undefined}
+													getModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i) => props.getModelThinkingLevelDefault!(name, provider.models[i]?.id ?? "") : undefined}
 													getModelAvailableThinkingLevels={(i) => {
 														// 键为空（未填 id 的新行）时查不到 → 未知，与「未识别模型」同一展示。
 														const model = provider.models[i];
@@ -764,6 +763,7 @@ export function ModelsTab(props: {
 																}
 															: undefined
 													}
+													getModelHidden={props.onToggleHiddenModel ? (i) => (props.hiddenModels ?? []).includes(`${name}/${provider.models[i]?.id ?? ""}`) : undefined}
 													onResetModel={(i) => props.onResetModel(name, i)}
 													resettingModelKey={props.resettingModelKey}
 													getRowKey={(i) => getModelInputKey(name, i)}
@@ -772,10 +772,6 @@ export function ModelsTab(props: {
 													selectedIndexes={selectedModelIndexes}
 													onToggleSelectIndex={(i) => setSelectedModelIndexes((current) => toggleModelIndex(current, i))}
 													onToggleAll={(total) => toggleAllModels(total)}
-													onDeleteSelected={(indexes) => {
-														props.onDeleteModels(name, indexes);
-														clearModelBatch();
-													}}
 													focusModelKey={pendingModelFocusKey}
 													onFocusHandled={() => setPendingModelFocusKey(null)}
 												/>
@@ -850,6 +846,12 @@ export function ModelsTab(props: {
 					onRequestSave={(save) => {
 						props.providerPageSaveRef.current = save;
 					}}
+					// 模型表对齐（供应商页 = 卡片同款操作）：页面里的隐藏 / 默认档位 / 逐模型 UA 都先记在页内，
+					// 点保存时由 ConfigModal 按最终名字替换式落盘（见 AddProviderDialog 的 props 注释）；
+					// 宿主只提供「读当前状态」的入口（entries 存在才渲染对应行内操作）。
+					hiddenModels={props.hiddenModels}
+					getModelThinkingLevelDefault={props.getModelThinkingLevelDefault}
+					getModelAvailableThinkingLevels={(providerName, modelId) => availableThinkingLevels.get(modelThinkingLevelsKey(providerName, modelId))}
 				/>
 			)}
 

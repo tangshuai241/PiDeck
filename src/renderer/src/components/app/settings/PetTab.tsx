@@ -167,7 +167,7 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
 					);
 				})()}
 			</SettingBox>
-			<SettingsSection title={t("settings.pet.preview")} description={t("settings.pet.previewDesc")}>
+			<SettingsSection id="settings-section-pet-preview" title={t("settings.pet.preview")} description={t("settings.pet.previewDesc")}>
 				<SettingRow title={<span>{t("settings.pet.previewMode")}</span>} alignEnd={false}>
 					<Select
 						value={petPreviewMode}
@@ -234,10 +234,14 @@ function PetChooserPreview(props: { pet?: PetManifest; mode?: string }) {
 			canvas.height = Math.round(cssH * dpr);
 			ctx.imageSmoothingEnabled = true;
 			ctx.imageSmoothingQuality = "high";
+			/* 与 PetOverlay 同一产品决策：prefers-reduced-motion 不完全冻结，降到 1/4 帧率近定格；
+			 预览的功能就是评估桌宠形态，静态帧会失真，但4倍拉长帧间隔仍尊重系统偏好。 */
+			const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+			const frameMs = reducedMotion ? 140 * 4 : 140;
 			const startedAt = performance.now();
 			const draw = (now: number) => {
 				if (disposed) return;
-				const frame = Math.floor((now - startedAt) / 140) % frameCount;
+				const frame = Math.floor((now - startedAt) / frameMs) % frameCount;
 				ctx.clearRect(0, 0, canvas.width, canvas.height);
 				ctx.drawImage(img, (frame % GRID_COLS) * CELL_W, row * CELL_H, CELL_W, CELL_H, 0, 0, canvas.width, canvas.height);
 				rafRef.current = requestAnimationFrame(draw);

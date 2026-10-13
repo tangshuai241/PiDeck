@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { openSettings } from "./open-session";
 
 /**
  * 设置弹窗内容区可滚动回归（pane Tabs 结构下高度链完整）：
@@ -8,7 +9,7 @@ import { test, expect } from "./fixtures";
 test("设置弹窗内容区可滚动（pane Tabs 高度链回归）", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 

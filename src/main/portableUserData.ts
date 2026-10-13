@@ -46,7 +46,7 @@ export interface AppUserDataInput {
 	/** e2e 隔离 / --user-data-dir 调试的显式目录；由调用方按 dev/E2E 态门控后传入。 */
 	explicitDir?: string;
 	isPackaged: boolean;
-	/** 未打包调试态的目录（%APPDATA%\pi-desktop-dev[±分支后缀]，由调用方拼好）。 */
+	/** 未打包调试态的目录（%APPDATA%\PiDeck-dev[±分支后缀]，由调用方拼好）。 */
 	unpackagedDevDir: string;
 	/** 当前构建通道（任务 2 的 UpdateChannel）。 */
 	channel: UpdateChannel;
@@ -61,7 +61,7 @@ export interface AppUserDataInput {
 /**
  * 启动期 userData 目录判定（index.ts 装配，单测覆盖；决策结果由入参传入，本函数保持纯函数）：
  * 1. 显式目录优先（e2e 隔离 / 多实例调试，避免读到真实用户数据）；
- * 2. 未打包调试态走 pi-desktop-dev(±分支后缀)，开发数据与发行数据隔离；
+ * 2. 未打包调试态走 PiDeck-dev(±分支后缀)，开发数据与发行数据隔离；
  * 3. 打包态——shared 模式共用 / channel-dev 模式独立，由决策指针驱动：
  *    仅 dev 构建且决策为 channel-dev 时落独立目录（resolveChannelDevDataDir），
  *    无决策（首启前的临时会话）与 shared 决策均落共用目录（fallbackSharedDir，
@@ -76,8 +76,8 @@ export function resolveAppUserDataDir(input: AppUserDataInput): string {
 	return input.fallbackSharedDir;
 }
 
-/** dev 独立数据目录：安装版 %APPDATA%/pi-desktop-channel-dev；便携版 exe 同级 data-channel-dev/。 */
+/** dev 独立数据目录：安装版 %APPDATA%/PiDeck-channel-dev；便携版 exe 同级 data-channel-dev/。 */
 export function resolveChannelDevDataDir(env: { appDataDir: string; portableExeDir?: string }): string {
 	if (env.portableExeDir) return join(env.portableExeDir, "data-channel-dev");
-	return join(env.appDataDir, "pi-desktop-channel-dev");
+	return join(env.appDataDir, "PiDeck-channel-dev");
 }

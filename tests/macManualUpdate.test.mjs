@@ -96,6 +96,21 @@ test("manual macOS checker does not flag the same stable version", async () => {
 	assert.equal(result.hasUpdate, false);
 });
 
+test("manual macOS checker does not roll a stable client back to an older prerelease tag (0.8.0 vs v0.8.0-beta.9)", async () => {
+	// GitHub /latest 在仅剩预发布时会 302 到最新 prerelease tag；正式版客户端不高于它即无更新。
+	const check = createMacManualUpdateChecker({
+		fetchLatestRelease: async () => ({
+			ok: true,
+			status: 200,
+			url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.8.0-beta.9",
+		}),
+	});
+
+	const result = await check("0.8.0");
+	assert.equal(result.latestVersion, "0.8.0-beta.9");
+	assert.equal(result.hasUpdate, false);
+});
+
 test("manual macOS checker reads AtomGit OpenAPI tag_name when the HTML page has no tag URL", async () => {
 	let requestedUrl = "";
 	const apiUrl = "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest";

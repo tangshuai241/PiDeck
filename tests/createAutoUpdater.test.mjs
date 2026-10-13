@@ -25,9 +25,9 @@ const { DEFAULT_UPDATER_CACHE_DIR_NAME, FALLBACK_APP_UPDATE_CONFIG_FILENAME, gen
 test("generateFallbackAppUpdateConfigYaml 生成合法的 GitHub provider 配置", () => {
 	const yaml = generateFallbackAppUpdateConfigYaml();
 	assert.match(yaml, /provider:\s*github/);
-	assert.match(yaml, /owner:\s*ayuayue/);
+	assert.match(yaml, /owner:\s*tangshuai241/);
 	assert.match(yaml, /repo:\s*PiDeck/);
-	assert.match(yaml, /updaterCacheDirName:\s*pi-desktop-updater/);
+	assert.match(yaml, /updaterCacheDirName:\s*pideck-updater/);
 
 	const customYaml = generateFallbackAppUpdateConfigYaml({
 		owner: "test-owner",
@@ -83,7 +83,7 @@ test("ensureAppUpdateConfig: 当默认配置缺失（如便携版）时在 userD
 	assert.equal(writtenFiles.has(expectedFallbackPath), true);
 	const content = writtenFiles.get(expectedFallbackPath);
 	assert.match(content, /provider:\s*github/);
-	assert.match(content, /updaterCacheDirName:\s*pi-desktop-updater/);
+	assert.match(content, /updaterCacheDirName:\s*pideck-updater/);
 });
 
 test("shouldDisableDifferentialDownload: 便携版、缺失默认配置或 E2E 环境下必须禁用差量下载", () => {
@@ -95,4 +95,29 @@ test("shouldDisableDifferentialDownload: 便携版、缺失默认配置或 E2E �
 	assert.equal(shouldDisableDifferentialDownload({ isE2E: true }), true);
 	// 普通完整安装版
 	assert.equal(shouldDisableDifferentialDownload({ isPortable: false, hasDefaultConfig: true, isE2E: false }), false);
+});
+
+test("inactive development checks explain the release build instead of offering an upstream mirror", async (t) => {
+	const savedE2E = process.env.PIDECK_E2E,
+		savedFeed = process.env.PIDEK_UPDATE_FEED_URL;
+	delete process.env.PIDECK_E2E;
+	delete process.env.PIDEK_UPDATE_FEED_URL;
+	t.after(() => {
+		if (savedE2E === undefined) delete process.env.PIDECK_E2E;
+		else process.env.PIDECK_E2E = savedE2E;
+		if (savedFeed === undefined) delete process.env.PIDEK_UPDATE_FEED_URL;
+		else process.env.PIDEK_UPDATE_FEED_URL = savedFeed;
+	});
+	const { createRealAutoUpdater } = loadTsCommonJs("src/main/update/createAutoUpdater.ts", {
+		stubs: {
+			electron: { app: { ...fakeApp, isPackaged: false, getLocale: () => "zh-CN" } },
+			"node:fs": { existsSync: () => true, mkdirSync: () => undefined, writeFileSync: () => undefined },
+			"electron-updater": { autoUpdater: { setFeedURL: () => undefined, checkForUpdates: async () => null } },
+		},
+	});
+	await assert.rejects(createRealAutoUpdater().checkForUpdates(), (error) => {
+		assert.match(error.message, /运行发行包/);
+		assert.doesNotMatch(error.message, /选择镜像/);
+		return true;
+	});
 });

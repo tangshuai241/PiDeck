@@ -636,3 +636,207 @@ test("bridge extension: session_shutdown 给仅 started 建立的 running 条目
 	assert.equal(appendedEntries[0].data.status, "stopped");
 	assert.equal(typeof appendedEntries[0].data.completedAt, "number");
 });
+
+/* ------------------------------------------------------------------ */
+/* pi-subagents（nicobailon）异步链：派发回执 → 终态 record + 快照      */
+/* ------------------------------------------------------------------ */
+
+const ASYNC_DISPATCH = "call_00_async1";
+const ASYNC_RUN_ID = "2824f0e6-08ff-42a5-9a30-683302ba52eb";
+const ASYNC_TASK = "把 4 个仍用手写 vm 沙箱的测试迁移到统一加载器";
+
+/** 真实回执形状：Run fan-out 头 + `Async: <agent> [<asyncId>]` 行 + detached 引导文。 */
+function asyncReceiptText() {
+	return `Run fan-out: 1/64 used, 63 remaining\nAsync: worker [${ASYNC_RUN_ID}]\n\nThe async run is detached and running in the background.\nYou are in an interactive session.`;
+}
+
+function asyncDispatchStart() {
+	return { type: "tool_execution_start", toolCallId: ASYNC_DISPATCH, toolName: "subagent", args: { agent: "worker", task: ASYNC_TASK, async: true } };
+}
+
+function asyncDispatchEnd(text = asyncReceiptText()) {
+	return { type: "tool_execution_end", toolCallId: ASYNC_DISPATCH, toolName: "subagent", result: { content: [{ type: "text", text }] }, isError: false };
+}
+
+function emptyAsyncBridge() {
+	return { pending: new Map(), byRunId: new Map() };
+}
+
+test("reduceSubagentAsyncToolEvent: start 暂存派发（type/description/startedAt），end 按回执 asyncId 存档", () => {
+	const { reduceSubagentAsyncToolEvent } = loadBridgeModule();
+	const started = reduceSubagentAsyncToolEvent(emptyAsyncBridge(), "tool_execution_start", asyncDispatchStart(), 1000);
+	assert.equal(started.asyncId, undefined);
+	const descriptor = started.state.pending.get(ASYNC_DISPATCH);
+	assert.equal(descriptor.type, "worker");
+	assert.equal(descriptor.description, ASYNC_TASK);
+	assert.equal(descriptor.startedAt, 1000);
+
+	const ended = reduceSubagentAsyncToolEvent(started.state, "tool_execution_end", asyncDispatchEnd(), 1100);
+	assert.equal(ended.asyncId, ASYNC_RUN_ID);
+	assert.equal(ended.descriptor.startedAt, 1000);
+	assert.equal(ended.descriptor.description, ASYNC_TASK);
+	assert.equal(ended.state.pending.size, 0);
+	assert.equal(ended.state.byRunId.get(ASYNC_RUN_ID).type, "worker");
+});
+
+test("reduceSubagentAsyncToolEvent: 前台派发的最终报告（无 detached 回执）不留档", () => {
+	const { reduceSubagentAsyncToolEvent } = loadBridgeModule();
+	const started = reduceSubagentAsyncToolEvent(emptyAsyncBridge(), "tool_execution_start", { toolCallId: "call_fg", toolName: "subagent", args: { agent: "worker", task: "t" } }, 1000);
+	const ended = reduceSubagentAsyncToolEvent(started.state, "tool_execution_end", { toolCallId: "call_fg", toolName: "subagent", result: { content: [{ type: "text", text: "worker:\n全部完成" }] } }, 1100);
+	assert.equal(ended.asyncId, undefined);
+	assert.equal(ended.state.pending.size, 0);
+	assert.equal(ended.state.byRunId.size, 0);
+});
+
+test("reduceSubagentAsyncToolEvent: action 管理查询 / 工作流脚本 / 非 subagent 工具不登记", () => {
+	const { reduceSubagentAsyncToolEvent } = loadBridgeModule();
+	const action = reduceSubagentAsyncToolEvent(emptyAsyncBridge(), "tool_execution_start", { toolCallId: "c1", toolName: "subagent", args: { agent: "worker", action: "list" } }, 1000);
+	assert.equal(action.state.pending.size, 0);
+	const workflow = reduceSubagentAsyncToolEvent(emptyAsyncBridge(), "tool_execution_start", { toolCallId: "c2", toolName: "subagent", args: { agent: "worker", workflowScript: "..." } }, 1000);
+	assert.equal(workflow.state.pending.size, 0);
+	const other = reduceSubagentAsyncToolEvent(emptyAsyncBridge(), "tool_execution_start", { toolCallId: "c3", toolName: "bash", args: { command: "ls" } }, 1000);
+	assert.equal(other.state.pending.size, 0);
+});
+
+test("buildSubagentAsyncTerminal: 终态映射完整（complete/failed/partial/stopped/rejected）", () => {
+	const { buildSubagentAsyncTerminal } = loadBridgeModule();
+	const descriptor = { type: "worker", description: ASYNC_TASK, startedAt: 1000 };
+	const cases = [
+		["complete", "completed"],
+		["failed", "error"],
+		["partial", "error"],
+		["stopped", "stopped"],
+		["rejected", "stopped"],
+	];
+	for (const [state, expected] of cases) {
+		const built = buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state, agent: "worker" }, descriptor, 2000);
+		assert.equal(built.entry.status, expected);
+		assert.equal(built.record.status, expected);
+		assert.equal(built.record.id, ASYNC_RUN_ID);
+		assert.equal(built.record.type, "worker");
+		assert.equal(built.record.description, ASYNC_TASK);
+		// 有描述符时 startedAt 取派发时刻，completedAt 退化到事件到达时刻（payload 无绝对时刻）
+		assert.equal(built.record.startedAt, 1000);
+		assert.equal(built.record.completedAt, 2000);
+	}
+});
+
+test("buildSubagentAsyncTerminal: paused / 未知状态 / 缺 id 不落终态（运行可能恢复）", () => {
+	const { buildSubagentAsyncTerminal } = loadBridgeModule();
+	const descriptor = { type: "worker", description: "t", startedAt: 1000 };
+	assert.equal(buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "paused" }, descriptor, 2000), undefined);
+	assert.equal(buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "running" }, descriptor, 2000), undefined);
+	assert.equal(buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "unknown-state" }, descriptor, 2000), undefined);
+	assert.equal(buildSubagentAsyncTerminal({ state: "complete" }, descriptor, 2000), undefined);
+	assert.equal(buildSubagentAsyncTerminal(null, descriptor, 2000), undefined);
+});
+
+test("buildSubagentAsyncTerminal: payload 绝对时刻与 durationMs 还原完成时间", () => {
+	const { buildSubagentAsyncTerminal } = loadBridgeModule();
+	const descriptor = { type: "worker", description: "t", startedAt: 1000 };
+	const stamped = buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "complete", timestamp: 1500 }, descriptor, 2000);
+	assert.equal(stamped.record.completedAt, 1500);
+	// 无描述符（桥接晚于派发加载）：startedAt/completedAt 由真实时长反推，type 降级用 payload.agent
+	const measured = buildSubagentAsyncTerminal({ id: ASYNC_RUN_ID, state: "complete", agent: "reviewer", durationMs: 500 }, undefined, 2000);
+	assert.equal(measured.record.id, ASYNC_RUN_ID);
+	assert.equal(measured.record.type, "reviewer");
+	assert.equal(measured.record.description, "");
+	assert.equal(measured.record.startedAt, 1500);
+	assert.equal(measured.record.completedAt, 2000);
+});
+
+test("buildSubagentAsyncTerminal: 失败类终态携带错误摘要（截断 2000）", () => {
+	const { buildSubagentAsyncTerminal } = loadBridgeModule();
+	const built = buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "failed", error: "x".repeat(5000) }, undefined, 2000);
+	assert.equal(built.record.status, "error");
+	assert.equal(built.record.error.length, 2000);
+	// 成功终态不写 error
+	const ok = buildSubagentAsyncTerminal({ runId: ASYNC_RUN_ID, state: "complete", error: "ignored" }, undefined, 2000);
+	assert.equal(ok.record.error, undefined);
+});
+
+test("bridge extension: 异步派发 + 终态事件 → subagents:record 落盘并并入桥接快照", async () => {
+	const { default: bridge } = loadBridgeModule();
+	const { pi, handlers, lifecycle, appendedEntries } = createMockPi();
+	bridge(pi);
+
+	const widgetCalls = [];
+	const ctx = { ui: { setWidget: (key, lines) => widgetCalls.push({ key, lines }) } };
+	lifecycle.get("session_start")({ type: "session_start" }, ctx);
+
+	lifecycle.get("tool_execution_start")(asyncDispatchStart());
+	lifecycle.get("tool_execution_end")(asyncDispatchEnd());
+	// 派发阶段不落盘（只有运行中 widget 是插件的事）
+	assert.equal(appendedEntries.length, 0);
+
+	handlers.get("subagent:async-complete")({ runId: ASYNC_RUN_ID, state: "complete", agent: "worker", durationMs: 500, timestamp: 1791704545239 });
+
+	assert.equal(appendedEntries.length, 1);
+	assert.equal(appendedEntries[0].type, "subagents:record");
+	const record = appendedEntries[0].data;
+	assert.equal(record.id, ASYNC_RUN_ID);
+	assert.equal(record.status, "completed");
+	assert.equal(record.type, "worker");
+	assert.equal(record.description, ASYNC_TASK);
+	assert.equal(record.completedAt, 1791704545239);
+
+	// 实时快照：终态条目必须并入（插件的 subagent-async widget 10s 后清空，
+	// 桥接快照里的终态留到会话结束，否则渲染层回退到推导条目的 running）
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	const last = widgetCalls.at(-1);
+	assert.equal(last.key, "pi-deck-subagents");
+	const snapshot = JSON.parse(last.lines[0]);
+	const agent = snapshot.agents.find((a) => a.id === ASYNC_RUN_ID);
+	assert.ok(agent, "终态条目应出现在桥接快照中");
+	assert.equal(agent.status, "completed");
+	assert.equal(agent.description, ASYNC_TASK);
+});
+
+test("bridge extension: 未登记 asyncId 的完成事件忽略、重复终态不重复落盘", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { pi, handlers, lifecycle, appendedEntries } = createMockPi();
+	bridge(pi);
+
+	// 没经过派发的 run（工作流子 run 等）：不落盘、不进快照，避免面板凭空多出无描述条目
+	handlers.get("subagent:async-complete")({ runId: "workflow-child-1", state: "complete", agent: "worker" });
+	assert.equal(appendedEntries.length, 0);
+
+	lifecycle.get("tool_execution_start")(asyncDispatchStart());
+	lifecycle.get("tool_execution_end")(asyncDispatchEnd());
+	handlers.get("subagent:async-complete")({ runId: ASYNC_RUN_ID, state: "complete", agent: "worker" });
+	assert.equal(appendedEntries.length, 1);
+	// 完成事件重放（投递重试/会话恢复）：同 run 同终态不重复写
+	handlers.get("subagent:async-complete")({ runId: ASYNC_RUN_ID, state: "complete", agent: "worker" });
+	assert.equal(appendedEntries.length, 1);
+});
+
+test("bridge extension: 异步终态 appendEntry 抛错不影响快照与后续事件", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { lifecycle } = createMockPi();
+	const appended = [];
+	const throwingPi = {
+		events: { on: () => {} },
+		on: (name, cb) => {
+			lifecycle.set(name, cb);
+		},
+		appendEntry: () => {
+			appended.push("threw");
+			throw new Error("session closed");
+		},
+	};
+	// events.on 需要真正订阅（throwingPi 覆盖了 createMockPi 的 handlers）
+	const handlers = new Map();
+	throwingPi.events = { on: (name, cb) => handlers.set(name, cb) };
+	bridge(throwingPi);
+
+	lifecycle.get("tool_execution_start")(asyncDispatchStart());
+	lifecycle.get("tool_execution_end")(asyncDispatchEnd());
+	let threw = false;
+	try {
+		handlers.get("subagent:async-complete")({ runId: ASYNC_RUN_ID, state: "complete", agent: "worker" });
+	} catch {
+		threw = true;
+	}
+	assert.equal(threw, false);
+	assert.deepEqual(appended, ["threw"]);
+});

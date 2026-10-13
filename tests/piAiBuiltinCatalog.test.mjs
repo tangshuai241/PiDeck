@@ -159,6 +159,18 @@ test("parseProviderModelsResponse: 空/非法声明不出现（不猜默认值�
 	assert.deepEqual(JSON.parse(JSON.stringify(models)), [{ id: "plain" }]);
 });
 
+test("parseProviderModelsResponse: 荒唐容量不回传给配置页（实测有中转回 32763840008）", () => {
+	const models = parseProviderModelsResponse({
+		data: [
+			// 超上限的输出上限与 max > ctx 都是坏数据；上下文窗口本身合法则保留
+			{ id: "junk-max", context_length: 1000000, max_output_tokens: 32763840008 },
+			{ id: "max-over-ctx", context_length: 1000000, max_output_tokens: 2000000 },
+			{ id: "junk-ctx", context_length: 999999999999 },
+		],
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [{ id: "junk-ctx" }, { id: "junk-max", contextWindow: 1000000 }, { id: "max-over-ctx", contextWindow: 1000000 }]);
+});
+
 test("parseProviderModelsResponse: Gemini models/ 前缀与 inputTokenLimit", () => {
 	const models = parseProviderModelsResponse(
 		{

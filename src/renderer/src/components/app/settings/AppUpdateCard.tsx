@@ -78,6 +78,7 @@ export function AppUpdateCard(props: AppUpdateCardProps) {
 	return (
 		/* 内容直接铺在 SettingsSection 的淡色外框里，不再自套边框（避免内外双框）。 */
 		<div className="mb-3">
+			<p className="mb-2 text-caption text-muted-foreground">{t("settings.appForkUpdateHint")}</p>
 			{/* 首行固定最小行高 + 垂直居中：与「自动下载更新」等 SettingRow 同行高观感，按钮不致偏上。 */}
 			<div className="flex min-h-10 items-center justify-between gap-2">
 				<div className="flex items-center gap-2">
@@ -136,7 +137,7 @@ export function AppUpdateCard(props: AppUpdateCardProps) {
 			{download && download.phase === "error" && (
 				<div className="mt-2 flex flex-col gap-1">
 					<p className="text-caption text-destructive">{t(download.errorKind === "download" ? "update.downloadFailedDetail" : "update.checkFailedDetail", { error: download.error ?? t("common.unknown") })}</p>
-					{props.updateSource === "github" && <p className="text-caption text-muted-foreground">{t("settings.updateGithubFailHint")}</p>}
+
 					<div className="flex gap-2">
 						<Button variant="ghost" size="sm" onClick={props.onCheckUpdate}>
 							{t("settings.checkUpdateRetry")}

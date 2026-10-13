@@ -349,23 +349,23 @@ export const ipcChannels = {
 	settingsGet: "settings:get",
 	settingsUpdate: "settings:update",
 	/** 重启当前已启用的 Web 服务，不修改 Web 设置 */
-	settingsRestartWebService: "settings:restart-web-service",
+
 	/** 查询 Web 服务运行状态（端口 / 本次启动的访问令牌 / 是否要求鉴权） */
-	webServiceStatus: "web:status",
+
 	/** 轮换 Web 服务访问令牌：旧令牌立即失效（泄露自救），返回新状态 */
-	webServiceRotateToken: "web:rotate-token",
+
 	/** 手动设置 Web 服务令牌/过期策略（热生效不重启），返回新状态 */
-	webServiceSetToken: "web:set-token",
+
 	/** 外网访问：查询 cloudflare 隧道 + tailscale 组网聚合状态 */
-	webRemoteAccessState: "web:remote-access-state",
+
 	/** 外网访问状态变化推送（主进程 → 渲染层） */
-	webRemoteAccessChanged: "web:remote-access-changed",
+
 	/** 外网访问：启动指定渠道（cloudflare 隧道 / tailscale serve） */
-	webRemoteAccessStart: "web:remote-access-start",
+
 	/** 外网访问：停用指定渠道 */
-	webRemoteAccessStop: "web:remote-access-stop",
+
 	/** 外网访问：重新检测本机 cloudflared / tailscale 安装与登录状态 */
-	webRemoteAccessRefresh: "web:remote-access-refresh",
+
 	settingsTestPiProxy: "settings:test-pi-proxy",
 	settingsApplyWindow: "settings:apply-window",
 	skillsList: "skills:list",
@@ -387,18 +387,13 @@ export const ipcChannels = {
 	promptsRenameInProject: "prompts:rename-in-project",
 	promptsToggle: "prompts:toggle",
 	promptsToggleInProject: "prompts:toggle-in-project",
-	promptStoreSearch: "prompt-store:search",
-	promptStoreGet: "prompt-store:get",
-	promptStoreImport: "prompt-store:import",
+
 	yaoPromptsList: "yao-prompts:list",
 	yaoPromptsDetail: "yao-prompts:detail",
 	yaoPromptsImport: "yao-prompts:import",
-	skillStoreSearch: "skill-store:search",
-	skillStoreImport: "skill-store:import",
+
 	// SkillHub（api.skillhub.cn）
-	skillHubSearch: "skill-hub:search",
-	skillHubDetail: "skill-hub:detail",
-	skillHubInstall: "skill-hub:install",
+
 	extensionsList: "extensions:list",
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",
@@ -407,7 +402,7 @@ export const ipcChannels = {
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
 	extensionsUpdateOne: "extensions:update-one",
-	extensionsCatalog: "extensions:catalog",
+
 	/** 内置扩展热更新：查询内置/覆盖层版本状态（不联网） */
 	extensionsBuiltInUpdateStatus: "extensions:builtin-update-status",
 	/** 内置扩展热更新：检查 AtomGit/GitHub 远端清单是否有更新（联网，逐文件 sha256 比对） */
@@ -529,7 +524,7 @@ export const ipcChannels = {
 	piRuntimePiInstall: "pi:runtime-pi-install",
 	appInfo: "app:info",
 	/** 获取当前机器的非回环 IPv4 网卡，供局域网 Web 服务二维码使用 */
-	appNetworkAddresses: "app:network-addresses",
+
 	appPreferredSystemLanguages: "app:preferred-system-languages",
 	appCheckUpdate: "app:check-update",
 	/** 查询当前构建所属更新通道（stable/dev，编译期判定）。 */
@@ -627,7 +622,6 @@ export const ipcChannels = {
 	projectsListModelsReport: "projects:list-models-report",
 	/** 模型规格查询：pi-ai 内置目录按模型 id 精确匹配，中转站通用 */
 	projectsGetModelSpec: "projects:get-model-spec",
-	agentsEvent: "agents:event",
 	agentsMessage: "agents:message",
 	agentsLog: "agents:log",
 
@@ -928,11 +922,15 @@ export const ipcChannels = {
 	hostPluginsMount: "host-plugins:mount",
 	hostPluginsUpdate: "host-plugins:update",
 	hostPluginsUnmount: "host-plugins:unmount",
+	/** 卸载：删掉 userData 里的插件目录并清掉授权（内置示例不可卸载，见 HostPluginManager.remove）。 */
+	hostPluginsRemove: "host-plugins:remove",
 	hostPluginsChanged: "host-plugins:changed",
 	hostPluginRequest: "host-plugin:request",
 	hostPluginEvent: "host-plugin:event",
 	/** 插件发起的会话导航：broker 校验后推给桌面渲染层执行，插件页自身无权打开会话 */
 	hostPluginNavigate: "host-plugin:navigate",
+	/** 插件要求打开本地服务的 Web UI：地址由主进程适配器给，渲染层只负责开内置浏览器 */
+	hostPluginOpenBrowser: "host-plugin:open-browser",
 	pluginDevStatus: "plugin-dev:status",
 	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
 	pluginDevWriteGuide: "plugin-dev:write-guide",
@@ -959,6 +957,20 @@ export const ipcChannels = {
 	 * 展示走 pideck-img:// 协议流式加载，这个通道只服务「复制 / 保存 / 重发带回参考图」。
 	 */
 	imagegenReadImageBlob: "imagegen:read-image-blob",
+
+	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
+	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
+	videogenSubmit: "videogen:submit",
+	/** 取消进行中的任务（停止轮询并标记 cancelled；上游可能继续执行与计费） */
+	videogenCancel: "videogen:cancel",
+	/** 读取独立生视频配置（userData/videogen.json） */
+	videogenGetConfig: "videogen:get-config",
+	/** 保存独立生视频配置（白名单校验后落盘） */
+	videogenSaveConfig: "videogen:save-config",
+	/** 某会话的全部任务快照（重启后渲染层恢复进行中占位用） */
+	videogenListJobs: "videogen:list-jobs",
+	/** 任务状态事件（主进程 → 渲染层单通道推送，按 sessionId 过滤消费） */
+	videogenEvent: "videogen:event",
 
 	// ===== 提示词增强（输入框草稿 → 模型改写 → 回填） =====
 	/** 发起增强：受理后流式事件经 enhance:event 推送（按 runId 配对） */
@@ -1001,17 +1013,16 @@ export const ipcChannels = {
 
 	// ===== 应用公告（无服务器拉取） =====
 	/** 渲染层 → 主进程：拉取当前公告快照（主进程返回缓存，不做网络请求） */
-	announcementList: "announcement:list",
+
 	/** 渲染层 → 主进程：立即刷新公告（设置页/手动刷新入口；带随机抖动防集中打源） */
-	announcementRefresh: "announcement:refresh",
+
 	/** 渲染层 → 主进程：标记公告已读（存储持久化到 userData） */
-	announcementMarkRead: "announcement:mark-read",
+
 	/** 渲染层 → 主进程：标记全部公告已读 */
-	announcementMarkAllRead: "announcement:mark-all-read",
+
 	/** 渲染层 → 主进程：记录已弹过提醒的公告（持久化，保证每条公告只弹一次） */
-	announcementMarkNotified: "announcement:mark-notified",
+
 	/** 主进程 → 渲染层：推送公告快照（定时拉取成功/缓存加载完成后广播） */
-	announcementChanged: "announcement:changed",
 
 	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
 	clipboardReadText: "clipboard:read-text",
@@ -1116,25 +1127,24 @@ export const ipcChannels = {
 
 	// ===== ACP 后端（agent CLI 工具登记表） =====
 	/** ACP 工具列表（settings.acpTools 只读快照）。 */
-	acpToolsList: "acp:tools-list",
+
 	/** 保存整张工具表（逐条消毒；非法条目丢弃而非拒绝整表）。 */
-	acpToolsSave: "acp:tools-save",
+
 	/** 单条表单校验（不含落盘；渲染层新增/编辑即时反馈）。 */
-	acpToolValidate: "acp:tool-validate",
+
 	/** 检测预设工具安装状态/版本（只读；presetId 枚举收口）。 */
-	acpToolDetect: "acp:tool-detect",
+
 	/** npm 全局安装预设工具（进度经 acpLifecycleEvent 推送）。 */
-	acpToolInstall: "acp:tool-install",
+
 	/** npm 全局卸载预设工具。 */
-	acpToolUninstall: "acp:tool-uninstall",
+
 	/** 主→渲染：安装/卸载进度行与结算（webContents 推送）。 */
-	acpLifecycleEvent: "acp:lifecycle-event",
+
 	/** 查询 acp 会话的配置枚举（模型/思考档/模式；agent 未提供时 null）。 */
-	acpSessionConfigGet: "acp:session-config-get",
+
 	/** 下发 session/set_config_option 并返回 agent 回传的整表。 */
-	acpSessionConfigSet: "acp:session-config-set",
+
 	/** 主→渲染：configOptions 变更（set 响应/config_option_update 通知）。 */
-	acpSessionConfigChanged: "acp:session-config-changed",
 
 	// ===== TPA 独立文稿（工作/准备/成果归档） =====
 	/** 建立工作记录（幂等；不启动制作）。 */

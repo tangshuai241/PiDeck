@@ -2,6 +2,7 @@ import { test as base, expect, _electron as electron, type ElectronApplication, 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { openFirstSession } from "./open-session";
 
 /**
  * 历史会话恢复（#113 3.2-9）：
@@ -14,19 +15,9 @@ import { join, resolve } from "node:path";
 
 const repoRoot = resolve(__dirname, "..");
 
+/** 打开第一个会话（合成器可用）；UI 2.0 起欢迎页已无「启动 Agent」按钮。 */
 async function startAgent(window: Page) {
-	const startButton = window.getByRole("button", { name: "启动 Agent" });
-	const composer = window.locator(".composer .rich-input");
-	for (let attempt = 0; attempt < 4; attempt += 1) {
-		await startButton.click();
-		const gone = await startButton
-			.waitFor({ state: "hidden", timeout: 5000 })
-			.then(() => true)
-			.catch(() => false);
-		if (gone) break;
-	}
-	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
-	return composer;
+	return openFirstSession(window);
 }
 
 async function launchApp(userDataRoot: string): Promise<ElectronApplication> {

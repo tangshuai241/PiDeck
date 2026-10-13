@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { sanitizeAcpTools, validateAcpTool, createAcpToolId } = loadTsCommonJs("src/main/acp/acpToolConfig.ts");
+const { sanitizeAcpTools, validateAcpTool, createAcpToolId } = loadTsCommonJs("src/main/settings/legacyAcpTools.ts");
 
 const validTool = { id: "t1", name: "Gemini CLI", command: "gemini", args: ["--acp"], enabled: true };
 

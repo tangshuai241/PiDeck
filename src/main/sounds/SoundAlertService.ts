@@ -2,7 +2,7 @@
  * SoundAlertService —— 主进程声音提醒服务。
  *
  * 职责：监听 AgentManager 的三类事件（完成 settled / 出错状态边沿 / 等待输入 ui-request），
- * 经 soundAlertTracker 去重冷却后，按设置（总开关/分事件开关/音量/音效引用）决定
+ * 经 soundAlertTracker 去重冷却后，按设置（总开关/分事件开关/音量/音效引用 + 仅失焦提醒）决定
  * 是否向主窗口推送 `sounds:play`。播放本身在渲染层（HTMLAudioElement），
  * 主进程只做「事件判定 + 设置门控」，与 PetStateBridge 的分工保持一致。
  */
@@ -11,12 +11,15 @@ import type { SoundAlertKind } from "../../shared/types/soundAlert";
 import type { AgentManager } from "../pi/AgentManager";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { createSoundAlertTrackerState, resolveSoundPlayback, trackAgentSettled, trackAgentTabs, trackUiRequest, type SoundAlertTrackerState } from "./soundAlertTracker";
+import { shouldAlertNow } from "../notifications/alertFocusGate";
 
 export type SoundAlertServiceDeps = {
 	agentManager: AgentManager;
 	settingsStore: SettingsStore;
 	/** 主窗口获取器：窗口已销毁/未创建时丢弃推送（无窗口可响）。 */
 	getMainWindow: () => { webContents: { send(channel: string, payload: unknown): void } } | null;
+	/** 主窗口是否有焦点：配合「仅失焦提醒」开关，前台时不播提示音。 */
+	isWindowFocused: () => boolean;
 	/** 日志回调（appLogger.info 的窄接口），便于测试注入。 */
 	log?: (domain: string, message: string, details?: Record<string, unknown>) => void;
 };
@@ -69,8 +72,10 @@ export class SoundAlertService {
 	 */
 	private maybePlay(kind: SoundAlertKind, title: string): void {
 		try {
-			const settings = this.deps.settingsStore.get().soundAlert;
-			const playback = resolveSoundPlayback(kind, title, settings);
+			const snapshot = this.deps.settingsStore.get();
+			// 仅失焦提醒：窗口在前台时不播提示音（同一开关也门控系统通知，见 notifications/alertFocusGate）
+			if (!shouldAlertNow(snapshot.alertOnlyWhenUnfocused, this.deps.isWindowFocused())) return;
+			const playback = resolveSoundPlayback(kind, title, snapshot.soundAlert);
 			if (!playback) return;
 			const window = this.deps.getMainWindow();
 			if (!window) return;

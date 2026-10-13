@@ -14,7 +14,7 @@ title: 宿主插件开发指南
 
 | ✅ 能做 | ❌ 不能做 |
 |--------|----------|
-| 在 PiDeck 里注册自己的面板（大弹框 `modal` 或工作区内联页 `page`） | 页面直接联网（`fetch`/`XMLHttpRequest`/WebSocket 仍被禁止） |
+| 在 PiDeck 里注册自己的面板（大弹框 `modal`、侧栏浮层 `popover` 或工作区内联页 `page`） | 页面直接联网（`fetch`/`XMLHttpRequest`/WebSocket 仍被禁止） |
 | 经 `network.request` 调用已授权的公网 HTTPS API / 本地固定端口 HTTP 服务 | 访问未声明的地址、局域网、任意端口；自动执行 BAT 或启动服务 |
 | 读取**当前项目**的会话目录：`sessions.list` / `get` / `search` | 读取其他项目的会话、读取任意本地文件 |
 | 读取会话的活跃分支历史：`sessions.entries`（分页、有预算） | 修改会话、发消息、调用 pi 或任何 RPC 命令 |
@@ -47,9 +47,9 @@ title: 宿主插件开发指南
 2. 点 **「新建插件…」**，填：
    - **插件 ID**：小写字母开头，`[a-z0-9.-]`，≤80 字符，例如 `demo.viewer`（同时是生成目录名）；
    - **显示名**：面板与命令里的名字；
-   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local`。纯联网工具可取消会话读取；
+   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`。纯联网工具可取消会话读取；
    - **网络目的地**（仅勾网络权限时出现）：HTTPS 填 `https://api.example.com` 这样的 origin，本地填明确端口（如 `4187`）；多个值用逗号或空白分隔，每类最多 16 个，不支持通配符；
-   - **面板形态**：`modal`（大弹框，默认）或 `page`（工作区内联页）；
+   - **面板形态**：`modal`（大弹框，默认）、`popover`（侧栏一行旁边的浮层，适合几行控件的紧凑面板）或 `page`（工作区内联页）；
 3. 生成后目录出现在插件目录里，并自动重新扫描（默认**禁用**）；
 4. 在列表里点 **「授权并启用」**；
 5. 从侧栏入口或命令面板（Ctrl+K）打开面板。
@@ -152,13 +152,14 @@ for (const session of page.sessions) {
 | `name` | ✅ | 非空，≤160 字符，无控制字符 |
 | `version` | ✅ | 非空，≤160 字符（仅用于展示，授权不看它） |
 | `description` | — | ≤1000 字符 |
-| `permissions` | ✅ | 数组，只能取 `sessions.read` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local`，不能重复；未知权限拒装 |
+| `permissions` | ✅ | 数组，只能取 `sessions.read` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装 |
 | `network` | 网络权限存在时 ✅ | `network.https` 对应 `httpsOrigins`，`network.local` 对应 `localPorts`。没声明对应权限不得填写该字段；规则见 5.5 |
-| `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` 或 `page`，可选） |
+| `services` | `service.local` 存在时 ✅ | 1–8 个，只能点名 PiDeck **已实现适配器**的本地服务（当前仅 `billion-context`）；没声明 `service.local` 不得填写该字段；规则见 5.8 |
+| `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` / `popover` / `page`，可选） |
 | `contributes.commands` | ✅ | 0–16 个。`id`、`title`、`panelId` 必须指向已声明的面板 |
 
 - **`icon` 白名单**：`bar-chart`、`activity`、`database`、`table`、`calendar`、`file-text`、`terminal`、`globe`、`git-branch`、`message`、`clock`、`layers`（见 `src/shared/hostPluginIcons.ts`）。不填或填未知名字都不会崩，未知名字直接拒装。
-- **`presentation`**：`modal`（缺省）= 近全屏大弹框；`page` = 工作区内联页，非模态覆盖会话区，侧栏入口再点即关。统计/浏览类长驻面板建议 `page`。
+- **`presentation`**：`modal`（缺省）= 近全屏大弹框；`popover` = 侧栏那一行旁边就地展开的浮层（宽 320px、高 280px 量级，只适合状态行 + 几个按钮的紧凑面板；从设置页/命令面板这类没有锚点的入口进来时退化成小对话框）；`page` = 工作区内联页，非模态覆盖会话区，侧栏入口再点即关。统计/浏览类长驻面板建议 `page`，启停/状态类紧凑面板建议 `popover`。
 - **`entry` 资源路径规则**：只用相对路径（`^[a-zA-Z0-9_./-]+$`，≤240 字符），不能以 `/` 开头，不能含 `..`、`.` 段。**文件名不要用空格或中文**，否则 HTML 里引用不到。
 
 ### 4.2 包预算（超出即拒装/拒载）
@@ -198,6 +199,9 @@ for (const session of page.sessions) {
 | `pideck.workbench.navigate(sessionId, entryId?)` | `workbench.navigate` | `void` |
 | `pideck.workbench.openExternal(url)` | `workbench.openExternal` | `void` |
 | `pideck.network.request(input)` | `network.https` 或 `network.local` + 对应目的地声明 | `{ url, status, ok, headers, body }` |
+| `pideck.services.status(id)` | `service.local` + `services` 点名 | `HostPluginServiceStatus` |
+| `pideck.services.start(id)` / `stop(id)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus` |
+| `pideck.services.openUi(id)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus`（由 PiDeck 开内置浏览器） |
 | `pideck.onEvent(listener)` | — | 取消订阅函数 |
 
 > 兼容策略：新能力只做加法。老插件不受影响；想探测新方法用 `typeof pideck.sessions.search === "function"`。
@@ -427,6 +431,54 @@ body {
 - 一定要带缺省值，且**不要**只按暗色硬编码——亮色主题下会看不清。
 - `--color-accent` 是「面」色：文字要用 `--color-text-inverse`，别拿它当文字色。
 
+### 5.8 本地服务：启停与打开 Web 面板（`service.local`）
+
+有些本地工具自带一个 Web 面板（例如 billion-context 的 `/__bili/`）。面板页 CSP 是 `connect-src 'none'; frame-src 'none'`，**既不能内嵌也打不开它**，所以「打开面板」只能把 URL 交给 PiDeck，由 PiDeck 用内置浏览器开。
+
+`service.local` 只对 PiDeck 已实现适配器的服务生效（当前：`billion-context`），清单必须同时点名：
+
+```json
+{
+	"permissions": ["service.local"],
+	"services": ["billion-context"]
+}
+```
+
+- 命令名、参数、端口全部是 PiDeck 主进程里的常量；插件只能传 service id，传别的一律 `permission-denied`。
+- 未实现的服务写进 `services` 会被清单校验拒装（`invalid-services`）。
+- 这是「权限 + 点名」双重门：少任何一边都拿不到能力。
+
+```ts
+type HostPluginServiceStatus = {
+	id: string; // 服务 id
+	available: boolean; // 外部 CLI 是否可用；false 时 running 恒为 false，reason 说明原因
+	running: boolean;
+	pid?: number;
+	version?: string;
+	uiUrl?: string; // Web 面板地址（http://127.0.0.1:<port>/...），未运行或未知时为 undefined
+	reason?: string; // 稳定原因码：cli-missing / cli-failed / invalid-report / start-* / stop-failed / stop-restarted…
+};
+```
+
+```js
+const status = await pideck.services.status("billion-context");
+if (!status.available) showInstallHint("npm i -g billion-context"); // 未装时 reason 说明原因
+
+// 三个方法都返回「操作后的新状态」，不需要再调一次 status
+await pideck.services.start("billion-context"); // 起进程，并等到 doctor 报告存活（最多约 20 秒）
+await pideck.services.stop("billion-context"); // 按 doctor 报告的 pid 终止
+await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开 uiUrl
+```
+
+- `start` / `stop` 比普通请求慢得多（要等进程真的起来 / 落下）；面板请自己加「进行中」态，不要连点。
+- `stop` **可能返回一个仍在运行的服务**：`reason: "stop-restarted"` 表示进程被杀掉后又被别人拉起来了（典型情形是代理由 pi 自己持有，pi 一发现它死了就重新拉起）。这时 `status.running` 仍是 `true`、`pid` 是**新**进程；面板要把 `reason` 直接告诉用户，不要当成失败或重试。
+- 服务不可用时的错误码见第 7 节（`service-unavailable` / `service-not-running` / `cli-missing` / `start-timeout`…）。
+- 这类面板通常**只监听 127.0.0.1 且无鉴权**：不要在界面或文档里引导用户把端口暴露到公网/局域网。
+
+#### 可直接导入的 demo
+
+`resources/host-plugins/billion-context/` 就是完整实现（状态卡 + 启停 + 开面板）。它会随 PiDeck 落位到插件目录，可直接改；改完重新扫描 + 重新授权。
+
 ## 6. 安全模型（为什么这些限制是这样）
 
 | 机制 | 说明 |
@@ -435,6 +487,7 @@ body {
 | 唯一能力面 | 页面只能通过注入的 `window.pideck` 请求；没有通用 IPC、没有文件系统、没有 pi RPC |
 | 请求绑定实例 | 每个请求绑定面板实例；插件被禁用、上下文变化或面板关闭后未完成的结果作废（`plugin-revoked`），网络 socket 同步中止 |
 | 网络授权 | 启用前展示所有权限与具体 origin / 本地端口；会话读取 + 网络同时存在时提示数据外发风险；每跳复查目的地与公网 DNS，阻止未授权地址 |
+| 服务控制 | `service.local` 只是「点名权」：命令、参数、端口全在 PiDeck 的服务适配器里，插件无法执行任意命令；启用前展示可控制的服务 id |
 | 项目隔离 | 会话读取逐条校验归属（含 fork 祖先链逐跳校验）；跨项目一律 `session-not-authorized`，也不泄露「该会话是否存在」 |
 | 指纹授权 | 授权 = 整包逐文件 sha256。内容一变授权即失效，必须重新确认；启用中的插件不能被静默替换（`plugin-in-use`） |
 | 频率限制 | 每实例同时最多 2 个在途请求，每秒最多 20 个请求，超出 `rate-limited` |
@@ -465,6 +518,11 @@ body {
 | `network-request-failed` | DNS、TLS、连接等失败（底层细节不会泄露） | 确认服务运行、地址可达、TLS 证书有效 |
 | `network-response-too-large` / `network-headers-too-large` | 响应正文 / 响应头超预算 | 接口分页、减少返回内容 |
 | `network-response-type-denied` / `network-response-encoding-denied` | 非文本/JSON、压缩、非法 UTF-8 或非支持字符集 | 服务返回有界 UTF-8 JSON/text，禁用压缩 |
+| `service-unavailable` | 该 service id 没有 PiDeck 适配器 | 只用清单里声明过的服务 |
+| `service-not-running` | 服务未运行（`stop` / `openUi` 时） | 先 `start`，或提示用户手动启动 |
+| `cli-missing` / `cli-failed` / `invalid-report` | 外部 CLI 不存在 / 执行失败 / 输出无法解析 | 让用户先安装（如 `npm i -g billion-context`） |
+| `start-failed` / `start-timeout` / `stop-failed` | 启动命令没发出去 / 20 秒内没起来 / 终止失败 | 提示用户手动排查；不要自动重试 |
+| `stop-restarted` | 终止成功但进程立刻又被拉起（pi 持有该代理时会这样） | 不是错误：如实转述，提示「要彻底停掉需先退出 pi」 |
 
 加载/安装/发布：
 
@@ -472,10 +530,11 @@ body {
 |--------|------|
 | `missing-manifest` | 目录里没有 `pideck-plugin.json`（选错目录/选到父目录） |
 | `invalid-manifest` / `invalid-panel` / `invalid-command` / `invalid-contributions` | manifest 字段不合法（ID、title、entry、panelId…） |
-| `invalid-panel-icon` / `invalid-panel-presentation` | icon 不在白名单 / presentation 不是 `modal`\|`page` |
+| `invalid-panel-icon` / `invalid-panel-presentation` | icon 不在白名单 / presentation 不是 `modal`\|`popover`\|`page` |
 | `duplicate-panel` / `duplicate-command` / `duplicate-plugin-id` | id 重复 |
 | `unsupported-permission` | 权限不在允许集合内 |
 | `invalid-network` | 网络权限与目的地不匹配、重复、格式非法或超 16 个 |
+| `invalid-services` | `service.local` 与 `services` 不匹配（缺失、为空、超 8 个、重复或含未实现的服务） |
 | `missing-panel-entry` / `invalid-asset` / `asset-not-allowed` | 入口或资产路径不合法（缺文件、`..`、绝对路径、非法字符） |
 | `asset-too-large` / `package-too-large` / `package-too-deep` / `invalid-package-file` / `symlink-not-allowed` | 超出包预算（见 4.2） |
 | `already-exists` | 脚手架：目标目录已存在（不覆盖作者代码） |

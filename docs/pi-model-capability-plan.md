@@ -10,7 +10,7 @@
 2. Pi 真实的 `/thinking` 选择器与 RPC `get_available_thinking_levels` 使用同一套 Pi 逻辑：
    `reasoning` 决定是否支持推理；`thinkingLevelMap` 的 `null` 禁用档位、缺失键对基础档位表示采用默认值、对 `xhigh/max` 表示不提供该档位。
 3. 欢迎页和草稿会话优先读取启动 capability cache；运行 Agent 读取自身 runtime cache。旧 Pi 或 probe 失败时才回退静态兼容档位。
-4. 配置页里显示的“关闭”只表示当前 `xhigh` / `max` 映射为空，不等于 `reasoning: false`，也不一定会写入 `thinkingLevelMap`。
+4. 配置页的思考档位弹窗用勾选方式编辑全部七个 map 键：勾选 = 该档位可用（`xhigh`/`max` 写入同名 wire 值，基础五档删条目走 Pi 默认），取消 = 基础五档写 `null`、`xhigh`/`max` 删条目；取消勾选不等于 `reasoning: false`。
 5. 手动新增 Pi 模型先保持能力字段为空，再按端点元数据、Pi 当前目录和内置目录的唯一模型本体匹配补全；不再写入乐观的 1M / 128K / reasoning / image 猜测值。
 6. `input` 是 Pi 真正的多模态能力字段。没有 `image` 时，Pi/pi-ai 会把用户图片和工具图片替换为占位文本；PiDeck 目前仍允许附件并把图片发给 Pi，再由 Pi/视觉桥决定结果。
 
@@ -139,7 +139,7 @@ watcher 使用目录级、按文件名过滤、短 debounce 的策略；创建�
 | `settings.json.defaultThinkingLevel` | Pi 全局/项目设置 | 默认请求档位，不是能力声明 |
 | `settings.json.modelThinkingLevels` | Pi 全局/项目设置 | provider/model 的默认请求档位，不是能力声明 |
 
-Pi 的 `ModelDefinitionSchema` 支持 `off/minimal/low/medium/high/xhigh/max` 全部 map 键，但 PiDeck 当前可视化配置只提供 `xhigh` 和 `max` 两行。
+Pi 的 `ModelDefinitionSchema` 支持 `off/minimal/low/medium/high/xhigh/max` 全部 map 键，PiDeck 配置页的思考档位弹窗也按这七个键逐个勾选编辑（见 §2.2）。
 
 ### 1.2 Pi 0.84.3 的实际算法
 
@@ -191,38 +191,39 @@ return ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 命中模板可补 `contextWindow`、`maxTokens`、完整 `input`、`reasoning` 和 `thinkingLevelMap`，但永不改写 provider、baseUrl、API 协议、认证、用户已填字段或用户手写 map。配置表会展示能力卡，说明匹配到的标准模型、数据源和映射档位；它是可审计说明，不是对远端中转站行为的伪造证明。
 
-### 2.2 “关闭”按钮的真实语义
+### 2.2 档位勾选的写回语义
 
-`ModelsTab.tsx` 的思考级别弹窗只编辑 `xhigh` 与 `max`：
+`ModelsTable.tsx`（`ModelsTab.tsx` 展开卡片与 `AddProviderDialog.tsx` 共用）的思考档位弹窗用**勾选列表**编辑模型自己的 `thinkingLevelMap`：
 
-- 下拉选择 `xhigh` / `max`：写入 `thinkingLevelMap[key]`；
-- 选择“关闭”（空值）：删除该 key；两个 key 都空时删除整个 `thinkingLevelMap`；
-- 清空 map 时不会把已有的 `reasoning: true` 改成 `false`；
-- `reasoning` checkbox 是另一个独立字段，必须单独取消才能让 Pi 只显示 `off`。
+- 勾选 `xhigh` / `max`：写入同名 wire 值（Pi 只认「有值」的 `xhigh`/`max`，缺条目等于不存在）；
+- 勾选 `off` 到 `high`：删掉该键（Pi 对基础五档的默认就是恒等映射）；已有自定义 wire 值（如 `off: "none"`、`low: "LOW"`）原样保留，并在行右侧以 `→ 值` 展示；
+- 取消勾选 `off` 到 `high`：写 `null`——这是 Pi 表达「该档位不可用」的唯一方式；
+- 取消勾选 `xhigh` / `max`：删除该键（对这两个档位缺条目与 `null` 等价，少写不污染配置）；
+- 表被清空时整块删掉 `thinkingLevelMap`；勾选任意档位都会把模型标成 `reasoning: true`；
+- 取消勾选**不会**把 `reasoning` 改回 `false`：`reasoning` 是能力列上的独立勾选，要单独取消才能让 Pi 只返回 `off`。
 
-因此截图中的“关闭”应理解为：
+勾选态是可预演的：`modelThinkingLevelState`（`shared/modelThinkingLevels.ts`）只读草稿的 `reasoning` + `thinkingLevelMap`，与 Pi `getSupportedThinkingLevels()` 同一套判定（基础五档缺条目即默认可用，`xhigh`/`max` 必须有值），不依赖 Pi 的能力探测结果——探测回答的是「已保存配置」，尚未保存的新行没有探测数据。
 
-> “没有为这个扩展档位配置 provider 映射”，不是“模型思考能力关闭”，也不是“必然会写入 `thinkingLevelMap`”。
+弹窗底部的「默认档位」写的是 `settings.json` 的 `modelThinkingLevels`（默认请求档位，不是能力声明）：候选只列当前已勾选的档位；取消勾选某个档位时，若它正好是该模型的默认档位会一并清掉（否则默认档位指向不可用档位，Pi 只能 clamp）。「Pi 识别到的档位」一行是只读参考，显示 Pi 对**已保存配置**的实际解析结果。
 
-当前文案容易误导，建议改成“未配置”或“未声明支持”，并在旁边明确说明：基础 `off~high` 仍由 Pi 按 `reasoning` 计算。
+### 2.3 配置页的可编辑范围
 
-### 2.3 配置页只展示 xhigh/max 的问题
+七个 map 键全部可以在弹窗内勾选编辑，不再有「只能保留、不能管理」的基础五档；`thinkingLevelMap` 也不再算 advanced preserved fields（计费弹框的保留提示不再列它）。单元格摘要只写首尾两档：连续区间是 `off → max`，中间有跳档是 `off…max`（不谎称连续；完整清单在悬停提示与弹层勾选列表里，表格列只有 96px，逐个列出会被截断成看不出首尾）。
 
-Pi 原生允许配置所有七个 map 键，例如：
+### 2.4 两条入口的模型表对齐
 
-```json
-"thinkingLevelMap": {
-  "off": null,
-  "minimal": null,
-  "low": "low",
-  "medium": null,
-  "high": "high",
-  "xhigh": null,
-  "max": "max"
-}
-```
+模型表在「展开卡片」（`ModelsTab`）与「供应商页」（`AddProviderDialog`，新增/编辑同页）两处渲染同一个 `ModelsTable`，操作集由 `tests/modelTableEntryParity.test.mjs` 做集合级锁死：上移/下移、隐藏、逐模型 UA、每模型默认档位、重置为自适应、计费、删除、批量选择/全选/反选。只允许两项宿主上下文差异：卡片的 `getRowKey`（多表同屏要 provider 前缀防 ref 串扰）与新增页的 `thinkingLevelsProbePending`（还没落盘的 provider 探不到档位，该行显示「保存后由 Pi 探测」）。
 
-Pi 会据此只显示 `off/low/high/max`。PiDeck 可视化弹窗目前不能编辑基础五档，只能保留它们、不能管理它们。含有基础 map 的模型会被标记为 advanced preserved fields，但用户无法在普通弹窗内完整核对。
+**两条入口唯一的行为差异是生效时机**（卡片没有保存按钮，页面是表单）：
+
+| 设置 | 存哪 | 卡片 | 供应商页 |
+|---|---|---|---|
+| 逐模型 UA | `models.json` 的 `provider.modelOverrides` | 即时写进配置草稿 | 先记页内，点保存随 provider 合并 |
+| 每模型默认思考档位 | `settings.json` 的 `modelThinkingLevels` | 即时写进设置草稿 | 先记页内，点保存按最终名字**替换式**落盘 |
+| 隐藏模型 | `AppSettings.hiddenModels` | 即时持久化 | 先记页内，点保存才并入 |
+| Pi 可用档位探测 | pi 运行时（只读） | 显示 Pi 的真实回答 | 新增页显示「保存后由 Pi 探测」 |
+
+页面里改模型 ID = 重命名同一行：页内三份副本跟着搬到新 ID。卡片路径（逐字符改 ID）不搬，改由**保存前清孤儿**兜底——落盘前按「provider 在 `models.json` 里、模型 ID 不在它的模型列表里」清 `modelOverrides` / `modelThinkingLevels` / `hiddenModels` 三处（pi 内置 provider 一律不碰）。代价是「删掉模型再加回来，它的 UA / 默认档位 / 隐藏要重配」——设置跟着模型走，不跟历史走。契约测试：`tests/providerPageModelSettings.test.mjs`（页面草稿与落盘）、`tests/modelTableEntryParity.test.mjs`（两条入口的 prop 集合）。
 
 ## 3. 草稿态/欢迎页链路
 

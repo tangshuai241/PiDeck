@@ -231,11 +231,6 @@ test("main-process user surfaces use stable copy and keep caught details in logs
 		"wsl.piNotInstalled",
 		"wsl.connectionFailed",
 		"session.stopBeforeDelete",
-		"store.promptSearchFailed",
-		"store.promptDetailFailed",
-		"store.promptImportFailed",
-		"store.skillSearchFailed",
-		"store.skillImportFailed",
 		// 注：store.skillsShInstallFailed 已不再被引用——安装失败改为返回真实错误（npx 输出/网络/权限），
 		// 渲染层 toast 直接展示，不用通用文案；key 定义保留在 mainProcessCopy.ts 以兼容旧调用
 		"store.yaoListFailed",
@@ -250,9 +245,6 @@ test("main-process user surfaces use stable copy and keep caught details in logs
 	assert.doesNotMatch(source, /throw new Error\(`(?:搜索|获取|导入|读取)[^`]*\$\{message\}`\)/);
 	assert.doesNotMatch(source, /state:\s*"failed",\s*error:\s*error\.message/);
 	assert.match(source, /appLogger\.warn\("wsl", "WSL connection validation failed"/);
-	assert.match(source, /appLogger\.warn\("skill-hub", "Install failed"/);
-	assert.match(source, /"webService\.invalidPort"/);
-	assert.match(source, /"webService\.startFailed"/);
 	assert.match(source, /throw sessionCommandIpcError\(/);
 	assert.doesNotMatch(source, /throw new Error\([^\n]*debugDetails \|\|[^\n]*code/);
 

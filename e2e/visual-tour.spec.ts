@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openConfigPane } from "./open-session";
 
 /**
  * 视觉巡检（#115 U5 收口后）：对启动页与各主要页面截图，
@@ -43,7 +44,7 @@ async function openContextMenu(window: Page, selector: string, name: string) {
 
 async function openSettings(window: Page) {
 	await dismissOverlays(window);
-	await window.locator(".settings-icon").click();
+	await window.getByRole("button", { name: /^设置/ }).click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible({ timeout: 5000 });
 	await window.waitForTimeout(300);
@@ -97,7 +98,7 @@ test("visual tour: light + dark", async ({ window }) => {
 
 	// ConfigModal：模型 / 认证
 	await dismissOverlays(window);
-	await window.locator(".config-icon").click();
+	await openConfigPane(window);
 	const config = window.locator(".config-modal");
 	await expect(config).toBeVisible({ timeout: 5000 });
 	await window.waitForTimeout(500);

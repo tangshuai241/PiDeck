@@ -683,53 +683,6 @@
   color: var(--color-warning);
   font-size: var(--font-size-caption);
 }
-
-/* 推荐扩展大列表 */
-.extensions-recommended-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.extensions-recommended-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  /* 行高/内边距贴近设置页列表密度，避免扩展页显得更“胖” */
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  transition: background 0.1s;
-}
-.extensions-recommended-row:last-child {
-  border-bottom: none;
-}
-.extensions-recommended-row:hover {
-  background: var(--color-bg-hover);
-}
-
-.extensions-recommended-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.extensions-recommended-name {
-  font-size: var(--font-size-control);
-  color: var(--color-text-primary);
-  margin-bottom: 2px;
-}
-
-.extensions-recommended-desc {
-  font-size: var(--font-size-caption);
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin-bottom: 4px;
-}
-
-.extensions-recommended-action {
-  flex-shrink: 0;
-  padding-top: 2px;
-}
-
 /* 已安装扩展标题：默认跟随 text-sm 语义；保留类名兼容组件 Tailwind 覆盖 */
 .extensions-installed-title {
   font-size: var(--font-size-body);

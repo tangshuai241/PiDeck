@@ -20,8 +20,8 @@ async function openDrawer(window: Page) {
 	await expect(window.locator(".detail-drawer")).toHaveAttribute("data-open", "true");
 }
 
-test.describe("默认（右侧边栏）", () => {
-	test.use({ seedProjects: [makeSeedProject("SidebarStatus")], seedSettings: { piEnvironmentChecked: true } });
+test.describe("右侧边栏（显式设置）", () => {
+	test.use({ seedProjects: [makeSeedProject("SidebarStatus")], seedSettings: { piEnvironmentChecked: true, sessionStatusPlacement: "sidebar" } });
 
 	test("抽屉关闭时分隔条不可聚焦；打开后把手可见，拖动改变下半区高度并持久化比例", async ({ window }) => {
 		await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
@@ -62,10 +62,10 @@ test.describe("默认（右侧边栏）", () => {
 	});
 });
 
-test.describe("输入框上方", () => {
-	test.use({ seedProjects: [makeSeedProject("SidebarStatusComposer")], seedSettings: { piEnvironmentChecked: true, sessionStatusPlacement: "composer" } });
+test.describe("默认（输入框上方）", () => {
+	test.use({ seedProjects: [makeSeedProject("SidebarStatusComposer")], seedSettings: { piEnvironmentChecked: true } });
 
-	test("右侧边栏保持单区抽屉：无会话状态面板、无纵向分隔条", async ({ window }) => {
+	test("未设置时按默认 composer：右侧边栏保持单区抽屉，无会话状态面板、无纵向分隔条", async ({ window }) => {
 		await openDrawer(window);
 		await expect(window.locator(".detail-drawer")).toBeVisible();
 		await expect(statusSection(window)).toHaveCount(0);
@@ -74,13 +74,13 @@ test.describe("输入框上方", () => {
 });
 
 test.describe("设置页切换", () => {
-	test.use({ seedProjects: [makeSeedProject("SidebarStatusSettings")], seedSettings: { piEnvironmentChecked: true } });
+	test.use({ seedProjects: [makeSeedProject("SidebarStatusSettings")], seedSettings: { piEnvironmentChecked: true, sessionStatusPlacement: "sidebar" } });
 
 	test("外观设置渲染「会话状态位置」二选一；改为「输入框上方」保存后右侧边栏去掉下半区", async ({ window }) => {
 		await openDrawer(window);
 		await expect(statusSection(window)).toBeVisible();
 
-		await window.getByRole("button", { name: "设置", exact: true }).click();
+		await window.getByRole("button", { name: /^设置/ }).click();
 		const modal = window.locator(".settings-modal");
 		await expect(modal).toBeVisible();
 		await modal.getByText("外观设置").click();
@@ -101,12 +101,12 @@ test.describe("设置页切换", () => {
 });
 
 test.describe("旧值兼容", () => {
-	// 开发期曾有过 "both" 选项，已移除：主进程读盘归一化为默认 sidebar
+	// 开发期曾有过 "both" 选项，已移除：主进程读盘归一化为默认 composer
 	test.use({ seedProjects: [makeSeedProject("SidebarStatusLegacy")], seedSettings: { piEnvironmentChecked: true, sessionStatusPlacement: "both" } });
 
-	test("settings.json 里残留 both 时按右侧边栏处理：挂会话状态面板", async ({ window }) => {
+	test("settings.json 里残留 both 时按默认 composer 处理：不挂会话状态面板", async ({ window }) => {
 		await openDrawer(window);
-		await expect(statusSection(window)).toBeVisible();
-		await expect(stackSeparator(window)).toHaveCount(1);
+		await expect(statusSection(window)).toHaveCount(0);
+		await expect(stackSeparator(window)).toHaveCount(0);
 	});
 });

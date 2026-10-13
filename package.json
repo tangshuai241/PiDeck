@@ -1,5 +1,5 @@
 {
-  "name": "pi-desktop",
+  "name": "pideck",
   "version": "0.9.0",
   "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
@@ -77,8 +77,6 @@
     "check:prompts-manifest": "node scripts/generate-content-manifests.mjs --domain prompts --check",
     "generate:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills",
     "check:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills --check",
-    "build:announcements": "node scripts/build-announcements.js",
-    "check:announcements": "node scripts/build-announcements.js --check",
     "check:xueprompts": "node scripts/check-xueprompts.mjs",
     "check:electron": "node scripts/check-electron.mjs",
     "check:dsh-wire": "node scripts/check-dsh-wire-payloads.mjs",
@@ -102,7 +100,7 @@
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site",
-    "postinstall": "node scripts/fix-pty-permissions.js",
+    "postinstall": "node scripts/fix-pty-permissions.js && node scripts/patch-electron-builder-rename-retry.js",
     "prepare": "node scripts/install-git-hooks.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
@@ -205,6 +203,13 @@
         ]
       },
       {
+        "from": "resources/host-plugins",
+        "to": "host-plugins",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/undici",
         "to": "extensions/node_modules/undici"
       },
@@ -219,6 +224,10 @@
       {
         "from": "resources/reply-actions.default.json",
         "to": "reply-actions.default.json"
+      },
+      {
+        "from": "resources/notification-logo.png",
+        "to": "notification-logo.png"
       },
       {
         "from": "resources/pi-auth-host.mjs",
@@ -252,7 +261,8 @@
       }
     ],
     "extraMetadata": {
-      "main": "out/main/index.js"
+      "main": "out/main/index.js",
+      "productName": "PiDeck"
     },
     "win": {
       "icon": "build/icon.ico",
@@ -290,20 +300,29 @@
         "tar.gz"
       ],
       "category": "Development",
-      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>"
+      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>",
+      "executableName": "pideck",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "packageName": "pideck",
+      "artifactName": "${productName}_${version}_${arch}.${ext}",
+      "fpm": [
+        "--replaces=pi-desktop",
+        "--conflicts=pi-desktop",
+        "--provides=pi-desktop"
+      ]
     },
     "appImage": {
       "artifactName": "${productName}-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",
-      "owner": "ayuayue",
+      "owner": "tangshuai241",
       "repo": "PiDeck"
     }
   },
   "devDependencies": {
-    "@ai-sdk/react": "^4.0.51",
-    "@astron-team/skillhub": "^0.1.8",
     "@biomejs/biome": "2.3.11",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
@@ -377,7 +396,6 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
-    "ai": "^7.0.48",
     "app-builder-bin": "^5.0.0-alpha.12",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

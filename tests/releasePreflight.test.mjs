@@ -77,7 +77,6 @@ test("buildLanes：release 泳道覆盖全部 --check 型脚本", () => {
 		"generate-extensions-manifest.mjs --check",
 		"--domain prompts --check",
 		"--domain skills --check",
-		"build-announcements.js --check",
 		"check-xueprompts.mjs",
 		"check-dsh-wire-payloads.mjs",
 		"check-electron.mjs",

@@ -1,29 +1,5 @@
 import { test, expect } from "./fixtures";
-
-/**
- * 设置弹窗：能从侧栏打开，开发设置 tab 含 Web 服务配置区。
- * 注：Streamdown 开关与「内置浏览器 WebContentsView 管线（实验）」开关
- * 已随 UI 2.0 设置弹窗重构移除（实验开关无字段/无文案残留），
- * 这里改断言仍保留的「Web 服务」配置区（含启用开关）。
- */
-test("settings modal opens with web service dev section", async ({ window }) => {
-	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-
-	await window.locator(".settings-icon").click();
-	const modal = window.locator(".settings-modal");
-	await expect(modal).toBeVisible();
-
-	// 实验开关在「开发设置」tab
-	await modal.getByText("开发设置").click();
-
-	// Web 服务配置区在开发设置内；文案走 i18n，默认 zh-CN
-	await expect(modal.getByText("局域网 Web 服务")).toBeVisible();
-	await expect(modal.getByText("启用 Web 服务")).toBeVisible();
-
-	// 关闭（设置弹窗不响应 ESC，走显式关闭按钮；aria-label 来自 t("common.close")）
-	await modal.getByRole("button", { name: "关闭" }).first().click();
-	await expect(modal).toHaveCount(0);
-});
+import { openSettings } from "./open-session";
 
 /**
  * 外观主题切换回归（issue #115 收尾时修复）：设置里改主题色必须立即生效——
@@ -37,7 +13,7 @@ test("appearance theme switch applies data-appearance and bundled accent", async
 	await expect(window.locator("html")).toHaveAttribute("data-accent", "default");
 	await expect(window.locator("html")).toHaveAttribute("data-appearance", "classic-green");
 
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 

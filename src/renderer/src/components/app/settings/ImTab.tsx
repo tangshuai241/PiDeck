@@ -130,6 +130,25 @@ export function ImTab(_props: Props) {
 	const [guideAnimating, setGuideAnimating] = useState(false);
 	const [connecting, setConnecting] = useState(false);
 
+	// 指南弹窗统一关闭路径：150ms 退场动画后卸载；overlay 点击、头部关闭钮、Escape 三入口共用，
+	// 防止三处内联后行为漂移（如改动画时长漏一处）。
+	const closeGuide = useCallback(() => {
+		setGuideAnimating(true);
+		setTimeout(() => {
+			setGuideAnimating(false);
+			setGuideOpen(false);
+		}, 150);
+	}, []);
+	// 模态惯例：Escape 可关（与 overlay 点击/头部关闭钮等价）
+	useEffect(() => {
+		if (!guideOpen) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") closeGuide();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [guideOpen, closeGuide]);
+
 	const api = (window as unknown as { piDesktop?: { feishu?: FeishuApiRaw } }).piDesktop?.feishu;
 
 	/** 使用主进程能力打开外部链接；forceSystem=true 强制系统浏览器（如飞书登录/指南页不适合内置浏览器）。 */
@@ -452,6 +471,14 @@ export function ImTab(_props: Props) {
 					const isThisConnected = status.status === "connected" && status.botId === bot.id;
 					const isEditingOpenId = editingOpenIdBotId === bot.id;
 					const isExpanded = expandedBotIds.has(bot.id);
+					// 展开/折叠唯一入口：鼠标点击与键盘 Enter/Space 共用，避免两处内联后行为漂移
+					const toggleBotExpanded = () =>
+						setExpandedBotIds((prev) => {
+							const next = new Set(prev);
+							if (next.has(bot.id)) next.delete(bot.id);
+							else next.add(bot.id);
+							return next;
+						});
 					const visibleBindingCount = getVisibleBindingsForBot(bot.id);
 					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
 					const secretValue = revealedSecrets[bot.id];
@@ -459,14 +486,17 @@ export function ImTab(_props: Props) {
 						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
 							<div
 								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
-								onClick={() =>
-									setExpandedBotIds((prev) => {
-										const next = new Set(prev);
-										if (next.has(bot.id)) next.delete(bot.id);
-										else next.add(bot.id);
-										return next;
-									})
-								}
+								/* 展开是进入 Bot 配置的唯一入口，键盘必须可达；全局 [role=button]:focus-visible 自动提供焦点环 */
+								role="button"
+								tabIndex={0}
+								aria-expanded={isExpanded}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault();
+										toggleBotExpanded();
+									}
+								}}
+								onClick={toggleBotExpanded}
 							>
 								<div className="min-w-0 flex-1">
 									<div className="truncate text-control font-semibold text-text-primary">
@@ -668,30 +698,13 @@ export function ImTab(_props: Props) {
 				<div
 					className={`config-im-guide-overlay${guideAnimating ? " closing" : ""}`}
 					onClick={(e) => {
-						if (e.target === e.currentTarget) {
-							setGuideAnimating(true);
-							setTimeout(() => {
-								setGuideAnimating(false);
-								setGuideOpen(false);
-							}, 150);
-						}
+						if (e.target === e.currentTarget) closeGuide();
 					}}
 				>
 					<div className="config-im-guide-modal">
 						<div className="config-im-guide-modal-header">
 							<strong>{t("config.im.guide")}</strong>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className="size-7"
-								onClick={() => {
-									setGuideAnimating(true);
-									setTimeout(() => {
-										setGuideAnimating(false);
-										setGuideOpen(false);
-									}, 150);
-								}}
-							>
+							<Button variant="ghost" size="icon-sm" className="size-7" onClick={closeGuide}>
 								<X size={16} strokeWidth={2.2} />
 							</Button>
 						</div>

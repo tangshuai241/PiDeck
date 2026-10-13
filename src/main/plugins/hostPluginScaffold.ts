@@ -22,6 +22,7 @@ function manifestJson(input: HostPluginScaffoldInput): string {
 			version: "0.1.0",
 			description: NOTICE,
 			permissions: input.permissions,
+			...(input.services ? { services: input.services } : {}),
 			...(input.network ? { network: input.network } : {}),
 			contributes: {
 				// icon 必须取自 shared/hostPluginIcons 的白名单，否则 manifest 解析就报 invalid-manifest。
@@ -487,7 +488,7 @@ function readme(input: HostPluginScaffoldInput): string {
 export function buildHostPluginScaffold(input: HostPluginScaffoldInput): Map<string, string> {
 	// 与安装同一解析器：先拒绝越权声明并规范化 origin，再从同一份授权生成页面。
 	const manifest = parseHostPluginManifest(JSON.parse(manifestJson(input)));
-	const validatedInput = { ...input, network: manifest.network };
+	const validatedInput = { ...input, network: manifest.network, services: manifest.services };
 	return new Map([
 		["pideck-plugin.json", manifestJson(validatedInput)],
 		["app.html", appHtml(validatedInput)],

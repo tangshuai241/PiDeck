@@ -34,7 +34,6 @@ export function readWelcomeBackendPreference(): AgentBackend | undefined {
 		// imagegen 是模式不是后端切换器的取值，历史脏数据一律忽略。
 		// acp 偏好携带工具 id（"acp:<toolId>"），后端枚举与工具分别读取。
 		if (raw === "pi" || raw === "dsh") return raw;
-		if (raw !== null && raw.startsWith("acp:")) return "acp";
 	} catch {
 		// localStorage 不可用时视为无偏好
 	}
@@ -42,16 +41,6 @@ export function readWelcomeBackendPreference(): AgentBackend | undefined {
 }
 
 /** 读取欢迎页 ACP 偏好携带的工具 id（非 acp 偏好/无工具段时 undefined）。 */
-export function readWelcomeAcpToolPreference(): string | undefined {
-	try {
-		const raw = localStorage.getItem(WELCOME_BACKEND_KEY);
-		if (raw === null || !raw.startsWith("acp:")) return undefined;
-		const toolId = raw.slice("acp:".length);
-		return toolId || undefined;
-	} catch {
-		return undefined;
-	}
-}
 
 /**
  * 引导页实际会创建的后端：用户显式切换优先，但 DSH runtime 不可用时回落 pi。
@@ -67,13 +56,13 @@ export function resolveGuidePageBackend(input: {
 	/** 引导页显式切换的后端（localStorage 偏好，无则 undefined）。 */
 	override?: AgentBackend;
 	/** 引导页 ACP 偏好携带的工具 id（无则 acp 偏好不成立，回落 pi——建不出会话）。 */
-	acpToolId?: string;
+
 	/** 设置项默认后端，已经过 DSH runtime 安装态钳制（effectiveAgentBackendAtom）。 */
 	effectiveDefault: AgentBackend;
 }): AgentBackend {
 	if (input.override === "dsh" && input.effectiveDefault !== "dsh") return "pi";
 	// acp 必须有工具 id（偏好残留但工具已被删时回落，首次发送才不会报错）
-	if (input.override === "acp" && !input.acpToolId) return "pi";
+	if (input.override === "acp" || input.effectiveDefault === "acp") return "pi";
 	return input.override ?? input.effectiveDefault;
 }
 

@@ -134,6 +134,9 @@ function dedupeShellCandidates(candidates: TerminalShellCandidate[]) {
 
 export class TerminalSessionManager {
 	private readonly runtimes = new Map<string, Map<string, TerminalRuntime>>();
+	/** 每归属锿的标题序号计数器：标题必须与序号一一对应，关闭后不复用，
+	 * 否则同桶两个活动 tab 会同名（「pwsh 2」×2）。桶删除时同步清理（见 close/closeAgent/closeOwner）。 */
+	private readonly ownerSeq = new Map<string, number>();
 
 	constructor(
 		private readonly getCwd: (agentId: string) => string,
@@ -183,14 +186,16 @@ export class TerminalSessionManager {
 		const ownerKey = this.ownerKey(target);
 		const resolvedCwd = this.cwdFor(target);
 		const runtimes = this.ensureOwner(ownerKey);
-		const index = runtimes.size + 1;
+		// 单调递增序号：不能用 runtimes.size + 1（关闭一个 tab 后 size 回退，新建会与存活 tab 撞名）
+		const seq = (this.ownerSeq.get(ownerKey) ?? 0) + 1;
+		this.ownerSeq.set(ownerKey, seq);
 		const id = randomUUID();
 		const spawned = this.spawnShell(resolvedCwd, shell);
 		const tab: TerminalTab = {
 			id,
 			agentId: target.kind === "agent" ? target.agentId : "",
 			ownerKey,
-			title: `${this.displayShell(spawned.shell)} ${index}`,
+			title: `${this.displayShell(spawned.shell)} ${seq}`,
 			cwd: resolvedCwd,
 			shell: spawned.shell,
 			createdAt: Date.now(),
@@ -251,7 +256,10 @@ export class TerminalSessionManager {
 		found.runtime.batcher.dispose();
 		found.runtime.pty.kill();
 		found.tabs.delete(tabId);
-		if (found.tabs.size === 0) this.runtimes.delete(found.runtime.tab.ownerKey);
+		if (found.tabs.size === 0) {
+			this.runtimes.delete(found.runtime.tab.ownerKey);
+			this.ownerSeq.delete(found.runtime.tab.ownerKey);
+		}
 	}
 
 	/** 关闭某个 agent 的全部终端（agent 退出/重启时调用） */
@@ -264,6 +272,7 @@ export class TerminalSessionManager {
 			runtime.pty.kill();
 		}
 		this.runtimes.delete(`agent:${agentId}`);
+		this.ownerSeq.delete(`agent:${agentId}`);
 	}
 
 	closeAll() {
@@ -281,6 +290,7 @@ export class TerminalSessionManager {
 			runtime.pty.kill();
 		}
 		this.runtimes.delete(ownerKey);
+		this.ownerSeq.delete(ownerKey);
 	}
 
 	private ensureOwner(ownerKey: string) {

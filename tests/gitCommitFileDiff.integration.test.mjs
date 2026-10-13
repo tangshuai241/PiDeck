@@ -525,4 +525,25 @@ describe("GitService committed-file diff integration", () => {
 			rmSync(plainDir, { recursive: true, force: true });
 		}
 	});
+
+	test("getStagedDiff：空暂存区返回空串，git 失败必须抛出而不是被吞成空串（issue #338）", async () => {
+		const service = new GitService();
+		git("reset", "--quiet");
+		assert.equal(await service.getStagedDiff(repositoryDir), "");
+
+		// 非仓库目录：execGit 以非 0 退出 reject（"Command failed: ... fatal: not a git repository"）。
+		// 旧实现 `catch { return "" }` 把它和「空暂存区」混成同一信号，前端只能提示「模型没有
+		// 返回提交摘要」，把用户引去查模型配置。
+		const plainDir = mkdtempSync(join(tmpdir(), "pideck-not-git-staged-"));
+		try {
+			await assert.rejects(() => service.getStagedDiff(plainDir), /Command failed|not a git repository/i);
+		} finally {
+			rmSync(plainDir, { recursive: true, force: true });
+		}
+
+		// 暂存后必须真拿到内容：否则上面的空串断言可能只是「永远返回空」的假绿
+		write("staged-later.ts", "export const staged = 1;\n");
+		git("add", "--", "staged-later.ts");
+		assert.match(await service.getStagedDiff(repositoryDir), /\+\+\+ b\/staged-later\.ts/);
+	});
 });

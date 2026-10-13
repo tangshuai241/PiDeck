@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+import { openConfigPane } from "./open-session";
 
 /**
  * DSH 安全与 plan 模式端到端验证（真实 DSH host + host 侧 slash 命令桥）：
@@ -148,7 +149,7 @@ test("DSH 权限预设切换、plan 模式与配置页分区", async ({ window }
 	await expect(window.locator(".composer-bar-btn.mode").first()).not.toContainText("计划", { timeout: 10_000 });
 
 	// ── 5. 配置管理页：预设设置 / 插件 / 安全 分区 ───────────────────────────
-	await window.locator(".config-icon").click();
+	await openConfigPane(window);
 	const modal = window.getByRole("dialog", { name: "配置管理" });
 	await expect(modal).toBeVisible({ timeout: 10_000 });
 	const dshTab = modal.getByRole("tab", { name: "DSH 配置管理" });

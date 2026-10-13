@@ -149,7 +149,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			<PromptEnhanceSettingsSection />
 
 			{/* 会话 */}
-			<SettingsSection title={t("settings.sectionSession")}>
+			<SettingsSection id="settings-section-common-session" title={t("settings.sectionSession")}>
 				<SettingRow
 					anchor="common-session-tab-open-mode"
 					title={
@@ -323,17 +323,17 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			</SettingsSection>
 
 			{/* 快捷消息：数据在 userData/quick-messages.json，本区自持编辑状态并即时落盘（不参与全局草案/取消）。 */}
-			<SettingsSection title={t("settings.quickMessagesSection")} description={t("settings.quickMessagesSectionDesc")}>
+			<SettingsSection id="settings-section-common-quick-messages-section" title={t("settings.quickMessagesSection")} description={t("settings.quickMessagesSectionDesc")}>
 				<QuickMessagesSetting />
 			</SettingsSection>
 
 			{/* 回复快捷操作：规则在 userData/reply-actions.json，同样即时落盘（不参与全局草案/取消）。 */}
-			<SettingsSection title={t("settings.replyActionsSection")} description={t("settings.replyActionsSectionDesc")}>
+			<SettingsSection id="settings-section-common-reply-actions-section" title={t("settings.replyActionsSection")} description={t("settings.replyActionsSectionDesc")}>
 				<ReplyActionsSetting />
 			</SettingsSection>
 
 			{/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
-			<SettingsSection title={t("settings.idleAgentSection")} description={t("settings.idleAgentSectionDesc")}>
+			<SettingsSection id="settings-section-common-idle-agent" title={t("settings.idleAgentSection")} description={t("settings.idleAgentSectionDesc")}>
 				<SettingSwitchRow anchor="common-idle-agent-auto-release" title={t("settings.idleAgentAutoRelease")} description={t("settings.idleAgentAutoReleaseDesc")} checked={draft.idleAgentAutoRelease ?? true} dirty={isDirty("idleAgentAutoRelease")} onChange={(checked) => updateDraft({ idleAgentAutoRelease: checked })} />
 				<SettingSwitchRow
 					anchor="common-standby-runtime-enabled"
@@ -400,7 +400,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			</SettingsSection>
 
 			{/* 悬浮球：主窗口可隐藏为屏幕角落的 64px 常驻小圆点，点开展开小任务浮窗/工作台 */}
-			<SettingsSection title={t("settings.floatingBallSection")} description={t("settings.floatingBallSectionDesc")}>
+			<SettingsSection id="settings-section-common-floating-ball" title={t("settings.floatingBallSection")} description={t("settings.floatingBallSectionDesc")}>
 				<SettingSwitchRow
 					anchor="common-floating-ball-enabled"
 					title={t("settings.floatingBallEnabled")}
@@ -462,7 +462,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			</SettingsSection>
 
 			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；自动审批默认开启，关闭后逐次确认。 */}
-			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
+			<SettingsSection id="settings-section-common-cua" title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
 				{/* 免审批：依赖 CUA 主开关，主开关关闭时置灰；只绕过审批对话框，杀开关仍生效 */}
 				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? true} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
@@ -470,7 +470,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），
           HKCU 写入即时生效；非 Windows 平台开关置灰并提示。 */}
-			<SettingsSection title={t("settings.shellContextMenuSection")} description={t("settings.shellContextMenuSectionDesc")}>
+			<SettingsSection id="settings-section-common-shell-integration" title={t("settings.shellContextMenuSection")} description={t("settings.shellContextMenuSectionDesc")}>
 				<SettingSwitchRow anchor="common-shell-context-menu" title={t("settings.shellContextMenu")} description={t("settings.shellContextMenuDesc")} checked={shellMenuState?.registered ?? false} disabled={!shellMenuState?.supported || shellMenuBusy} onChange={toggleShellMenu} />
 				<QuickTaskMenuSetting />
 				{!shellMenuState?.supported && <p className="px-4 pb-2 text-xs text-destructive">{t("settings.shellContextMenuUnsupported")}</p>}
@@ -478,7 +478,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			</SettingsSection>
 
 			{/* 窗口 */}
-			<SettingsSection title={t("settings.sectionWindow")}>
+			<SettingsSection id="settings-section-common-window" title={t("settings.sectionWindow")}>
 				<SettingRow
 					title={
 						<>

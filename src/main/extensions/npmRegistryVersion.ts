@@ -41,6 +41,12 @@ export type NpmRegistryVersionResolverOptions = {
 	resolveRegistryBase: () => Promise<string | null>;
 	/** 快路失败时逐包回退的 npm view 实现。 */
 	npmViewFallback: (packageName: string) => Promise<string | null>;
+	/**
+	 * 快路失败原因回调（纯诊断，可选）。调用方接日志：快路失败本身被吞掉（语义红线），
+	 * 没有这条回调时「版本一直查不到」只能看到 npm 子进程的结果，无从判断 registry
+	 * 网络是否可达（2026-10 用户反馈排查成本）。回调抛错必须被吞：不影响版本查询。
+	 */
+	onFallback?: (info: { packageName: string; reason: string }) => void;
 	timeoutMs?: number;
 	maxBytes?: number;
 	concurrency?: number;
@@ -57,9 +63,20 @@ export type NpmRegistryVersionResolver = {
 export function createNpmRegistryVersionResolver(options: NpmRegistryVersionResolverOptions): NpmRegistryVersionResolver {
 	const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
 	const npmViewFallback = options.npmViewFallback;
+	const onFallback = options.onFallback;
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 	const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
+
+	/** 诊断回调必须完全 fail-safe：它抛错不得把「回退后能拿到版本」变成整行报错。 */
+	function reportFallback(packageName: string, reason: string): void {
+		if (!onFallback) return;
+		try {
+			onFallback({ packageName, reason });
+		} catch {
+			// 诊断失败不影响版本查询
+		}
+	}
 
 	// 基址解析失败（含同步抛错）一律按 null 处理：整轮回退，零行为变化。
 	const registryBasePromise = (async () => {
@@ -98,11 +115,15 @@ export function createNpmRegistryVersionResolver(options: NpmRegistryVersionReso
 			try {
 				const registryBase = await registryBasePromise;
 				// 基址缺失（npm config 失败 / 输出非法）→ 整轮直接走 npm view，不发 HTTP。
-				if (!registryBase) return await npmViewFallback(packageName);
+				if (!registryBase) {
+					reportFallback(packageName, "npm registry base unresolved (`npm config get registry` failed)");
+					return await npmViewFallback(packageName);
+				}
 				try {
 					return await fetchLatestVersion(registryBase, packageName);
-				} catch {
+				} catch (error) {
 					// 网络错误 / 非 2xx / 坏 JSON / 超时 / 超限：该包回退子进程，版本信息不缺失。
+					reportFallback(packageName, error instanceof Error ? error.message : String(error));
 					return await npmViewFallback(packageName);
 				}
 			} finally {

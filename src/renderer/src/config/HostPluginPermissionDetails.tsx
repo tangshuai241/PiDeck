@@ -10,11 +10,13 @@ export const HOST_PLUGIN_PERMISSION_OPTIONS = [
 	["workbench.openExternal", "hostPlugins.scaffoldOpenExternal", "hostPlugins.scaffoldOpenExternalHint"],
 	["network.https", "hostPlugins.networkHttps", "hostPlugins.networkHttpsHint"],
 	["network.local", "hostPlugins.networkLocal", "hostPlugins.networkLocalHint"],
+	["service.local", "hostPlugins.serviceLocal", "hostPlugins.scaffoldServiceLocalHint"],
 ] as const;
 
 /** Never collapse grants into “can access the network”: the exact origins and loopback ports are the consent. */
 export function HostPluginPermissionDetails({ manifest, warnings = false }: { manifest: HostPluginManifest; warnings?: boolean }) {
 	const network = manifest.permissions.includes("network.https") || manifest.permissions.includes("network.local");
+	const services = manifest.permissions.includes("service.local");
 	return (
 		<div className="flex flex-col items-start gap-2">
 			{HOST_PLUGIN_PERMISSION_OPTIONS.filter(([permission]) => manifest.permissions.includes(permission)).map(([permission, label]) => (
@@ -46,6 +48,23 @@ export function HostPluginPermissionDetails({ manifest, warnings = false }: { ma
 			{warnings && manifest.permissions.includes("network.local") && (
 				<Alert>
 					<AlertDescription>{t("hostPlugins.networkLocalWarning")}</AlertDescription>
+				</Alert>
+			)}
+			{services && (
+				<div className="flex w-full flex-col gap-1 text-xs">
+					<span className="text-muted-foreground">{t("hostPlugins.serviceDestinations")}</span>
+					<ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+						{manifest.services?.map((id) => (
+							<li key={id} className="shrink-0 break-all font-mono">
+								{id}
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
+			{warnings && services && (
+				<Alert>
+					<AlertDescription>{t("hostPlugins.serviceLocalWarning")}</AlertDescription>
 				</Alert>
 			)}
 		</div>

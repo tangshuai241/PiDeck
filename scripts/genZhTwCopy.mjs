@@ -26,6 +26,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ZHTW_TARGETS, readSourceRegion } from "./zhTwCopySources.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checkOnly = process.argv.includes("--check");
@@ -116,40 +117,20 @@ function matchContinuation(line) {
 	return null;
 }
 
-const HEADER = ["/**", " * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。", " * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。", " * 注释刻意保留简体：属于开发者视角文本，不面向用户。", " */"];
-
-const TARGETS = [
-	{
-		out: "src/renderer/src/i18n/rendererCopy.zh-TW.ts",
-		source: "src/renderer/src/i18n/rendererCopy.zh-CN.ts",
-		startMarker: "export const zhCN = {",
-		endMarker: "} as const;",
-		spread: ["...mainProcessZhCN,", "...mainProcessZhTW,"],
-		imports: ['import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";', 'import type { TranslationKey } from "./rendererCopy.zh-CN";', "", "export const zhTW: Record<TranslationKey, string> = {"],
-	},
-	{
-		out: "src/shared/i18n/mainProcessCopy.zh-TW.ts",
-		source: "src/shared/i18n/mainProcessCopy.ts",
-		startMarker: "export const mainProcessZhCN = {",
-		endMarker: "} as const;",
-		imports: ['import type { MainProcessTranslationKey } from "./mainProcessCopy";', "", "export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {"],
-	},
-	{
-		out: "src/main/web/WebI18n.zh-TW.ts",
-		source: "src/main/web/WebI18n.ts",
-		startMarker: "export const webZhCN = {",
-		endMarker: "} as const;",
-		spread: ["...mainProcessZhCN,", "...mainProcessZhTW,"],
-		imports: ['import { mainProcessZhTW } from "../../shared/i18n/mainProcessCopy.zh-TW";', 'import type { WebTranslationKey } from "./WebI18n";', "", "export const webZhTW: Record<WebTranslationKey, string> = {"],
-	},
-	{
-		out: "src/main/feishu/FeishuI18n.zh-TW.ts",
-		source: "src/main/feishu/FeishuI18n.ts",
-		startMarker: "const zhCN = {",
-		endMarker: "} as const;",
-		imports: ['import type { FeishuTranslationKey } from "./FeishuI18n";', "", "export const feishuZhTW: Record<FeishuTranslationKey, string> = {"],
-	},
-];
+/**
+ * 产物头部。`source-sha256` 是 zh-CN 词典区块的指纹（见 zhTwCopySources.mjs）：生成器写进头部，
+ * tests/zhTwCopy.test.mjs 直接复算它做「值新鲜度」门禁——不需要 opencc 就能发现「改了值但没重跑」。
+ */
+function buildHeader(target, regionSha256) {
+	return [
+		"/**",
+		" * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。",
+		" * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。",
+		" * 注释刻意保留简体：属于开发者视角文本，不面向用户。",
+		` * source-sha256: ${regionSha256}（来自 ${target.source} 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）`,
+		" */",
+	];
+}
 
 /**
  * 逐行翻译一份词典区块。除字符串字面量外的一切（注释、空行、展开语法、排版）原样保留；
@@ -210,17 +191,14 @@ function translateBlock(source, lines, start, end, spread) {
 }
 
 function buildTarget(target) {
-	const lines = readFileSync(join(ROOT, target.source), "utf8").split("\n");
-	const start = lines.indexOf(target.startMarker);
-	const end = lines.indexOf(target.endMarker, start);
-	if (start < 0 || end < 0) throw new Error(`${target.source}: 找不到 ${target.startMarker} / ${target.endMarker} 区块`);
+	const { lines, start, end, regionSha256 } = readSourceRegion(ROOT, target);
 	const { body, entries } = translateBlock(target.source, lines, start, end, target.spread);
-	return { content: [...HEADER, ...target.imports, ...body, "};", ""].join("\n"), entries };
+	return { content: [...buildHeader(target, regionSha256), ...target.imports, ...body, "};", ""].join("\n"), entries };
 }
 
 function main() {
 	const stale = [];
-	for (const target of TARGETS) {
+	for (const target of ZHTW_TARGETS) {
 		const { content, entries } = buildTarget(target);
 		const outPath = join(ROOT, target.out);
 		if (checkOnly) {
@@ -247,7 +225,7 @@ function main() {
 			console.error(`✗ 以下文件与 zh-CN 源不同步，请运行 node scripts/genZhTwCopy.mjs 重新生成：\n  ${stale.join("\n  ")}`);
 			process.exit(1);
 		}
-		console.log(`✓ zh-TW 词典与 zh-CN 源同步（${TARGETS.length} 个文件）`);
+		console.log(`✓ zh-TW 词典与 zh-CN 源同步（${ZHTW_TARGETS.length} 个文件）`);
 	}
 }
 

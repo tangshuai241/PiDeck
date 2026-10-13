@@ -1,9 +1,12 @@
-import { Download, Copy, Check, ChevronDown } from "lucide-react";
+import { Download, Copy, Check, ChevronDown, X } from "lucide-react";
 import { memo, useCallback, type RefObject, useState } from "react";
 import type { ChatMessage, ImageContent } from "../../../../../shared/types";
 import type { ImageGenMeta } from "../../../../../shared/types/imagegen";
+import type { VideoGenMeta, VideoContent } from "../../../../../shared/types/videogen";
 import { IMAGE_GEN_SIZE_UNSET, parseImageGenSize } from "../../../../../shared/imageGenParams";
 import { imageContentSrc, loadImageBase64 } from "../../../../../shared/imageContentSrc";
+import { videoContentSrc } from "../../../../../shared/videoContentSrc";
+import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../ui-shadcn/dropdown-menu";
@@ -18,6 +21,89 @@ function isImageGenMeta(value: unknown): value is ImageGenMeta {
 	if (typeof value !== "object" || value === null) return false;
 	const v = value as Record<string, unknown>;
 	return (v.status === "generating" || v.status === "complete" || v.status === "error") && typeof v.prompt === "string";
+}
+
+/** 收窄 meta.videoGen（同 imageGen：消息来自历史/缓存，运行时校验而非盲转）。 */
+function isVideoGenMeta(value: unknown): value is VideoGenMeta {
+	if (typeof value !== "object" || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return (v.status === "queued" || v.status === "generating" || v.status === "complete" || v.status === "error") && typeof v.prompt === "string";
+}
+
+/** 画幅预设（16:9 等）→ CSS aspect-ratio（16 / 9）；非法值不渲染徽标。 */
+function videoAspectRatio(ratio: string | undefined): string | undefined {
+	const match = ratio?.match(/^([1-9]\d*)\s*[:x]\s*([1-9]\d*)$/i);
+	return match ? `${match[1]} / ${match[2]}` : undefined;
+}
+
+/** 把 pideck-video:// 产物保存到本地：协议字节 fetch 成 Blob 后走 objectURL 下载（无 base64 中转）。 */
+async function saveVideoLocally(src: string): Promise<void> {
+	const response = await fetch(src);
+	if (!response.ok) throw new Error(`video fetch failed: ${response.status}`);
+	const blob = await response.blob();
+	const objectUrl = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement("a");
+		link.href = objectUrl;
+		link.download = `pideck-video-${Date.now()}.mp4`;
+		link.click();
+	} finally {
+		// 下载由浏览器异步接管，给足高水位后回收；立即 revoke 会截断未开始的下载
+		window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+	}
+}
+
+/**
+ * 生视频消息渲染：queued/generating 点阵动画（复用 beUI ImageGeneration 卡片视觉）→
+ * complete 内联 <video controls>（pideck-video:// 流式加载，支持拖进度）→ error 详情。
+ * 与生图的差别：分钟级异步任务，进行中可取消（上游可能继续执行与计费，文案已如实说明）。
+ */
+function VideoGenMessage(props: { meta: VideoGenMeta; videos?: VideoContent[] }) {
+	const status = props.meta.status;
+	const [cancelling, setCancelling] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const statusText = status === "queued" ? t("videogen.status.queued") : status === "generating" ? t("videogen.status.generating") : status === "complete" ? t("videogen.status.complete") : t("videogen.status.error");
+	const video = props.videos?.[0];
+	const src = videoContentSrc(video);
+	const badges = [props.meta.resolution, props.meta.duration ? `${props.meta.duration}s` : undefined, props.meta.ratio].filter(Boolean).join(" · ");
+	const cancelJob = async () => {
+		if (!props.meta.jobId || cancelling) return;
+		setCancelling(true);
+		try {
+			await desktopApi.videogen.cancel(props.meta.jobId);
+		} catch {
+			showNotice(t("videogen.cancelFailed"), 2000, "error");
+		}
+		setCancelling(false);
+	};
+	const saveVideo = () => {
+		if (!src) return;
+		void saveVideoLocally(src)
+			.then(() => {
+				setSaved(true);
+				window.setTimeout(() => setSaved(false), 1600);
+			})
+			.catch(() => showNotice(t("videogen.saveFailed"), 2000, "error"));
+	};
+	return (
+		<div className="py-1">
+			<ImageGeneration status={status === "queued" ? "generating" : status} prompt={props.meta.prompt} statusText={statusText} resolution={badges || undefined} aspectRatio={videoAspectRatio(props.meta.ratio)} size="fluid" className="max-w-[340px]">
+				{status === "complete" && src ? <video src={src} controls preload="metadata" className="w-full rounded-[inherit]" /> : undefined}
+			</ImageGeneration>
+			{(status === "queued" || status === "generating") && props.meta.jobId ? (
+				<Button variant="ghost" size="sm" className="mt-1 h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground" type="button" disabled={cancelling} onClick={() => void cancelJob()} title={t("videogen.cancelHint")}>
+					<X size={12} aria-hidden="true" />
+					{t("videogen.cancel")}
+				</Button>
+			) : null}
+			{status === "complete" && src ? (
+				<Button variant="ghost" size="icon-sm" className="mt-1 size-7 text-muted-foreground hover:bg-muted hover:text-foreground" type="button" onClick={saveVideo} title={t("videogen.save")} aria-label={t("videogen.save")}>
+					{saved ? <Check size={14} /> : <Download size={14} />}
+				</Button>
+			) : null}
+			{status === "error" && props.meta.errorDetail ? <p className="mt-1.5 max-w-[36rem] whitespace-pre-wrap break-words text-xs leading-relaxed text-destructive">{props.meta.errorDetail}</p> : null}
+		</div>
+	);
 }
 
 /**
@@ -161,6 +247,11 @@ export const FinalAnswer = memo(function FinalAnswer(props: {
 	const imageGenMeta = isImageGenMeta(props.message.meta?.imageGen) ? props.message.meta.imageGen : undefined;
 	if (imageGenMeta) {
 		return <ImageGenMessage meta={imageGenMeta} images={props.images} onPreviewImage={props.onPreviewImage} />;
+	}
+	// 生视频消息：同样不渲染 markdown 正文，走专用视频卡（占位动画→内联播放→失败态）。
+	const videoGenMeta = isVideoGenMeta(props.message.meta?.videoGen) ? props.message.meta.videoGen : undefined;
+	if (videoGenMeta) {
+		return <VideoGenMessage meta={videoGenMeta} videos={props.message.videos} />;
 	}
 	return <AssistantText text={props.message.text} images={props.images} onPreviewImage={props.onPreviewImage} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} isStreaming={props.isStreaming ?? false} settle={props.settle} />;
 });

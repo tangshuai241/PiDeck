@@ -23,8 +23,6 @@ const read = (path) => readFileSync(path, "utf8");
 const dialog = read("src/renderer/src/components/ui-shadcn/notice-details-dialog.tsx");
 const card = read("src/renderer/src/components/ui-shadcn/notice-toast.tsx");
 const markdownLink = read("src/renderer/src/components/session/MarkdownLink.tsx");
-const notifier = read("src/renderer/src/hooks/useAnnouncementNotifier.ts");
-const announcementCenter = read("src/renderer/src/components/sidebar/AnnouncementCenter.tsx");
 
 /** 只留运行时 import（`import type` 编译期擦除，不构成模块环）。 */
 const runtimeImports = (source) => (source.match(/^import[^\n]*$/gm) ?? []).filter((line) => !/^import type\b/.test(line));
@@ -45,12 +43,6 @@ test("title stays plain text", () => {
 	assert.match(dialog, /whitespace-pre-wrap text-text-primary">\{payload\.title\}/);
 });
 
-test("announcement-center detail drawer keeps the same markdown-body scope", () => {
-	// 公告中心详情抽屉与 toast 详情弹窗是两个入口、同一种内容：挂载点必须一致，
-	// 否则公告在抽屉里是补丁后的排版、在 toast 弹窗里是完整排版，两处观感分叉
-	assert.match(announcementCenter, /className="markdown-body[^"]*"[\s\S]{0,600}?<MarkdownStream/);
-});
-
 test("notice-toast keeps no runtime dependency on the markdown chain (cycle guard)", () => {
 	const imports = runtimeImports(card);
 	assert.ok(!imports.some((line) => line.includes('"../session/MarkdownStream"')), `notice-toast must not import MarkdownStream at runtime, got: ${imports.join(" | ")}`);
@@ -64,10 +56,4 @@ test("notice-toast keeps no runtime dependency on the markdown chain (cycle guar
 	// MarkdownLink 必须从 utils 取（从 notice-toast 取会成环）
 	assert.match(markdownLink, /import \{ writeClipboard \} from "\.\.\/\.\.\/utils\/clipboard"/);
 	assert.doesNotMatch(markdownLink, /^import[^\n]*ui-shadcn\/notice-toast/m);
-});
-
-test("announcement toast comment no longer claims plain-text rendering", () => {
-	// 旧注释「正文纯文本展示（与公告中心一致，不做 markdown 渲染，控制攻击面）」已过时，
-	// 留着会误导下一个人把详情弹窗改回纯文本
-	assert.doesNotMatch(notifier, /不做 markdown 渲染/);
 });

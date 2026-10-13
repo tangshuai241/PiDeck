@@ -1,8 +1,9 @@
 /**
- * MCP 目录服务的品牌图标（24x24 单色 path + 官方品牌色）。
- * Path 数据取自 simple-icons（CC0，经 iconify API 获取）；未收录的服务（context7/firecrawl）
- * 回退到 lucide 通用图标（见 McpResourceViews 的 catalogEntryIcon）。
- * adaptive 品牌（github/notion/sentry）原始色过暗，暗色主题下会消失：改用主题文字色自动适配。
+ * MCP 目录服务的品牌图标（单色/多色 path + 官方品牌色，或官方位图）。
+ * 来源优先级：官方站点/CDN 导出的 SVG（Tavily mark、飞书四色 logo）> simple-icons（CC0，经 iconify API 获取）
+ * > 官方品牌图集 logos（Exa）> 官方只发位图时的内联 PNG（腾讯文档/企查查/百度网盘的官方 app 图标裁切后压缩）。
+ * 拿不到任何官方图形的服务（context7/firecrawl）回退到 lucide 通用图标（见 McpResourceViews 的 catalogEntryIcon）。
+ * adaptive 品牌（github/notion/sentry/tavily/piDeck）原始色过暗，暗色主题下会消失：改用主题文字色自动适配。
  */
 export type McpBrandIcon = {
 	hex: string;
@@ -11,6 +12,13 @@ export type McpBrandIcon = {
 	path?: string;
 	/** 非 24 网格的官方图形（ant-design 1024 / icon-park 48 / 飞书官方 16）需声明原始 viewBox 尺寸。 */
 	viewSize?: number;
+	/** 官方原始画板（非正方形时用；缺省时等价于 `0 0 {viewSize ?? 24} {viewSize ?? 24}`）。 */
+	viewBox?: string;
+	/**
+	 * 官方只提供位图的品牌：内联 PNG data URI（官方 app 图标裁切 / 去白底 / 压缩到 ≤96px，约 1KB）。
+	 * 按 viewBox 满格 meet 缩放；hex 仅为满足统一契约（不参与渲染）。
+	 */
+	png?: string;
 	/** 官方彩色多 path 图形（如飞书四色 logo）：优先于单色 path 渲染，每段自带官方 fill。 */
 	multiPaths?: Array<{ d: string; fill: string }>;
 };
@@ -83,13 +91,56 @@ export const MCP_BRAND_ICONS: Record<string, McpBrandIcon> = {
 		hex: "#4285F4",
 		path: "M12 0C8.21 0 4.831 1.757 2.632 4.501l3.953 6.848A5.454 5.454 0 0 1 12 6.545h10.691A12 12 0 0 0 12 0M1.931 5.47A11.94 11.94 0 0 0 0 12c0 6.012 4.42 10.991 10.189 11.864l3.953-6.847a5.45 5.45 0 0 1-6.865-2.29zm13.342 2.166a5.446 5.446 0 0 1 1.45 7.09l.002.001h-.002l-5.344 9.257q.309.015.621.016c6.627 0 12-5.373 12-12c0-1.54-.29-3.011-.818-4.364zM12 16.364a4.364 4.364 0 1 1 0-8.728a4.364 4.364 0 0 1 0 8.728",
 	},
+	pideck: {
+		hex: "#181717",
+		adaptive: true,
+		// 与 LogoMark 同一经典 π 图形：从 520 网格（起点 165.29，范围 469.43）等比归一到 24 网格，
+		// 与其它品牌图标同为 14px 满格图形（原先直接嵌 LogoMark 黑底白标，内层图形只有 8px，列表里明显偏小）。
+		path: "M0 0H18V12H12V18H6V24H0ZM6 6V12H12V6ZM18 12H24V24H18Z",
+	},
+	tavily: {
+		hex: "#1F1E1E",
+		adaptive: true,
+		viewBox: "0 0 55 55",
+		// 官方 mark（tavily.com/logos/tavily-mark-black.svg，55x55 原始画板）。
+		path: "M38.8088 0C44.4762 0 47.3101 9.1895e-05 49.4748 1.10306C51.3788 2.07326 52.927 3.62135 53.8971 5.52544C55.0001 7.69013 55 10.524 55 16.1914V38.8088C55 44.4761 55.0001 47.3099 53.8971 49.4746C52.927 51.3786 51.3788 52.9267 49.4748 53.8969C47.3101 54.9999 44.4762 55 38.8088 55H16.1914C10.5239 55 7.69014 54.9999 5.52544 53.8969C3.62133 52.9267 2.07325 51.3787 1.10306 49.4746C0.000109958 47.3099 0 44.4762 0 38.8088V16.1912C0 10.5238 0.000107614 7.69012 1.10306 5.52544C2.07325 3.62133 3.62133 2.07326 5.52544 1.10306C7.69014 8.88436e-05 10.5239 0 16.1914 0H38.8088ZM23.3863 30.405C23.0885 30.405 22.7934 30.4638 22.5183 30.5782C22.2433 30.6926 21.9933 30.8603 21.7827 31.0716L17.4534 35.4188L16.3029 34.2638C15.4573 33.415 14.0099 33.8346 13.7471 35.0064L12.1073 42.3023C12.0498 42.5532 12.0568 42.8148 12.128 43.0621C12.199 43.3085 12.3313 43.5327 12.5123 43.7136L12.5108 43.7159C12.6915 43.8987 12.9155 44.0321 13.1619 44.1037C13.4083 44.1752 13.6688 44.1824 13.9188 44.1246L21.1862 42.4776C22.3527 42.2137 22.7715 40.7614 21.9259 39.9124L20.7754 38.7574L25.1056 34.411C25.5306 33.9842 25.7695 33.4049 25.7695 32.8013C25.7695 32.1977 25.5306 31.6185 25.1056 31.1916L25.0476 31.1334L25.0497 31.1319L24.9896 31.0716C24.7791 30.8603 24.529 30.6926 24.254 30.5782C23.979 30.4638 23.684 30.4051 23.3863 30.405ZM39.0054 27.6663C37.9941 27.0245 36.6768 27.7546 36.6766 28.9556V30.5884H27.3981C27.7081 31.1832 27.8847 31.8596 27.8847 32.5774C27.8846 33.6152 27.5181 34.5672 26.908 35.3099L36.6758 35.3096L36.6752 36.9424C36.6753 38.1434 37.9941 38.8736 39.0054 38.2319L45.3045 34.2387C45.7757 33.9384 46.0114 33.443 46.0115 32.948C46.0109 32.4536 45.7752 31.9592 45.303 31.6601L39.0054 27.6663ZM23.6104 10.2206C23.3539 10.2194 23.101 10.2839 22.8763 10.4081C22.6514 10.5325 22.4614 10.7132 22.3253 10.9318L18.3472 17.2549H18.3458C17.7067 18.2701 18.4346 19.5933 19.6307 19.5936H21.2578V28.9869C21.9327 28.5406 22.7403 28.2801 23.609 28.2801C24.4781 28.2801 25.2864 28.5407 25.9615 28.9875V19.5936H27.5884C28.7849 19.5936 29.5112 18.2702 28.8728 17.2541L24.8939 10.9318C24.5951 10.4584 24.1029 10.2212 23.6104 10.2206Z",
+	},
+	exa: {
+		hex: "#0143D9",
+		viewBox: "0 0 256 256",
+		// Exa 官方 mark（logos 品牌图集 exa-icon，256 原始画板，官方品牌色 #0143D9）。
+		path: "M256 22.39a2.78 2.78 0 0 1-.63 1.76L148.04 155.163l107.329 131.01c.406.496.63 1.12.63 1.76v19.61a2.79 2.79 0 0 1-2.795 2.783H2.795A2.79 2.79 0 0 1 0 307.543V2.783A2.79 2.79 0 0 1 2.795 0h250.41A2.79 2.79 0 0 1 256 2.783zM45.795 279.972h165.16L128.372 179.17zm-15.316-29.325l66.09-80.669h-66.09zm0-111.022h65.497l-65.497-79.95zm97.893-8.472l82.583-100.8H45.795z",
+	},
+	"tencent-docs": {
+		hex: "#2A65F5",
+		// 官方 app 图标（App Store 512 图，去白底 + 官方圆角遮罩后压成 48px）：蓝底白 T + 青色折角。
+		// 站点列表页的 list_logo SVG 只有“文档页”图形，不带白 T，不是产品标志，故不用。
+		png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwBAMAAAClLOS0AAAAMFBMVEUtavYrZfUpafYqZfUrZPUqZPX////U4P4D2v9Sgffs8f94nfm6zfyatfsdjPkRrfwvry7NAAAABXRSTlP+BNZtr6UzncsAAAAJcEhZcwAACxMAAAsTAQCanBgAAAHKSURBVHjaZVQ7TsNAEN0UIz5CgpATRCIHcMEFkOhHDiNkhU+3FvlINIBAVFSu3DlIVFRIOUBCm4bcIDkBSByBkt3ZnY1jjy1lM88zs+/tzqhms9k6ASrZ1VFknMr4N9xE1zlGDHTEgx7IfmILHFLF9rOc2gYIAbTjfrYzG6Ja609fp+CBnCJ1QARoX4LxgPHfzIQ01HGoDDO9FCDvqtOQCVZ6RCbZnwGyb9UhTmSzL7Se+4jsRQV2gPdaDwEIFZvQIko+tNaP8le5uvZNjF+nBawBbz0L6AkKwAub95KBvmNpgN6DtycG9CBELPSmLaXGXgVgljbC7n/D5ugiYKsCWJYWQGZWtlt0POCtAqSFZ14LmXjm8BlopEzpuRBJDHGnyB0ri7DWCp0iX0RVES8cbagBjs10HWHOwj5+z0UtFYxZdJMJ+FHh1s5YDaLyCfJ65ZQl7+AabAs5JevAEg+W5QZrxRMRqQr0RHB/MQNQUYTkiqIo4ougkoY6d4oIwTi0wa5TRDQ8k8ZxUvULIdi1rcZLViRFEaghzQmsyBDJKxGFdmZFRkI8DgPAXceBsGiHkZEEqexu4zBkXDvpd8/ODRkeS/7ysJvH0j/1gYPGNvC3pgAAAABJRU5ErkJggg==",
+	},
+	"baidu-netdisk": {
+		hex: "#06A7FF",
+		// 官方 app 图（百度网盘开放平台文档站的 mark，420x350 透明 PNG 去空白边后压成 96px）。
+		png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABMBAMAAABg2K9GAAAAMFBMVEVMaXFJ0P9D5/+Or/9l4/5zwP9WsfxnvPJSx/9byv6geL/jTJPrRYv/LXP/RI0ttP83PZleAAAADXRSTlMA/v7+/f72L2Wi/e+OMYKngwAAAAlwSFlzAAAuIwAALiMBeKU/dgAABOFJREFUeNqtV09oI1UcHrHsJKyIb5hEi2CYKKKehCH75yJOnXF3PVkmLxg8hXXiemp2sW3EP6TFtY0Xm9LSgqCCCLLirgcvCq3ePK14E1onexR2twO5hPU0/n7vvZl5k2aaHPadkpfvm+/7fvN7v74qyrjV7m7N7q4p0y51y7btuTnjvdZ0+BzAbQKrXOxMjbfsOQso0zCYH8vWiIYis5NdfYoC8HwLFQh5ahI+z/C6rjMBUiQbEwhbNmcYFjGQUatPI4CGDMQXC0W6MUUC235OZ45Iw/PeOrFEwpBOysxQoVCo0ZMKNSMEbCiRBpRGkXr0zYmRLfsS9FG7BwoepV59oiP7EnOh9oqEeEBpTaiRbQuE2ijWKHXd7Dq9z/E70felYqFWq7lnJxU12YCqUrdyLpPA8ReSjSUQqLjmhMxSS+cgA3XNVuZJeM2syo4UxfPcG9+6Waci/8Z+cNe+KG9d9/Z8/7usMs3cDILg5wvy1tLbvu8fZBEeBXxw91V56xQI+P43GYTTSAhSj8sfIeGnDMInjPC7vPUY4v2/Hxbh8SzCXw+LwEOnEp4+gdDufskI/8qbHzPCL+vLx/uoVy6/xAj35e3bjHArDEcHc64M61lGuCfv+xGh2ewcwxvPB6OpeWZ/IVxophjqXJmt/dEQPMJhGA6HzWY9cbXK4Jp2c9QTFzhg+Kb3bsoQMp4J0oX9kBPuhMzSGdpJCRiGwcsUpxAJIDNTuOyeGxEgInVwn8+l236UOURHtYo4q9cE3iA8RP8ouPeHony050cRwuaw6XmXXZMPHCEAlsjTSDgCTtD3+wLv/xYOUaF2pmKeZ2dECGhlIjwdsRXh0VGjiQPKNc1O4qg8u7bc7r3CLfVRQFAO/ltbXm/WYH4AAT1tcoEXWaDPeQhZ4XtWgG3KFKBOqkjAa6z+GeNFhn9EKWGimbDiCE9G3SMU+lHmqLOuUxMUIMQMJ8R98lU/wAiRo7jZc1xhg2c2XkhG14+sSoJykLTotlsBwsuiL55IJtFwrx9LHF5JGnGRKZzlRdKSB6nhcN/vc8bhLWmq5TEClAkJRlk6gF+Hwx94gl8XHsiHDMsK71pjXaHIBDgvN2DBG5aPpcoUziv8rUk/fBHG60Hq3AsF1qcZhPQfEpMthTmSCSsZAlzBhAzQ13KGXoZAlGETFYhUpd5gvEAuIuDBSb2HcDBOQMmb/D2swtHRtORN50ql0jgBZbHCCddQgSS9dLVUGgxAo4QCqjSEt03eGo/AtABGK4mA+MEABXINEt87VFrh3Zo32P0xOg95UiLIICgANyYrSrLIq9pRVIOw+6CQ6AEeUrD7ah6fdDES4AoA2yTSjXYJPw5ABflX4bOu74gzXeFVhamhMU/a7JqidiM8c7iC3yx7t6W0YQYwBk6NvMElkGYgnEQGeyig67ZDqw6NIoAavzSnFi/BKmGe9KrjoECFDY1oP714BVYYvGA7VcqnkpitkadRAeUUVyg4DkpUxKRU4jqNCigqRLbmHQsFormXSJSOCYAnuCDrpAoLBVwzbseV1PNfj9tE1QHvWNThCsntMpcqlDxadFIgepUz5LtiXsJfkXv6M4tA4ip7bamb1wfaWDwwbDI/j6HpzsjVpMfxu6OXkO47NqCd+rH/G9X1HinujrnSql1K6+vxD/8Db/4PuW9CoH8AAAAASUVORK5CYII=",
+	},
+	qcc: {
+		hex: "#1E8BE8",
+		// 官方 app 图标（App Store 512 图，去白底 + 官方圆角遮罩后压成 48px）：蓝底白 C 放大镜。
+		png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwBAMAAAClLOS0AAAAMFBMVEUAhv4Ag/4Bhv4Ahv8Ba/8BoP0Bkf/+//8Bdv8Cg/+Yzv9xuf/B4f/h8P8rlP9Jpv+0BQdDAAAABHRSTlME1G2vIEvHsgAAAAlwSFlzAAALEwAACxMBAJqcGAAAAp9JREFUeNptVE1P1FAULRP/gfwAF/4BE35CFw2TgCMZVrqcJojR5Uk6LWy6eDOA7JpWzbgRKiM6GzN1AurKlEBgZ5roMGyIgHxtVAQC8b6PtpD4lu/03Hv77jlH0zStcIfRqflBEHgmnZu3NHEKuuFyIEiBclki/bp7jVEpl0v8vk83JJIzKuW7gqAzg9/zWmOyFKcUdGLQvS+bKIC63NAlwzheXu+uXQayFNW6rRhnCeg4LcW4pw0Qw2XuAdTZkIwR3psYU/Tx6tLSItHaglHSdNEjhP2Jd9+PYQlGWQBuHU5H/vt4gjl+LwBDD7HBWOP8849g7ABWDhRh+4yqUD3PjNFOAX0HK2xKjtsxH2Ei6xFim4VAdx3U+jHsFBhC1aD2rcA7Q9U0I/xRwCBW3Ag9/rwXHdN8gHkFzOB9LXF2/cZe4NG7j+OrAnac7SImarPr3VP+hk+SSQVEtjGN1ywCJsSi4qoCQosG/jtL03YEEFoKiKv6iePXsbUkVxvaVwCbvcAHtfPoP0BwHaAezm4d399IMWSlqPmhbL7AS43GVjYuo3H9j0BPCC5Jx90B/eBk7eni6p74QaQ/OI1XLKYnoQ02CHiILwoooueeYIs/YrRgmofZIw4llkEyWTs6WqZ9mJHzO1/UL/5Sm5vg+ziwsg3O0DJmY75a+5Smmst2Pgxnlz1/C3xrey/bZiXXVUStWeP4cs8LLiyhRCkfYxB4J63zE5jPGQZRnJbPmMc1rwTXL9Q+TBfdZpP048SYE6Ie4KUM91kiXeDM3xfiHeHG0clQ7r4clzS6WhHG4VZzybVu47zZJFVL35DVCpKR+lnZmUdAv2RcSYZRmQB90px5AFSEaWVkiGTw8ywpqZDRr6dPGjIUS1mW8OYVEUv/AMAVDkIliia9AAAAAElFTkSuQmCC",
+	},
 };
 
-/** 目录行内品牌图标：大小跟随目录图标（14px），彩色品牌用原色，adaptive 品牌用主题文字色。 */
+/** 目录行内品牌图标：大小跟随目录图标（14px），彩色品牌用原色，adaptive 品牌用主题文字色；官方位图（png）按 viewBox 满格 meet 缩放。 */
 export function McpBrandIconSvg(props: { icon: McpBrandIcon; size?: number }) {
+	const [minX, minY, boxW, boxH] = (props.icon.viewBox ?? `0 0 ${props.icon.viewSize ?? 24} ${props.icon.viewSize ?? 24}`).split(/\s+/).map(Number);
 	return (
-		<svg viewBox={`0 0 ${props.icon.viewSize ?? 24} ${props.icon.viewSize ?? 24}`} width={props.size ?? 14} height={props.size ?? 14} aria-hidden="true" className={props.icon.adaptive ? "shrink-0 text-text-primary" : "shrink-0"}>
-			{props.icon.multiPaths ? props.icon.multiPaths.map((segment, index) => <path key={index} d={segment.d} fill={segment.fill} />) : <path d={props.icon.path} fill={props.icon.adaptive ? "currentColor" : props.icon.hex} />}
+		<svg viewBox={`${minX} ${minY} ${boxW} ${boxH}`} width={props.size ?? 14} height={props.size ?? 14} aria-hidden="true" className={props.icon.adaptive ? "shrink-0 text-text-primary" : "shrink-0"}>
+			{props.icon.png ? (
+				<image href={props.icon.png} x={minX} y={minY} width={boxW} height={boxH} preserveAspectRatio="xMidYMid meet" />
+			) : props.icon.multiPaths ? (
+				props.icon.multiPaths.map((segment, index) => <path key={index} d={segment.d} fill={segment.fill} />)
+			) : (
+				<path d={props.icon.path} fill={props.icon.adaptive ? "currentColor" : props.icon.hex} />
+			)}
 		</svg>
 	);
 }

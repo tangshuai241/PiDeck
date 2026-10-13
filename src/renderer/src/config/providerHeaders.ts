@@ -72,6 +72,31 @@ function getOverrideHeaders(modelOverrides: unknown, modelId: string): Record<st
 	return isPlainObject(entry) ? getProviderHeaders(entry.headers) : undefined;
 }
 
+/**
+ * 清掉 modelOverrides 里「模型 id 不在当前模型列表」的孤儿键（保存 models.json 前调用）。
+ * 入参是已收窄的映射（调用方用 readModelOverrides 转换）；无孤儿时原样返回入参（同一引用，
+ * 调用方可跳过改写），全部都是孤儿时返回 undefined（调用方据此删掉 provider.modelOverrides 字段）。
+ */
+export function pruneModelOverrides(overrides: Record<string, Record<string, unknown>>, modelIds: readonly string[]): Record<string, Record<string, unknown>> | undefined {
+	const known = new Set(modelIds);
+	const next: Record<string, Record<string, unknown>> = {};
+	let dropped = false;
+	for (const [modelId, value] of Object.entries(overrides)) {
+		if (known.has(modelId)) next[modelId] = value;
+		else dropped = true;
+	}
+	if (!dropped) return overrides;
+	return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/**
+ * 收窄任意外部值为 provider.modelOverrides 形状（逐项过滤非对象项）。
+ * 导出给配置页：预填/草稿都要 `unknown → 可用映射` 的安全转换（项目禁止 as 强转）。
+ */
+export function readModelOverrides(value: unknown): Record<string, Record<string, unknown>> | undefined {
+	return asOverridesRecord(value);
+}
+
 function asOverridesRecord(value: unknown): Record<string, Record<string, unknown>> | undefined {
 	if (!isPlainObject(value)) return undefined;
 	// 逐项收窄：value 是 unknown，整体断言会绕过类型检查（项目禁止 as 强转）。

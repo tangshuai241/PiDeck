@@ -2,6 +2,7 @@
 import { join } from "node:path";
 import type { HostPluginContext, HostPluginMountInput } from "../../shared/types/hostPlugin";
 import type { SessionCatalog } from "../sessions/SessionCatalog";
+import type { LocalServiceRegistry } from "../localServices/LocalServiceRegistry";
 import { preparePreloadPath } from "../preloadPath";
 import { setHostPluginWebviewBridge } from "./hostPluginWebviewPolicy";
 import { HostPluginManager } from "./HostPluginManager";
@@ -20,14 +21,17 @@ export class HostPluginService {
 		userData: string,
 		catalog: SessionCatalog,
 		private readonly preload: string,
+		services: LocalServiceRegistry,
 		projectNameOf?: (projectId: string) => string | undefined,
 	) {
 		this.manager = new HostPluginManager(userData, process.env.PIDECK_DISABLE_HOST_PLUGINS === "1");
 		this.sessions = new HostPluginSessions(catalog);
-		this.broker = new HostPluginBroker(this.manager, this.sessions, new HostPluginStorage(join(userData, "host-plugin-storage")), projectNameOf);
+		this.broker = new HostPluginBroker(this.manager, this.sessions, new HostPluginStorage(join(userData, "host-plugin-storage")), projectNameOf, undefined, services);
 	}
 
-	async initialize(): Promise<void> {
+	/** 内置示例插件（如 billion-context）在首次扫描前落位；目录已存在则不覆盖。 */
+	async initialize(builtinDirectory?: string): Promise<void> {
+		if (builtinDirectory) await this.manager.seedBuiltin(builtinDirectory);
 		await this.manager.load();
 		const preload = await preparePreloadPath(this.preload, "host-plugin-preload.js");
 		if (!this.disposed) {

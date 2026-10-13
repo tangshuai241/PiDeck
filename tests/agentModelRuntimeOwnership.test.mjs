@@ -46,6 +46,8 @@ function harness({ waitAt, failure, state = modelState } = {}) {
 		{ warn: (...args) => warnings.push(plain(args)) },
 	);
 	manager.agents.set(AGENT_ID, runtime);
+	// Coordinator 的完整运行态推送也会读取文件统计；本 harness 只使用内存快照。
+	manager.getSessionCacheHitStats = async () => ({ sampleCount: 0 });
 	manager.onOutput((channel) => {
 		if (channel === ipcChannels.agentsState) events.push(channel);
 	});
@@ -196,6 +198,46 @@ test("a valid model selection persists the actual Pi model and effort through th
 	assert.equal(h.entry.thinkingLevel, "high");
 	assert.equal(h.updates.length, 1);
 });
+
+for (const status of ["idle", "running"]) {
+	test(`model selection immediately publishes the new context capacity while ${status}`, async () => {
+		const h = coordinatorHarness();
+		h.runtime.tab.status = status;
+		let currentModel = { provider: "provider-old", id: "model-old", name: "Saved model", contextWindow: 1_000_000 };
+		h.process.client.request = async (input) => {
+			if (input.type === "set_model") {
+				currentModel = { provider: input.provider, id: input.modelId, name: "Source model", contextWindow: 500_000 };
+				return { success: true };
+			}
+			if (input.type === "get_state") return { success: true, data: { model: currentModel, thinkingLevel: "high" } };
+			if (input.type === "get_session_stats") {
+				return { success: true, data: { contextUsage: { tokens: 270_000, contextWindow: currentModel.contextWindow, percent: (270_000 / currentModel.contextWindow) * 100 }, tokens: { input: 985_000, output: 165_000, cacheRead: 24_700_000, cacheWrite: 0 }, cost: 1.2 } };
+			}
+			throw new Error(`Unexpected RPC: ${input.type}`);
+		};
+		h.manager.getSessionCacheHitStats = async () => ({ latest: 99.7, average: 95.7, sampleCount: 168, conversationTokens: 253_000 });
+		const before = await h.manager.getRuntimeState(AGENT_ID);
+		assert.equal(before.contextWindow, 1_000_000);
+		assert.equal(before.contextPercent, 27);
+		const snapshots = [];
+		h.manager.onOutput((channel, payload) => {
+			if (channel === ipcChannels.agentsRuntimeState) snapshots.push(plain(payload));
+		});
+
+		const result = await h.coordinator.setRuntimeModel(h.target, "provider-a", "model-a");
+
+		assert.equal(result.ok, true);
+		assert.equal(snapshots.length, 1, "switching models must refresh the meter without waiting for a message or tool event");
+		assert.equal(snapshots[0].agentId, AGENT_ID);
+		const refreshed = snapshots[0].state;
+		assert.equal(refreshed.modelId, "model-a");
+		assert.equal(refreshed.contextWindow, 500_000);
+		assert.equal(refreshed.contextPercent, 54);
+		for (const field of ["contextTokens", "inputTokens", "outputTokens", "cacheRead", "cacheWrite", "cacheTotal", "cacheHitPercent", "cacheHitAveragePercent", "cacheHitSampleCount", "cost"]) {
+			assert.equal(refreshed[field], before[field], `model selection must preserve ${field}`);
+		}
+	});
+}
 
 test("a valid effort selection persists the actual Pi level through the coordinator", async () => {
 	const h = coordinatorHarness();

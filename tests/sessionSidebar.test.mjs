@@ -536,3 +536,33 @@ test("activity page keeps failed/stopped agents visible (error/closed)", () => {
 	// 右键/重启入口不区分 live：失败会话也能从活动页菜单重启。
 	assert.match(activeTree, /openMenu\(\{ kind: "agent", agentId: agent\.id/);
 });
+
+test("终态会话行的会话菜单保留「关闭 Agent」入口（不按 live 判据裁掉）", () => {
+	// 回归（2026-10）：会话行用 getBoundSidebarRuntimeAgent 选菜单类型，而该函数把
+	// error/closed 当「非 live」，报错会话因此退回会话菜单、丢掉「关闭 Agent」——
+	// 恰好是最需要它的状态。修复：会话菜单补该入口，按「有 agentId 绑定」注入。
+	const components = readFileSync("src/renderer/src/components/sidebar/SidebarComponents.tsx", "utf8");
+	const content = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
+	const sessionMenu = components.slice(components.indexOf("export function SessionContextMenu"));
+
+	assert.match(sessionMenu, /onCloseAgent\?:\s*\(\)\s*=>\s*void;/);
+	assert.match(sessionMenu, /title=\{t\("menu\.closeAgentHint"\)\}/);
+	assert.match(sessionMenu, /\{t\("menu\.closeAgent"\)\}/);
+	assert.match(sessionMenu, /onSelect=\{props\.onCloseAgent\}/);
+	// 归档入口不能被顶掉（agent 菜单没有归档，会话菜单必须保留）
+	assert.match(sessionMenu, /onSelect=\{props\.onArchiveSession\}/);
+
+	// 注入判定只看「有绑定」，不复用 RPC 日志的 live 判据
+	const boundStart = content.indexOf("const boundAgentForSession");
+	assert.ok(boundStart > 0, "SidebarContent 必须有独立的绑定判定");
+	const boundBlock = content.slice(boundStart, boundStart + 400);
+	assert.match(boundBlock, /runtimeBySessionId\[sessionId\]\?\.agentId/);
+	assert.doesNotMatch(boundBlock, /getBoundSidebarRuntimeAgent/);
+	assert.match(content, /onCloseAgent=\{\s*menuSessionBoundAgent/);
+
+	// 草稿会话行同一缺口：报错草稿也走草稿菜单，必须同样保留入口
+	const draftMenu = components.slice(components.indexOf("export function DraftSessionContextMenu"), components.indexOf("export function SessionContextMenu"));
+	assert.match(draftMenu, /onCloseAgent\?:\s*\(\)\s*=>\s*void;/);
+	assert.match(draftMenu, /onSelect=\{props\.onCloseAgent\}/);
+	assert.match(content, /onCloseAgent=\{\s*menuDraftBoundAgent/);
+});

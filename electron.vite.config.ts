@@ -148,30 +148,7 @@ export default defineConfig({
       // 未开 strictPort：散列碰撞时 Vite 自动让位，ELECTRON_RENDERER_URL 仍指向实际地址。
       port: resolveDevVitePort(readDevGitBranch()),
     },
-    // dev 预构建：web 端独享的 ai-sdk 依赖树必须启动即优化。
-    // 否则首次访问 web 服务端口时 vite 才在运行中重新优化，页面已引用的
-    // deps URL 会 504/失效，经 WebServiceManager 代理回退 HTML 后浏览器报
-    // "MIME text/html" 模块错误、整页白屏。
-    optimizeDeps: {
-      include: [
-        "@ai-sdk/react",
-        "ai",
-        "@ai-sdk/provider",
-        "@ai-sdk/provider-utils",
-        "@ai-sdk/mcp",
-        "@ai-sdk/gateway",
-        "swr",
-        "throttleit",
-        "json-schema",
-        "eventsource-parser",
-        "undici",
-        "pkce-challenge",
-        "dequal",
-        "use-sync-external-store",
-        "@standard-schema/spec",
-        "@workflow/serde",
-      ],
-    },
+
     resolve: {
       alias: [
         { find: "@", replacement: resolve("src/renderer/src") },
@@ -197,11 +174,11 @@ export default defineConfig({
       rollupOptions: {
         // 缓存模块解析结果，增量构建时跳过未变更模块，加速二次打包
         cache: true,
-        // 多入口：主窗口 index.html + 桌面宠物悬浮窗 pet.html + Web 服务聊天页 web.html
+        // 多入口：主窗口 index.html + 桌面宠物悬浮窗 pet.html
         input: {
           index: resolve("src/renderer/index.html"),
           pet: resolve("src/renderer/pet.html"),
-          web: resolve("src/renderer/web.html"),
+
           floater: resolve("src/renderer/floater.html"),
         },
         output: {

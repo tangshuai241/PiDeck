@@ -37,14 +37,6 @@ test("视觉桥脏标记挂到视觉桥 tab，而不是当成未知 AppSettings 
 	assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [["settings.tabs.vision", "settings.vision.section"]]);
 });
 
-test("webServiceRequiresAuth 变更指向 Web 设置 tab 的访问令牌项", () => {
-	const summary = summarizeSettingsUnsavedChanges({
-		dirtyFields: ["webServiceRequiresAuth"],
-	});
-	assert.equal(summary.totalCount, 1);
-	assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [["settings.tabs.web", "settings.webUseTokenAuth"]]);
-});
-
 test("未建目录的内部字段合成「其他选项」，不按 Set 插入顺序抢第一条", () => {
 	const summary = summarizeSettingsUnsavedChanges({
 		dirtyFields: ["sidebarExpandedProjectIds", "language"],

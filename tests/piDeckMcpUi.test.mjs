@@ -121,7 +121,10 @@ test("saved consent remains revocable when its listener could not start", async 
 test("PiDeck catalog uses dedicated consent panel, native logo and localized controls; no remote management fallback", () => {
 	const read = (path) => readFileSync(path, "utf8");
 	assert.match(read("src/renderer/src/config/McpTab.tsx"), /selectedTemplateDefinition\?\.id\s*===\s*"pideck"\s*\?\s*\(\s*<PiDeckMcpPanel/);
-	assert.match(read("src/renderer/src/config/McpResourceViews.tsx"), /entry\.id\s*===\s*"pideck"\s*\?\s*<LogoMark/);
+	// 上游新增 logoStyle 品牌切换（自定义图优先，其次 pi-tui 专属三色标，否则 LogoMark）：契约断言都算「原生 logo」，不把品牌开关误判为回退
+	const mcpViews = read("src/renderer/src/config/McpResourceViews.tsx");
+	assert.match(mcpViews, /entry\.id\s*===\s*"pideck"\s*&&\s*customLogo\s*\?\s*\(?\s*<img src=\{customLogo\}/, "pideck 目录条目必须优先用自定义品牌图");
+	assert.match(mcpViews, /entry\.id\s*===\s*"pideck"\s*&&\s*logoStyle\s*===\s*"pi-tui"\s*\?\s*\(?\s*<PiTuiLogoMark/, "pideck 目录条目在 pi-tui 风格下用官方三色标");
 	const preview = read("src/renderer/src/previewApi.ts");
 	assert.match(preview, /piDeckMcp:\s*\{[\s\S]*?getState:\s*async\s*\(\)\s*=>\s*\(\{\s*ok:\s*false,\s*code:\s*"desktop-only"/);
 	for (const locale of ["zh-CN", "en-US", "zh-TW"]) assert.match(read(`src/renderer/src/i18n/rendererCopy.${locale}.ts`), /"config\.mcp\.pideck\.warning"\s*:/);

@@ -16,6 +16,7 @@ const SESSION_COMMAND_ERROR_KEYS: Record<SessionCommandError["code"], Translatio
 	SESSION_RUNTIME_CHANGED: "sessionCommand.runtimeChanged",
 	SESSION_RUNTIME_BUSY: "sessionCommand.runtimeBusy",
 	SESSION_COMMAND_FAILED: "sessionCommand.commandFailed",
+	SESSION_BACKEND_REMOVED: "sessionCommand.backendRemoved",
 	SESSION_MODEL_NOT_FOUND: "sessionCommand.modelNotFound",
 	SESSION_FILE_TOO_LARGE: "sessionCommand.fileTooLarge",
 };

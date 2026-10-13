@@ -5,6 +5,15 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { getFileIconColor, getFileIconSeti } from "../../../fileIcons";
 import { t } from "../../../i18n";
 import { GitStatus, type GitFileStatus, type GitResource, type GitResourceGroupType } from "../../../../../shared/types";
+import { buildChangeTreeRows, toRelativeChangePath, type GitChangeViewMode } from "./changeTree";
+
+/** 树形视图每级缩进（px）；与文件抽屉的树保持同一节奏 */
+export const CHANGE_TREE_INDENT_PX = 14;
+/** 文件行的基准左内边距，与扁平视图的 pl-3 保持一致 */
+const FILE_ROW_BASE_PADDING = 12;
+/** 目录行的基准左内边距，与扁平视图的 px-2 保持一致 */
+const DIR_ROW_BASE_PADDING = 8;
+
 export function fileNameOnly(path: string): string {
 	return path.split(/[/\\]/).pop() ?? path;
 }
@@ -13,6 +22,7 @@ export function fileNameOnly(path: string): string {
  * 缩短长目录路径，类似 Java package 包名缩写：取每段的首字母。
  * 例如 "src/main/java/com/example/service/impl" → "s/m/j/c/e/s/i"。
  * 短路径（≤3 段或总长 ≤20）保持原样。
+ * 仅扁平视图使用：树形视图靠紧凑链把层级摊平，缩写会丢掉可读的目录名。
  */
 function shortenDir(dir: string): string {
 	const parts = dir.split("/");
@@ -20,7 +30,7 @@ function shortenDir(dir: string): string {
 	return parts.map((p) => p.charAt(0) || "").join("/");
 }
 
-/** 按目录分组 Git 资源，返回 { dir -> resources[] } 映射 */
+/** 按目录分组 Git 资源，返回 { dir -> resources[] } 映射（扁平视图；目录只到一级） */
 function groupByDir(
 	resources: GitResource[],
 	/** 项目根目录，传入后目录名显示为相对路径而非绝对路径 */
@@ -29,16 +39,7 @@ function groupByDir(
 	const dirs = new Map<string, GitResource[]>();
 	for (const r of resources) {
 		// 将绝对路径转为相对路径，使目录分组显示简洁的相对路径而非长绝对路径
-		let p = r.path;
-		if (rootPath) {
-			const normalizedRoot = rootPath.replace(/[\\]+/g, "/").replace(/\/+$/, "");
-			const normalizedPath = p.replace(/[\\]+/g, "/");
-			if (normalizedPath.startsWith(normalizedRoot + "/")) {
-				p = normalizedPath.slice(normalizedRoot.length + 1);
-			} else if (normalizedPath === normalizedRoot) {
-				p = "";
-			}
-		}
+		const p = toRelativeChangePath(r.path, rootPath);
 		const parts = p.split(/[/\\]/);
 		const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
 		if (!dirs.has(dir)) dirs.set(dir, []);
@@ -47,7 +48,7 @@ function groupByDir(
 	return dirs;
 }
 
-/** 收集变更列表中可折叠的目录键（单根无目录头时返回空） */
+/** 收集变更列表中可折叠的目录键（扁平视图语义：单根无目录头时返回空） */
 export function getCollapsibleChangeDirs(resources: GitResource[], projectRoot?: string): string[] {
 	const byDir = groupByDir(resources, projectRoot);
 	const dirs = [...byDir.keys()];
@@ -56,7 +57,7 @@ export function getCollapsibleChangeDirs(resources: GitResource[], projectRoot?:
 	return dirs;
 }
 
-/** 按目录树渲染文件列表 */
+/** 按目录渲染文件列表：flat = 一级目录分组；tree = 嵌套目录树（紧凑链合并单子目录） */
 export function FileTree(props: {
 	resources: GitResource[];
 	groupType: GitResourceGroupType;
@@ -80,6 +81,8 @@ export function FileTree(props: {
 	/** 受控：已折叠目录集合（与父级「收起/展开全部」共享） */
 	collapsedDirs: Set<string>;
 	onToggleDir: (dir: string) => void;
+	/** 视图模式：flat（默认，一级目录分组）/ tree（嵌套目录树） */
+	viewMode?: GitChangeViewMode;
 }) {
 	const byDir = groupByDir(props.resources, props.projectRoot);
 	// 按目录名排序，根目录排最前
@@ -88,6 +91,148 @@ export function FileTree(props: {
 		if (b === "") return 1;
 		return a.localeCompare(b);
 	});
+
+	/**
+	 * 单行文件：暂存/取消暂存/回滚/打开。depth 只影响左缩进，动作与扁平视图完全一致。
+	 */
+	const renderResourceRow = (r: GitResource, depth: number) => {
+		const actions: Array<{
+			label: string;
+			kind: "stage" | "unstage" | "discard" | "open";
+			disabled?: boolean;
+			run: () => void;
+		}> = [];
+		if (props.groupType === "index") {
+			actions.push({
+				label: t("git.unstage"),
+				kind: "unstage",
+				disabled: props.mutating,
+				run: () => props.unstageFile?.(r.path),
+			});
+		} else if (props.groupType === "workingTree" || props.groupType === "untracked") {
+			// 已暂存文件在 Changes 组仅保留打开按钮，暂存/回滚归 Staged 组（VS Code 语义）
+			if (!props.stagedPaths?.has(r.path)) {
+				actions.push({
+					label: t("git.stage"),
+					kind: "stage",
+					disabled: props.mutating,
+					run: () => props.stageFile?.(r.path),
+				});
+				// 回滚：tracked 走 git restore，untracked 走回收站删除
+				actions.push({
+					label: t("git.discardChanges"),
+					kind: "discard",
+					disabled: props.mutating,
+					run: () => props.discardFile?.(r.path, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
+				});
+			}
+		}
+		if (props.onOpenFile) {
+			actions.push({
+				label: t("common.open"),
+				kind: "open",
+				run: () => props.onOpenFile?.(r.path),
+			});
+		}
+		return (
+			<ResourceRow
+				key={r.path}
+				status={r.status}
+				letter={r.letter}
+				path={r.path}
+				indent={depth * CHANGE_TREE_INDENT_PX}
+				onOpen={() =>
+					props.onOpenWorkspaceFileDiff(
+						// Changes 组合并了 workingTree + untracked + index，但 groupType 写死 workingTree；
+						// 未跟踪文件按实际状态传 untracked，否则服务端在 workingTree 组找不到而打不开
+						props.groupType === "workingTree" && r.status === GitStatus.UNTRACKED ? "untracked" : props.groupType,
+						r.path,
+					)
+				}
+				actions={actions}
+				deleteFile={props.deleteFile ? (path) => props.deleteFile?.(path) : undefined}
+			/>
+		);
+	};
+
+	/**
+	 * 目录行：折叠开关 + 目录级暂存/回滚 + 计数。
+	 * 目录级操作只作用于传入的资源（树形视图传整棵子树），不影响其他目录。
+	 */
+	const renderDirHeader = (dir: string, label: string, dirResources: GitResource[], depth: number) => {
+		const stageable = dirResources.filter((resource) => !props.stagedPaths?.has(resource.path));
+		const discardable = stageable
+			.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")
+			.map((resource) => ({
+				path: resource.path,
+				group: resource.status === GitStatus.UNTRACKED ? ("untracked" as const) : ("workingTree" as const),
+			}));
+		return (
+			<div
+				key={dir || "root"}
+				className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)] focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none"
+				style={{ paddingLeft: DIR_ROW_BASE_PADDING + depth * CHANGE_TREE_INDENT_PX }}
+				/* 折叠是目录展开的唯一入口，键盘必须可达（GitGraph 行同款 inset 焦点环） */
+				role="button"
+				tabIndex={0}
+				aria-expanded={!props.collapsedDirs.has(dir)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						props.onToggleDir(dir);
+					}
+				}}
+				onClick={() => props.onToggleDir(dir)}
+			>
+				<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
+				<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
+					{label}
+				</span>
+				<span className="ml-auto flex items-center gap-0.5">
+					{props.stageDir && stageable.length > 0 && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
+							aria-label={t("git.stageDirectory")}
+							title={t("git.stageDirectory")}
+							disabled={props.mutating}
+							onClick={(event) => {
+								event.stopPropagation();
+								props.stageDir?.(stageable.map((resource) => resource.path));
+							}}
+						>
+							<Plus size={13} aria-hidden="true" />
+						</Button>
+					)}
+					{props.discardDir && discardable.length > 0 && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
+							aria-label={t("git.discardDirectory")}
+							title={t("git.discardDirectory")}
+							disabled={props.mutating}
+							onClick={(event) => {
+								event.stopPropagation();
+								props.discardDir?.(discardable, dir || "/");
+							}}
+						>
+							<RotateCcw size={13} aria-hidden="true" />
+						</Button>
+					)}
+					<span className="px-1 text-micro tabular-nums text-text-tertiary">{dirResources.length}</span>
+				</span>
+			</div>
+		);
+	};
+
+	// 树形视图：嵌套目录 + 缩进；折叠项由 buildChangeTreeRows 直接剪枝，渲染层无需回溯层级
+	if (props.viewMode === "tree") {
+		return <>{buildChangeTreeRows(props.resources, props.projectRoot, props.collapsedDirs).map((row) => (row.kind === "dir" ? renderDirHeader(row.path, row.label, row.resources, row.depth) : renderResourceRow(row.resource, row.depth)))}</>;
+	}
 
 	return (
 		<>
@@ -99,121 +244,8 @@ export function FileTree(props: {
 				const hideDirHeader = isSingleRoot && !props.stageDir && !props.discardDir;
 				return (
 					<Fragment key={dir || "root"}>
-						{!hideDirHeader && (
-							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
-								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
-								<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
-									{shortenDir(dir) || "/"}
-								</span>
-								{(() => {
-									const stageable = resources.filter((resource) => !props.stagedPaths?.has(resource.path));
-									const discardable = stageable
-										.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")
-										.map((resource) => ({
-											path: resource.path,
-											group: resource.status === GitStatus.UNTRACKED ? ("untracked" as const) : ("workingTree" as const),
-										}));
-									return (
-										<span className="ml-auto flex items-center gap-0.5">
-											{props.stageDir && stageable.length > 0 && (
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon-sm"
-													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
-													aria-label={t("git.stageDirectory")}
-													title={t("git.stageDirectory")}
-													disabled={props.mutating}
-													onClick={(event) => {
-														event.stopPropagation();
-														props.stageDir?.(stageable.map((resource) => resource.path));
-													}}
-												>
-													<Plus size={13} aria-hidden="true" />
-												</Button>
-											)}
-											{props.discardDir && discardable.length > 0 && (
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon-sm"
-													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
-													aria-label={t("git.discardDirectory")}
-													title={t("git.discardDirectory")}
-													disabled={props.mutating}
-													onClick={(event) => {
-														event.stopPropagation();
-														props.discardDir?.(discardable, dir || "/");
-													}}
-												>
-													<RotateCcw size={13} aria-hidden="true" />
-												</Button>
-											)}
-											<span className="px-1 text-micro tabular-nums text-text-tertiary">{resources.length}</span>
-										</span>
-									);
-								})()}
-							</div>
-						)}
-						{(!props.collapsedDirs.has(dir) || hideDirHeader) &&
-							resources.map((r) => {
-								const actions: Array<{
-									label: string;
-									kind: "stage" | "unstage" | "discard" | "open";
-									disabled?: boolean;
-									run: () => void;
-								}> = [];
-								if (props.groupType === "index") {
-									actions.push({
-										label: t("git.unstage"),
-										kind: "unstage",
-										disabled: props.mutating,
-										run: () => props.unstageFile?.(r.path),
-									});
-								} else if (props.groupType === "workingTree" || props.groupType === "untracked") {
-									// 已暂存文件在 Changes 组仅保留打开按钮，暂存/回滚归 Staged 组（VS Code 语义）
-									if (!props.stagedPaths?.has(r.path)) {
-										actions.push({
-											label: t("git.stage"),
-											kind: "stage",
-											disabled: props.mutating,
-											run: () => props.stageFile?.(r.path),
-										});
-										// 回滚：tracked 走 git restore，untracked 走回收站删除
-										actions.push({
-											label: t("git.discardChanges"),
-											kind: "discard",
-											disabled: props.mutating,
-											run: () => props.discardFile?.(r.path, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
-										});
-									}
-								}
-								if (props.onOpenFile) {
-									actions.push({
-										label: t("common.open"),
-										kind: "open",
-										run: () => props.onOpenFile?.(r.path),
-									});
-								}
-								return (
-									<ResourceRow
-										key={r.path}
-										status={r.status}
-										letter={r.letter}
-										path={r.path}
-										onOpen={() =>
-											props.onOpenWorkspaceFileDiff(
-												// Changes 组合并了 workingTree + untracked + index，但 groupType 写死 workingTree；
-												// 未跟踪文件按实际状态传 untracked，否则服务端在 workingTree 组找不到而打不开
-												props.groupType === "workingTree" && r.status === GitStatus.UNTRACKED ? "untracked" : props.groupType,
-												r.path,
-											)
-										}
-										actions={actions}
-										deleteFile={props.deleteFile ? (path) => props.deleteFile?.(path) : undefined}
-									/>
-								);
-							})}
+						{!hideDirHeader && renderDirHeader(dir, shortenDir(dir) || "/", resources, 0)}
+						{(!props.collapsedDirs.has(dir) || hideDirHeader) && resources.map((r) => renderResourceRow(r, 0))}
 					</Fragment>
 				);
 			})}
@@ -317,17 +349,21 @@ export function ResourceRow(props: {
 	/** 右键菜单“删除文件”入口；未提供时不启用右键菜单（compare 只读列表） */
 	deleteFile?: (path: string) => void;
 	onOpen?: () => void | Promise<void>;
+	/** 树形视图缩进（px），叠加在基准左内边距之上 */
+	indent?: number;
 }) {
 	const [opening, setOpening] = useState(false);
 	const name = fileNameOnly(props.path);
 	const tone = props.compareStatus ? statusTone(props.compareStatus, true) : statusTone(props.status);
 	const letter = props.compareStatus ? compareStatusLetter(props.compareStatus) : props.letter;
+	const rowPadding = { paddingLeft: FILE_ROW_BASE_PADDING + (props.indent ?? 0) };
 	const row = (
 		<div className={`group git-resource-row flex h-[26px] items-center pr-[7px] text-sm leading-[26px] hover:bg-[var(--git-panel-hover)] focus-within:bg-[var(--git-panel-hover)] ${tone}`} title={props.path}>
 			{props.onOpen ? (
 				<button
 					type="button"
-					className="git-resource-open flex h-[26px] min-w-0 flex-1 cursor-pointer appearance-none items-center border-0 bg-transparent p-0 pl-3 text-left font-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none disabled:cursor-progress disabled:opacity-70"
+					className="git-resource-open flex h-[26px] min-w-0 flex-1 cursor-pointer appearance-none items-center border-0 bg-transparent p-0 text-left font-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none disabled:cursor-progress disabled:opacity-70"
+					style={rowPadding}
 					aria-label={t("git.openWorkspaceDiff", { path: props.path })}
 					aria-busy={opening}
 					disabled={opening}
@@ -344,7 +380,7 @@ export function ResourceRow(props: {
 					<span className="git-resource-name min-w-0 flex-[0_1_auto] truncate text-[var(--git-panel-fg)]">{name}</span>
 				</button>
 			) : (
-				<div className="flex h-[26px] min-w-0 flex-1 cursor-default items-center border-0 bg-transparent p-0 pl-3 text-left font-inherit">
+				<div className="flex h-[26px] min-w-0 flex-1 cursor-default items-center border-0 bg-transparent p-0 text-left font-inherit" style={rowPadding}>
 					<FileIcon name={name} />
 					<span className="git-resource-name min-w-0 flex-[0_1_auto] truncate text-[var(--git-panel-fg)]">{name}</span>
 				</div>

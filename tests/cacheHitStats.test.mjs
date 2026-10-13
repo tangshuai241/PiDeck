@@ -65,7 +65,8 @@ function makeScanHarness(text, { withContext = true } = {}) {
 		calls.scans += 1;
 		const start = options.start ?? 0;
 		calls.ranges.push(start);
-		const body = text.slice(start);
+		// 允许传「文本提供者」：增量续算用例需要在两次扫描之间改内容而不重建 reader
+		const body = (typeof text === "function" ? text() : text).slice(start);
 		let offset = start;
 		for (const piece of body.split("\n")) {
 			// split 的末项对应「原文本以 \n 结尾」时的空尾，跳过
@@ -168,6 +169,56 @@ test("computeCacheHitStats: compaction 行重置纪元（对话估算与命中�
 	assert.equal(stats.average, 0);
 	// 压缩摘要「前情摘要：修复了圆环指标」= 12 个 CJK 字符 → 12/1.5 = 8；新纪元 "ok"（2 字符）→ 1；合计 9；归档的 userLine("hi") 不再计入
 	assert.equal(stats.conversationTokens, 9);
+});
+
+test("computeCacheHitStats: 系统消息重放为提示词装载（系统/工具两段），且不计入对话估算", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const systemLine = JSON.stringify({
+		type: "message",
+		id: "s1",
+		parentId: null,
+		message: { role: "system", content: "", sections: { preamble: "abcd", rules: "中文规则" }, toolsAdded: [{ name: "read", description: "read files here" }] },
+	});
+	const stats = computeCacheHitStats([systemLine, userLine()].join("\n"));
+	// 系统段 1（abcd）+ 3（中文规则）；工具段来自声明 JSON，必须 > 0
+	assert.equal(stats.systemTokens, 4);
+	assert.ok(stats.toolsTokens > 0);
+	// 系统消息的正文在 sections 里（对话估算不得重复计量）：只剩 userLine 的 "hi" → 1
+	assert.equal(stats.conversationTokens, 1);
+});
+
+test("computeCacheHitStats: 无系统消息的老会话不给出系统/工具测量值", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const stats = computeCacheHitStats([assistantLine({ id: 1 }), userLine()].join("\n"));
+	// 两段都缺失 = 无测量值：调用方据此退回「总占用 − 对话估算」口径，而不是当成 0
+	assert.equal(stats.systemTokens, undefined);
+	assert.equal(stats.toolsTokens, undefined);
+});
+
+test("computeCacheHitStats: 系统消息只做了删除补丁（装载空）时也不给出 0/0 测量值", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const removeOnly = JSON.stringify({ type: "message", id: "s2", parentId: null, message: { role: "system", content: "", sections: { preamble: null } } });
+	const stats = computeCacheHitStats([removeOnly, userLine()].join("\n"));
+	assert.equal(stats.systemTokens, undefined, "空装载不能当成「系统为 0」（那只是把所有常驻开销推给对话段）");
+	assert.equal(stats.toolsTokens, undefined);
+});
+
+test("computeCacheHitStats: compaction 快照整体替换装载（不叠加旧节、不保留旧工具）", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const raw = [
+		JSON.stringify({ type: "message", id: "s1", parentId: null, message: { role: "system", content: "", sections: { preamble: "old section" }, toolsAdded: [{ name: "old-tool", description: "zzzz" }] } }),
+		JSON.stringify({
+			type: "compaction",
+			id: "c1",
+			parentId: "s1",
+			summary: "摘要",
+			firstKeptEntryId: "s1",
+			systemMessage: { role: "system", content: "", sections: { preamble: "new section" }, toolsAdded: [{ name: "read", description: "read" }] },
+		}),
+	].join("\n");
+	const stats = computeCacheHitStats(raw);
+	assert.equal(stats.systemTokens, 3); // "new section" 11 字符 ÷4 → 3（旧的 old section 已随快照丢弃）
+	assert.ok(stats.toolsTokens > 0);
 });
 
 test("computeCacheHitStats: 工具调用参数与工具结果计入对话估算", () => {
@@ -280,6 +331,28 @@ test("createCacheHitStatsReader: 只追加时仅扫描尾部新增内容（不�
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
+});
+
+test("createCacheHitStatsReader: 增量续算保留提示词装载（系统消息只在文件头部也不丢）", async () => {
+	// 系统消息条目通常只在头部（首请求）与提示词变化处出现，续扫只读尾部；
+	// 装载状态必须随累加器一起缓存，否则每次轮询都会把「系统 / 工具」两段丢成无测量值。
+	const { createCacheHitStatsReader } = loadCacheHitStats();
+	const systemLine = JSON.stringify({ type: "message", id: "s1", parentId: null, message: { role: "system", content: "", sections: { preamble: "abcd" }, toolsAdded: [{ name: "read", description: "read files here" }] } });
+	let text = [systemLine, assistantLine({ id: 1, usage: { input: 100, cacheRead: 100, cacheWrite: 0 } })].join("\n");
+	const { scanLines, calls } = makeScanHarness(() => text);
+	const reader = createCacheHitStatsReader({ scanLines, stat: async () => ({ size: Buffer.byteLength(text, "utf8"), mtimeMs: calls.scans }) });
+
+	const first = await reader("s1.jsonl");
+	assert.equal(first.systemTokens, 1);
+	assert.ok(first.toolsTokens > 0);
+
+	// 追加一条消息（文件变大 → 走增量续算）：装载仍在，对话估算累加
+	text = `${text}\n${assistantLine({ id: 2, usage: { input: 100, cacheRead: 0, cacheWrite: 100 } })}`;
+	const second = await reader("s1.jsonl");
+	assert.equal(calls.scans, 2);
+	assert.equal(second.systemTokens, first.systemTokens, "续扫不得丢失头部系统消息的装载");
+	assert.equal(second.toolsTokens, first.toolsTokens);
+	assert.equal(second.conversationTokens, 2, "续扫把新增消息累加进对话估算（ok ×2）");
 });
 
 test("createCacheHitStatsReader: 前缀被改写（rename/头部修复重写文件）时放弃续算重扫", async () => {

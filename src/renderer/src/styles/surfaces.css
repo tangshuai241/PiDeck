@@ -324,13 +324,7 @@
   background: var(--color-bg-panel);
 }
 
-/* 标签栏 */
-.browser-tab.active {
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  border-bottom: 2px solid var(--color-accent);
-  margin-bottom: -1px;
-}
+/* 标签栏：tab 自身外观走 Tailwind（对齐中间栏文件 tab），此处只保留原生关闭钮 */
 .browser-tab-close {
   width: 16px;
   height: 16px;
@@ -620,15 +614,7 @@
 .composer-box .rich-input.bang-bang {
   caret-color: var(--color-danger);
 }
-/* shell 模式下 RichInput 左侧留出与 ::before 指示条对齐的空间,复刻原 textarea 的 padding-left。 */
-.composer-box.shell-mode .rich-input,
-.composer-box.shell-silent-mode .rich-input {
-  padding-left: 18px;
-}
-.composer-box.shell-mode .rich-input.is-editor-empty::before,
-.composer-box.shell-silent-mode .rich-input.is-editor-empty::before {
-  left: 18px;
-}
+/* shell 模式不再有 ::before 指示条（2026-10 精简），输入区不再为它让出左内边距。 */
 
 /* 模板预览弹框 */
 /* 预览区占满弹框剩余高度（弹框已受 max-h 约束），按钮行固定、正文内部滚动，
@@ -1145,146 +1131,6 @@
   flex: 1;
   overflow: hidden;
 }
-
-/* ── SkillHub 商店模态框 ─────────────────────────────── */
-.skillhub-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: var(--space-4);
-  gap: var(--space-3);
-}
-/* 搜索结果列表 */
-.skillhub-results {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-right: var(--space-2);
-}
-.skillhub-result-count {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-caption);
-}
-.skillhub-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.skillhub-card:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-default);
-}
-.skillhub-card:active {
-  background: var(--color-bg-active);
-}
-.skillhub-card-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.skillhub-card-title {
-  font-size: var(--font-size-control);
-  color: var(--color-text-primary);
-}
-.skillhub-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-size-caption);
-  color: var(--color-text-tertiary);
-}
-.skillhub-card-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.skillhub-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.skillhub-card-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
-}
-.skillhub-card-action-btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-.skillhub-card-action-btn.primary {
-  color: var(--color-accent);
-}
-.skillhub-card-action-btn.primary:hover:not(:disabled) {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-}
-.skillhub-card-action-btn:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-.skillhub-card-source {
-  font-size: var(--font-size-micro);
-  font-family: var(--font-family-business);
-  color: var(--color-text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.skillhub-installed-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-success-soft, color-mix(in srgb, #22c55e 12%, transparent));
-  color: var(--color-success, #22c55e);
-  font-size: 11px;
-  font-weight: 500;
-  vertical-align: middle;
-}
-.skillhub-installing-dot {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-accent);
-  border-top-color: transparent;
-  border-radius: 50%;
-}
-/* 详情视图 */
-.skillhub-detail-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-2);
-}
-.skillhub-detail-toolbar button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 @keyframes fadeInUp {
   from {
     opacity: 0;
@@ -2041,6 +1887,11 @@
 }
 .rpc-log-entry:hover {
   background: var(--color-bg-hover);
+}
+/* role=button 后键盘可达：补焦点环（与仓库 inset 环惯例一致） */
+.rpc-log-entry:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
 }
 .rpc-log-entry.log-send {
   color: var(--rpc-log-send);
@@ -2816,32 +2667,7 @@ div.fixed.inset-0.z-50 {
   }
 }
 
-/* 思考级别映射：两个 ConfigSelect 垂直排列（xhigh + max） */
-.config-thinking-levels-cell {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.config-thinking-levels-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.config-thinking-levels-key {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-tertiary);
-  font-family: var(--font-mono);
-  flex-shrink: 0;
-  width: 26px;
-}
-
-.config-thinking-levels-row .config-select-trigger > span {
-  font-size: 11px;
-}/* 壁纸模式下业务弹框只保留 DialogContent 这一层底色；布局容器透明，
+/* 壁纸模式下业务弹框只保留 DialogContent 这一层底色；布局容器透明，
    否则 header 是一层、body 又叠一层同色面板，最终看起来像两个透明度。 */
 :root[data-bg-image="on"] .config-modal .config-layout, :root[data-bg-image="on"] .config-modal .config-sidebar, :root[data-bg-image="on"] .config-modal .config-main, :root[data-bg-image="on"] .config-modal .config-content, :root[data-bg-image="on"] .config-modal .config-provider-card, :root[data-bg-image="on"] .config-modal .config-provider-body, :root[data-bg-image="on"] .config-modal .config-provider-form, :root[data-bg-image="on"] .config-modal .config-models-section, :root[data-bg-image="on"] .config-modal .config-model-table, :root[data-bg-image="on"] .settings-modal .settings-layout, :root[data-bg-image="on"] .settings-modal .settings-tabs, :root[data-bg-image="on"] .settings-modal .settings-panel, :root[data-bg-image="on"] .feedback-modal-shell .feedback-environment-content, :root[data-bg-image="on"] .feedback-modal-shell .feedback-actions, :root[data-bg-image="on"] .feedback-modal-shell .feedback-actions [data-slot="button"][data-variant="secondary"], :root[data-bg-image="on"] .environment-dialog .environment-body{
   background: transparent;

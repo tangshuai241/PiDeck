@@ -46,7 +46,6 @@ test("every plain-text surface folds self-contained reference blocks", () => {
 		"子代理转录（DSH）": "src/renderer/src/components/session/DshAgentToolsPanel.tsx",
 		会话定位轴标题: "src/renderer/src/components/app/AppUtils.ts",
 		"侧栏会话 preview（主进程）": "src/main/sessions/SessionScanner.ts",
-		"Web 端消息渲染（主进程）": "src/main/web/WebServiceManager.ts",
 	};
 	for (const [label, file] of Object.entries(surfaces)) {
 		const source = readFileSync(file, "utf8");

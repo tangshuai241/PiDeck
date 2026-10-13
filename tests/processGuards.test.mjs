@@ -16,7 +16,7 @@ const ciYml = readFileSync(".github/workflows/ci.yml", "utf8");
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 
 test("ci.yml 接入全部 check:* 守卫，且位于 npm ci 之后、Build 之前", () => {
-	const guardScripts = ["check:announcements", "check:pi-ai-catalog", "check:extensions-manifest", "check:prompts-manifest", "check:skills-manifest"];
+	const guardScripts = ["check:pi-ai-catalog", "check:extensions-manifest", "check:prompts-manifest", "check:skills-manifest"];
 	for (const script of guardScripts) {
 		assert.ok(pkg.scripts[script], `package.json 缺少 ${script}`);
 		assert.ok(ciYml.includes(`npm run ${script}`), `ci.yml 缺少守卫命令 npm run ${script}`);

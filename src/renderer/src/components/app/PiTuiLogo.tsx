@@ -1,11 +1,31 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAtomValue } from "jotai";
-import { logoStyleAtom } from "../../atoms/app-ui-atoms";
+import { appDisplayNameAtom, customLogoAtom, logoStyleAtom } from "../../atoms/app-ui-atoms";
+import type { LogoStyle } from "../../../../shared/types/settings";
 import { PI_TUI_COLORS, PI_TUI_LOGO_CELLS, PI_TUI_PIECES, type PiTuiColorKey } from "./piTuiLogoData";
 
 /** 订阅 logo 风格镜像 atom；Web 独立环境无人写入 → 恒取 atom 默认（pi-tui），与桌面默认品牌位一致。 */
-export function useLogoStyle(): "classic" | "pi-tui" {
+export function useLogoStyle(): LogoStyle {
 	return useAtomValue(logoStyleAtom);
+}
+
+/**
+ * 品牌位统一取值（渲染落点专用）：把「风格 + 自定义图」两个 atom 收敛成一个判定，避免每个落点各写一套回落规则。
+ * - `customLogo` 非空 = 当前就是自定义且已上传图 → 落点渲染用户图；
+ * - `style` 只可能是内置两档：非 classic（含 custom）一律按 **pi-tui**（应用默认品牌位）处理，
+ *   与 shared `resolveLogoStyle` 及主进程窗口/托盘图标的回落一致，custom 缺图时不能落回 classic。
+ * 落点写法保持 `const { style: logoStyle, customLogo } = useBrandGlyph();`，沿用 `logoStyle === "pi-tui" ? … : …` 既有分支形态。
+ */
+export function useBrandGlyph(): { style: "classic" | "pi-tui"; customLogo: string } {
+	const style = useAtomValue(logoStyleAtom);
+	const customLogo = useAtomValue(customLogoAtom);
+	const hasCustomLogo = style === "custom" && customLogo.length > 0;
+	return { style: style === "classic" ? "classic" : "pi-tui", customLogo: hasCustomLogo ? customLogo : "" };
+}
+
+/** 订阅应用显示名称（已解析）；品牌区与「关于」弹层用，未设置时就是 PiDeck。 */
+export function useAppDisplayName(): string {
+	return useAtomValue(appDisplayNameAtom);
 }
 
 /**

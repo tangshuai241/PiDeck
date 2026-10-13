@@ -68,3 +68,33 @@ it("update 清洗渲染层 patch 并落盘；未知 id 原样保留", async () =
 	const cleared = await store.update({ hiddenModules: null });
 	assert.deepEqual(plain(cleared.hiddenModules), []);
 });
+
+it("retired switches remain disabled on load and update while legacy ACP configuration survives", async () => {
+	const { SettingsStore, userData } = makeStore();
+	const tool = { id: "legacy", name: "Legacy CLI", command: "legacy-cli", args: ["--acp"], enabled: true };
+	seed(userData, { acpEnabled: true, acpTools: [tool], defaultAgentBackend: "acp", webServiceEnabled: true, telemetryEnabled: true });
+	const store = new SettingsStore();
+	await store.load();
+	const loaded = store.get();
+	for (const field of ["acpEnabled", "webServiceEnabled", "telemetryEnabled"]) assert.equal(loaded[field], false);
+	assert.equal(loaded.defaultAgentBackend, "pi");
+	assert.equal(loaded.acpTools[0].command, "legacy-cli");
+	const next = await store.update({ acpEnabled: true, webServiceEnabled: true, telemetryEnabled: true, defaultAgentBackend: "acp" });
+	for (const field of ["acpEnabled", "webServiceEnabled", "telemetryEnabled"]) assert.equal(next[field], false);
+	assert.equal(next.defaultAgentBackend, "pi");
+	assert.equal(next.acpTools[0].command, "legacy-cli");
+	const persisted = JSON.parse(readFileSync(join(userData, "settings.json"), "utf8"));
+	assert.equal(persisted.acpTools[0].command, "legacy-cli");
+	assert.equal(persisted.acpEnabled, false);
+	assert.equal(persisted.webServiceEnabled, false);
+	assert.equal(persisted.telemetryEnabled, false);
+});
+
+it("retained DSH default remains DSH after loading and saving legacy settings", async () => {
+	const { SettingsStore, userData } = makeStore();
+	seed(userData, { defaultAgentBackend: "dsh" });
+	const store = new SettingsStore();
+	await store.load();
+	assert.equal(store.get().defaultAgentBackend, "dsh");
+	assert.equal((await store.update({ defaultAgentBackend: "dsh" })).defaultAgentBackend, "dsh");
+});

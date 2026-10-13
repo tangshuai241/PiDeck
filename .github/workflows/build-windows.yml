@@ -42,7 +42,7 @@ jobs:
       - name: Upload Windows ${{ matrix.arch }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pi-desktop-windows-${{ matrix.arch }}
+          name: PiDeck-windows-${{ matrix.arch }}
           if-no-files-found: error
           path: |
             release/*.exe

@@ -318,7 +318,7 @@ export function VoiceTranscriptionSettingsSection() {
 	const showProgress = progress && (busyTarget === progress.target || (progress.target === "runtime" && busyTarget === "runtime"));
 
 	return (
-		<SettingsSection title={t("voice.settings.title")} description={t("voice.settings.description")}>
+		<SettingsSection id="settings-section-common-voice-input" title={t("voice.settings.title")} description={t("voice.settings.description")}>
 			<SettingSwitchRow title={t("voice.settings.enabled")} description={t("voice.settings.enabledDescription")} checked={config.enabled} disabled={busy} onChange={(checked) => patch({ enabled: checked })} />
 			{/* 总开关关闭时下面每一项都不生效（麦克风按钮本身也不会出现），整块隐藏：
 			    一屏无法使用的输入框只会制造噪音（用户反馈「看着很烦」）。 */}

@@ -168,14 +168,21 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		try {
 			const boundary = await resolveProjectReadBoundary(scope);
 			const readablePath = await resolveReadablePath(path, boundary);
-			// 编辑器场景传入 maxBytes（maxEditorFileSizeMB 设置项）：读取前先 stat 拦截，
+			// 编辑器场景传入 maxBytes（maxEditorFileSizeMB 设置项，默认 5MiB）：读取前先 stat 拦截，
 			// 避免大文件全量读入主进程再经 IPC 传输（几百 MB 字符串会同时压垮两侧内存）。
-			// 其他调用方（技能/提示词小文件）不传参，行为不变。
-			if (typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0) {
+			// 不传参的调用方（技能/提示词/DSH 配置小文件）过去完全没有上界——渲染层一旦
+			// 指到任意大文件就会把主进程内存打爆（与会话文件「大会话闪退」同族）；
+			// 这里给默认 16MiB（远超技能/提示词真实体量），显式入参再钳到 64MiB 天花板
+			// （JS 字符串超 64MiB 渲染层本身也吃不消，与二进制预览同族预算）。
+			const MAX_DEFAULT_READ_BYTES = 16 * 1024 * 1024;
+			const MAX_READ_BYTES_CEILING = 64 * 1024 * 1024;
+			const requestedMax = typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_DEFAULT_READ_BYTES;
+			const effectiveMax = Math.min(requestedMax, MAX_READ_BYTES_CEILING);
+			{
 				const fileStat = await stat(readablePath);
-				if (fileStat.size > maxBytes) {
+				if (fileStat.size > effectiveMax) {
 					// 结构化前缀供渲染层识别后走 i18n 文案；message 不直接展示给用户
-					throw new Error(`FILE_TOO_LARGE:${fileStat.size}:${Math.floor(maxBytes)}`);
+					throw new Error(`FILE_TOO_LARGE:${fileStat.size}:${Math.floor(effectiveMax)}`);
 				}
 			}
 			return await readFile(readablePath, "utf8");

@@ -1,8 +1,7 @@
 import { useAtomValue } from "jotai";
 import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, MessagesSquare, MoreHorizontal, Pencil, PanelLeft, PanelRight, Pin, PinOff, Play, Plus, RefreshCw, RotateCw, Terminal, X } from "lucide-react";
-import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { motion, useReducedMotion, type Transition } from "motion/react";
-import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
@@ -41,19 +40,6 @@ export const SPLIT_GROUP_COLOR_PALETTE = [
 ] as const;
 
 /**
- * beui Tabs（motion）同款 spring：活动 Tab 指示条切换时带轻微过冲，
- * 落地有生命感而不是硬切；数值与 beui.dev 官方 registry 保持一致。
- */
-const TAB_INDICATOR_SPRING: Transition = {
-	type: "spring",
-	stiffness: 170,
-	damping: 24,
-	mass: 1.2,
-};
-/** 用户开启「减少动态效果」时禁用指示条滑动（瞬时切换，不动画）。 */
-const TAB_INDICATOR_INSTANT: Transition = { duration: 0 };
-
-/**
  * 会话 Tab 栏（浏览器式多 Tab）：标题栏下方展示当前打开的所有会话。
  *
  * 生命周期约定（省内存 + 复用 Agent 的最佳实践）：
@@ -71,7 +57,8 @@ const TAB_INDICATOR_INSTANT: Transition = { duration: 0 };
  * - 每个会话 Tab 的下拉按钮（或右键）打开操作菜单：切换到该会话、固定、
  *   停止 Agent（仅当前 Tab，保留会话与 Tab）、重启（仅当前 Tab）、关闭/关闭其他/关闭全部；
  * - 当前 Tab 识别：灰色柔和实底（选中态背景 = --color-bg-active，与左侧 SessionTree 选中态
- *   同一套语义），由共享 layoutId 的 motion.span 滑动呈现；不做浮起/阴影/底部横条
+ *   同一套语义），直接画在激活 Tab 自己身上、切换瞬时出现；不做滑动/浮起/阴影/底部横条
+ *   （2026-10 用户指定取消 beui 同款 layoutId 共享投影：旧实现下选中底色会从上一个 Tab 滑到新 Tab）。
  *   （曾因过粗被弃用）。
 
 /** “+” 下拉里的新建目标：聊天对话区或已打开项目 */
@@ -123,7 +110,7 @@ export type SessionTabsBarProps = {
 	newSessionTargets: readonly NewSessionTarget[];
 	onNewSessionInProject: (projectId: string) => void;
 	/** 新建 ACP 工具会话（acpEnabled 门控后由 App 提供；菜单里按工具→项目二级选择） */
-	onNewAcpSession?: (projectId: string, toolId: string) => void;
+
 	onTogglePin: (sessionId: string) => void;
 	onReorder: (sourceId: string, targetId: string, position: "before" | "after") => void;
 	/** 右侧抽屉总开关：打开/关闭整块右侧面板（活动栏在抽屉内、系统按钮下方）。 */
@@ -238,14 +225,6 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	// 分屏组管理菜单（右键胶囊打开）：重命名草稿
 	const [splitGroupMenuOpen, setSplitGroupMenuOpen] = useState(false);
 	const [splitGroupNameDraft, setSplitGroupNameDraft] = useState("");
-
-	// —— 活动 Tab 指示器（beui Tabs 同款）——
-	// 所有 Tab（会话/文件）共用同一个 layoutId：active 变化时指示条 spring 滑到新位置，
-	// 而不是每个 Tab 自己画一条硬切底条。layoutRoot 使投影作用域限定在本栏内，
-	// 滚动容器里的偏移不会被重放成位移（见 beui tabs.tsx 同款注释）。
-	const activeIndicatorId = useId();
-	const reduceMotion = useReducedMotion();
-	const indicatorTransition = reduceMotion ? TAB_INDICATOR_INSTANT : TAB_INDICATOR_SPRING;
 
 	// —— 按项目分组（始终生效，不再受开关控制）——
 	// 分组排序是会话 Tab 的固有行为：新会话归入其所属项目组的尾部（buildProjectTabGroups
@@ -400,7 +379,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				</Button>
 			) : null}
 			<div className="relative flex min-w-0 flex-1 items-center">
-				<motion.div ref={scrollRef} layoutRoot onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				<div ref={scrollRef} onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{(() => {
 						// 分屏组：组内会话聚合渲染（组头胶囊 + 颜色标记）；收起时组内 Tab 隐藏
 						const splitGroupIds = props.splitGroupIds ?? [];
@@ -423,8 +402,6 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								isStopping={sessionId === currentSessionId ? props.runControl?.isStopping : undefined}
 								isRestarting={sessionId === currentSessionId ? props.runControl?.isRestarting : undefined}
 								isReloading={sessionId === currentSessionId ? props.runControl?.isReloading : undefined}
-								indicatorId={activeIndicatorId}
-								indicatorTransition={indicatorTransition}
 								onSelect={props.onSelect}
 								onPromotePreview={props.onPromotePreview}
 								onClose={props.onClose}
@@ -610,12 +587,12 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 					})()}
 					{/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目。
             （新建会话保留独立「+」按钮；⋯ 菜单只收运行控制与工具） */}
-					{!props.simple && <NewSessionMenu targets={props.newSessionTargets} onSelect={props.onNewSessionInProject} onNewAcpSession={props.onNewAcpSession} />}
+					{!props.simple && <NewSessionMenu targets={props.newSessionTargets} onSelect={props.onNewSessionInProject} />}
 					{/* 页面式插件面板伪 Tab：始终选中态（它就是当前呈现的视图），与会话 Tab 之间加竖线分隔 */}
 					{!props.simple && props.pluginTab ? (
 						<>
 							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
-							<HostPluginTab tab={props.pluginTab} indicatorId={activeIndicatorId} indicatorTransition={indicatorTransition} />
+							<HostPluginTab tab={props.pluginTab} />
 						</>
 					) : null}
 					{/* 文件/Diff 与会话共用本栏：同一套 session-tab 皮，不另开绿条栏 */}
@@ -623,13 +600,13 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 						<>
 							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
 							{props.editorTabs.flatMap((tab, index) => {
-								const node = <EditorWorkbenchTab key={tab.id} tab={tab} indicatorId={activeIndicatorId} indicatorTransition={indicatorTransition} onSelect={props.onSelectEditorTab} onClose={props.onCloseEditorTab} onPromotePreview={props.onPromoteEditorPreview} />;
+								const node = <EditorWorkbenchTab key={tab.id} tab={tab} onSelect={props.onSelectEditorTab} onClose={props.onCloseEditorTab} onPromotePreview={props.onPromoteEditorPreview} />;
 								if (index === 0) return [node];
 								return [<span key={`editor-tab-sep:${tab.id}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />, node];
 							})}
 						</>
 					) : null}
-				</motion.div>
+				</div>
 				{/* 右缘渐变：溢出时提示「右侧还有 Tab」（纯装饰，不拦截鼠标）。
           放在滚动容器外层（absolute 子元素放 overflow-x-auto 容器内会随内容滚走）。 */}
 				{tabsOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background/90 to-transparent" />}
@@ -750,15 +727,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
  * 工作台文件/Diff Tab：视觉复用 session-tab，不引入第二套绿条样式。
  * 与会话 Tab 正交：不参与会话拖拽/固定，只转发选中/关闭/预览晋升。
  */
-function EditorWorkbenchTab(props: {
-	tab: WorkbenchEditorTabItem;
-	/** 与会话 Tab 共用的指示器 layoutId（选中态滑动到本 Tab，同一套 spring） */
-	indicatorId: string;
-	indicatorTransition: Transition;
-	onSelect?: (tabId: string) => void;
-	onClose?: (tabId: string) => void;
-	onPromotePreview?: (tabId: string) => void;
-}) {
+function EditorWorkbenchTab(props: { tab: WorkbenchEditorTabItem; onSelect?: (tabId: string) => void; onClose?: (tabId: string) => void; onPromotePreview?: (tabId: string) => void }) {
 	const { tab } = props;
 	// 工作台 Tab 富提示：第一行 tab 标题，第二行完整路径（tab.title 由装配层传入 filePath）。
 	// title 缺省时退化为单行，与旧原生 title 行为一致。
@@ -809,10 +778,10 @@ function EditorWorkbenchTab(props: {
 							<X className="size-3" />
 						</button>
 					</span>
-					{/* 灰色选中背景：与会话 Tab 同一 layoutId（active 变化即 spring 滑动到本 Tab），
+					{/* 灰色选中背景：只属于激活 Tab 自身，切换时瞬时出现（无滑动动画），
           替代旧的底部细条；内容包装层已 z-10 抬升到背景之上。
           背景色用 inline 变量（var(--color-bg-active)）而非 bg-accent 类，同 SessionTab 一致。 */}
-					{tab.active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
+					{tab.active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 				</div>
 			</TooltipTrigger>
 			{tab.title ? (
@@ -832,10 +801,10 @@ function EditorWorkbenchTab(props: {
 
 /**
  * 页面式宿主插件面板伪 Tab：与 EditorWorkbenchTab 同一套 session-tab 皮。
- * 它在栏里始终是选中态（呈现的视图就是它），背景走与会话 Tab 共享的 layoutId 指示器，
- * 选中背景从上一个 Tab spring 滑过来。不可拖拽排序，唯一动作是关闭（即收起插件页）。
+ * 它在栏里始终是选中态（呈现的视图就是它），选中背景瞬时铺满（无滑动动画）。
+ * 不可拖拽排序，唯一动作是关闭（即收起插件页）。
  */
-function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void }; indicatorId: string; indicatorTransition: Transition }) {
+function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void } }) {
 	const { tab } = props;
 	const Icon = tab.icon;
 	return (
@@ -865,7 +834,7 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 					<X className="size-3" />
 				</button>
 			</span>
-			<motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
+			<span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
 		</div>
 	);
 }
@@ -951,10 +920,6 @@ function SessionTab(props: {
 	onDragOver: (event: React.DragEvent) => void;
 	onDrop: (event: React.DragEvent) => void;
 	onDragEnd: () => void;
-	/** 与全栏共享的指示器 layoutId（beui Tabs 同款：active 切换时 spring 滑动） */
-	indicatorId: string;
-	/** 指示器 transition：spring（默认）/ 减少动态时瞬时 */
-	indicatorTransition: Transition;
 	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
 	sessionActions?: SessionTabActions;
 }) {
@@ -1058,7 +1023,7 @@ function SessionTab(props: {
 								hasLeadingBadges ? "w-fit max-w-(--session-tab-max-w-badged)" : "w-fit max-w-(--session-tab-max-w)",
 								dragging && "opacity-50",
 								// 选中态：灰色柔和实底（bg-accent = --color-bg-active，与左侧 SessionTree 选中行一致），
-								// 背景由下方共享 layoutId 的 motion.span spring 滑到当前 Tab；不做黑色实底/阴影/底部条。
+								// 背景由下方 span 画在激活 Tab 自身，切换瞬时出现；不做黑色实底/阴影/底部条。
 								// 文字用 text-foreground（灰底上直接可读，无需反色）。
 								// hover 底用 accent-soft 实底而非 accent/50：半透明灰叠在白底上几乎不可见（同 EditorWorkbenchTab 注释）。
 								active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
@@ -1119,13 +1084,13 @@ function SessionTab(props: {
 							</span>
 							{/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
 							{props.indicator && <span aria-hidden="true" className={cn("pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-full bg-primary", props.indicator === "before" ? "-left-0.5" : "-right-0.5")} />}
-							{/* 灰色选中背景按钮（beui Tabs 同款滑动；无底部条）：只有 active Tab 渲染，layoutId 全栏共享，
-            切换时 spring 滑到新位置并在目标 Tab 铺满整块灰底——替代旧的底部细条/黑色实底；
-            拖拽插入线（props.indicator）是竖线且仅拖拽期存在，二者位置不重叠。
+							{/* 灰色选中背景：只属于激活 Tab 自身，切换时瞬时出现；拖拽插入线（props.indicator）
+            是竖线且仅拖拽期存在，二者位置不重叠。旧实现用全栏共享 layoutId 把底色从旧 Tab 滑到新 Tab，
+            用户明确不要这个移动动画，已改为普通 span（不做浮起/阴影/底部条）。
             背景色用 inline 变量（var(--color-bg-active)）而非 bg-accent 类：类依赖 Tailwind
             扫描生成，曾出现在部分环境下类未输出导致「激活 Tab 无背景」的回归。inline 变量
             随主题实时切换，与 SessionTree 选中态同色。 */}
-							{active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
+							{active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 						</div>
 					</ContextMenuTrigger>
 				</TooltipTrigger>
@@ -1238,14 +1203,12 @@ function SessionTab(props: {
  * （2026-08 收敛调整：仅 Tab 上的小箭头下拉被移除，运行控制上收 ⋯ 菜单；
  *   「+」新建是高频入口，保留独立按钮。）
  */
-function NewSessionMenu(props: { targets: readonly NewSessionTarget[]; onSelect: (projectId: string) => void; onNewAcpSession?: (projectId: string, toolId: string) => void }) {
+function NewSessionMenu(props: { targets: readonly NewSessionTarget[]; onSelect: (projectId: string) => void }) {
 	const chatTargets = props.targets.filter((target) => target.isChat);
 	const projectTargets = props.targets.filter((target) => !target.isChat);
 	// ACP 入口是 opt-in：仅开关开启且登记了工具时出现；工具→项目二级选择，
 	// 只列真实项目（chat 区不是文件项目，作为 ACP 工作目录无意义）。
-	const acpEnabled = useAtomValue(acpEnabledAtom);
-	const acpTools = useAtomValue(acpToolsAtom);
-	const acpVisible = Boolean(props.onNewAcpSession) && acpEnabled && acpTools.length > 0 && projectTargets.length > 0;
+
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
@@ -1271,30 +1234,7 @@ function NewSessionMenu(props: { targets: readonly NewSessionTarget[]; onSelect:
 						</span>
 					</DropdownMenuItem>
 				))}
-				{acpVisible ? (
-					<>
-						<DropdownMenuSeparator />
-						<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t("app.newAcpSession")}</DropdownMenuLabel>
-						{acpTools.map((tool) => (
-							<DropdownMenuSub key={tool.id}>
-								<DropdownMenuSubTrigger className="gap-2">
-									<Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-									<span className="truncate">{tool.name}</span>
-								</DropdownMenuSubTrigger>
-								<DropdownMenuSubContent>
-									{projectTargets.map((target) => (
-										<DropdownMenuItem key={target.projectId} onSelect={() => props.onNewAcpSession?.(target.projectId, tool.id)}>
-											<span className="inline-flex min-w-0 items-center gap-2">
-												<Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-												<span className="truncate">{target.label}</span>
-											</span>
-										</DropdownMenuItem>
-									))}
-								</DropdownMenuSubContent>
-							</DropdownMenuSub>
-						))}
-					</>
-				) : null}
+				{null}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

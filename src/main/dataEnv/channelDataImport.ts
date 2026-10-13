@@ -25,7 +25,8 @@ export const IMPORT_PATHS: readonly string[] = [
 	"imagegen.json",
 	"security-policy.json",
 	"pet-position.json",
-	"pi-desktop/feishu*.json", // feishu 全套：受限 glob 展开（feishu.json / feishu-bindings-*.json 等）
+	"feishu/feishu*.json", // 新目录中的飞书配置/群绑定。
+	"pi-desktop/feishu*.json", // 兼容尚未迁移的历史源目录，导入后首读由 FeishuConfig 更名。
 	"imagegen/sessions/",
 	"imagegen/blobs/",
 	"builtin-extensions/",

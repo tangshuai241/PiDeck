@@ -81,7 +81,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 	return (
 		<>
 			{/* 外观：配色主题与内容区间距 */}
-			<SettingsSection title={t("settings.terminal.appearance")}>
+			<SettingsSection id="settings-section-terminal-appearance" title={t("settings.terminal.appearance")}>
 				<SettingRow
 					title={
 						<>
@@ -122,7 +122,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 
 			{/* 字体：两项都是选择款——字体取自系统字体集合，字号取预设档位；
 			    默认分别是「跟随代码字体」「跟随界面字号」（值为空 = 跟随） */}
-			<SettingsSection title={t("settings.terminal.font")}>
+			<SettingsSection id="settings-section-terminal-font" title={t("settings.terminal.font")}>
 				<SettingRow
 					anchor="terminal-font-size"
 					title={
@@ -174,7 +174,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 			</SettingsSection>
 
 			{/* 行为：滚动上限/光标/复制/关闭确认 */}
-			<SettingsSection title={t("settings.terminal.behavior")}>
+			<SettingsSection id="settings-section-terminal-behavior" title={t("settings.terminal.behavior")}>
 				<SettingRow
 					anchor="terminal-scrollback"
 					stacked
@@ -245,7 +245,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 			</SettingsSection>
 
 			{/* 启动：新终端自动执行的命令 */}
-			<SettingsSection title={t("settings.terminal.startup")}>
+			<SettingsSection id="settings-section-terminal-startup" title={t("settings.terminal.startup")}>
 				<SettingRow
 					stacked
 					title={

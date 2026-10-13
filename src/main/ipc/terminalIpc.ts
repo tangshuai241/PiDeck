@@ -47,13 +47,21 @@ export function registerTerminalIpc({ appLogger, sessionRuntimeCoordinator, term
 		});
 		return result;
 	});
+	// 入参类型校验（安全约束 2）：data 直达 pty.write（原生调用），非字符串会同步 throw 变成
+	// 渲染层 rejection；tabId 查不到本身是静默语义，一并挡在边界。无效载荷属于渲染层 bug，
+	// 与 manager 侧「迟到输入静默忽略」保持同一哲学：不 throw、不重试。
 	ipcMain.handle(ipcChannels.terminalInput, (_event, tabId: string, data: string) => {
+		if (typeof tabId !== "string" || typeof data !== "string") return;
 		terminalManager.input(tabId, data);
 	});
+	// cols/rows 直达原生 pty.resize：非有限数字（NaN/Infinity/字符串）会以 NaN 落到 ConPTY，
+	// 行为未定义；下限钳制在 manager 侧已有（Math.max(2/1)），这里只挡类型。
 	ipcMain.handle(ipcChannels.terminalResize, (_event, tabId: string, cols: number, rows: number) => {
+		if (typeof tabId !== "string" || !Number.isFinite(cols) || !Number.isFinite(rows)) return;
 		terminalManager.resize(tabId, cols, rows);
 	});
 	ipcMain.handle(ipcChannels.terminalClose, (_event, tabId: string) => {
+		if (typeof tabId !== "string") return;
 		terminalManager.close(tabId);
 		void appLogger.info("terminal", "Terminal closed", { tabId });
 	});

@@ -72,13 +72,13 @@ test("隐藏簇首项时分割线顺延到该簇下一个可见项", () => {
 	assert.equal(ids.includes("im"), false);
 	assert.equal(visible.find((e) => e.id === "pet").dividerBefore, true);
 	// 其余分割线位置不受影响
-	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["pet", "web", "dev"]);
+	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["pet", "editors", "dev"]);
 });
 
 test("整簇隐藏时该簇分割线消失，不留连续两条线", () => {
-	const visible = resolveVisibleSettingsTabs(["im", "pet", "vision", "imagegen", "acp", "hostplugins"], new Set());
+	const visible = resolveVisibleSettingsTabs(["im", "pet", "vision", "imagegen", "videogen", "hostplugins"], new Set());
 	// 全簇隐藏后不残留分割线；仅隐部分成员时，分割线顺延到簇内下一个可见项（上一条测试）
-	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["web", "dev"]);
+	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["editors", "dev"]);
 });
 
 test("revealedTabs 让隐藏 tab 临时出现在侧栏（深链 / 搜索找回）", () => {

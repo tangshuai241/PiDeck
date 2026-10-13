@@ -32,6 +32,38 @@ function loadHookModule() {
 
 const { computeVisibleModes } = loadHookModule();
 
+// 底栏触发器 ghost 外观（2026-10 用户反馈）：shadcn SelectTrigger 基底自带 bg-bg-input，
+// 底栏按钮一旦不显式 bg-transparent 就会被染成实心块，与同排「+」等 ghost 按钮不齐；
+// 模式选择器还自带一个 chevron（图标+箭头并排 → 图标偏左、视觉多一个小按钮）。
+const COMPOSER_TRIGGER_FILES = ["src/renderer/src/components/session/ComposerComponents.tsx", "src/renderer/src/components/session/ComposerImageGenOptions.tsx"];
+
+function composerSelectTriggerClassNames() {
+	const result = [];
+	for (const file of COMPOSER_TRIGGER_FILES) {
+		const source = readFileSync(file, "utf8");
+		// 空白容忍：[^>]* 跨行匹配属性，避免行序/缩进变化让断言失效。
+		for (const match of source.matchAll(/<SelectTrigger\b[^>]*className="([^"]*)"/g)) {
+			if (match[1].includes("composer-bar-btn")) result.push([file, match[1]]);
+		}
+	}
+	return result;
+}
+
+test("底栏 SelectTrigger 保持 ghost 透明底（不被 shadcn 基底的实心底染色）", () => {
+	const triggers = composerSelectTriggerClassNames();
+	assert.ok(triggers.length >= 3, `应扫到底栏触发器（mode/backend/imagegen），实际 ${triggers.length}`);
+	for (const [file, className] of triggers) {
+		assert.ok(className.includes("bg-transparent"), `${file} 的底栏 SelectTrigger 必须显式 bg-transparent：${className}`);
+	}
+});
+
+test("模式选择器隐藏自带 chevron，与后端选择器/「+」同族", () => {
+	const composer = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
+	const modeTrigger = composer.match(/"composer-bar-btn[\s]+mode[^"]*"/)?.[0];
+	assert.ok(modeTrigger, "模式选择器应带 composer-bar-btn mode 语义 class（e2e 定位依赖）");
+	assert.ok(modeTrigger.includes("[&_[data-slot='select-icon']]:hidden"), `模式选择器需隐藏自带 chevron：${modeTrigger}`);
+});
+
 test("pi 全扩展可用：菜单只有 普通/目标/规划，不再出现生图", () => {
 	const result = [...computeVisibleModes({ isImageGen: false, planModeAvailable: true, goalModeAvailable: true })];
 	assert.deepEqual(result, ["normal", "goal", "plan"]);

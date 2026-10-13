@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { atom, createStore } from "jotai/vanilla";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
+import { sessionRecord } from "./helpers/sessionSendHarness.mjs";
 
 /** Production queue hook and atoms; only React mounting is replaced for deterministic enqueue/cleanup checks. */
 function harness() {
@@ -25,6 +26,8 @@ function harness() {
 		},
 	});
 	Object.assign(atoms, load("src/renderer/src/atoms/session-atoms.ts"), load("src/renderer/src/atoms/composer-atoms.ts"), load("src/renderer/src/atoms/alignment-atoms.ts"));
+	// The shared queue now requires a catalog owner; confirmation barriers still use the production atoms.
+	for (const id of ["s1", "s2"]) store.set(atoms.upsertSessionAtom, sessionRecord(id));
 	const { useQueuedPrompt } = load("src/renderer/src/hooks/useQueuedPrompt.ts");
 	const hook = useQueuedPrompt({
 		store,

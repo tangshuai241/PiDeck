@@ -16,12 +16,12 @@ const NAME_ERROR_KEYS = {
 	duplicate: "config.mcp.template.name.duplicate",
 } as const;
 
-/** 单个凭据字段的落点说明：让用户看到值最终写到哪个字段（Bearer 头 / 环境变量 / URL 参数 / 命令行参数）。 */
+/** 单个凭据字段的落点说明：让用户看到值最终写到哪个字段（Bearer 头 / 裸 token 头 / 环境变量 / URL 参数 / 命令行参数）。 */
 function credentialTargetText(credential: McpCatalogCredential): string {
 	if (credential.kind === "env") return t("config.mcp.catalog.credentialEnv", { key: credential.envKey });
 	if (credential.kind === "url-query") return t("config.mcp.catalog.credentialUrlQuery", { param: credential.param });
 	if (credential.kind === "args") return t("config.mcp.catalog.credentialArgs", { flag: credential.flag });
-	return t("config.mcp.catalog.credentialHeader");
+	return t(credential.scheme ? "config.mcp.catalog.credentialHeader" : "config.mcp.catalog.credentialHeaderRaw", { header: credential.header });
 }
 
 /** 目录服务表单：字段由条目的凭据声明驱动——none/oauth 只需名称，其余按 credentials 渲染多个密钥框。 */

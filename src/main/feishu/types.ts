@@ -79,7 +79,7 @@ export type LarkSDK = {
 	WSClient: new (
 		opts: Record<string, unknown>,
 	) => {
-		start: (opts: Record<string, unknown>) => void;
+		start: (opts: Record<string, unknown>) => Promise<void>;
 		stop?: () => void;
 	};
 	EventDispatcher: new (

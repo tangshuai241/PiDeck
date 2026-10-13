@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { ElectronApplication, Page } from "@playwright/test";
+import { openSettings } from "./open-session";
 
 /**
  * 供应商用量链路 E2E（cc-switch 风格统一显示）：
@@ -65,7 +66,7 @@ async function stubUsageIpc(app: ElectronApplication, seed: UsageStubSeed): Prom
 async function openModelsTab(window: Page) {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 	// 侧栏齿轮打开设置窗口 → 顶部「配置管理」分区 → 左栏「模型」
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	await window.getByRole("tab", { name: "配置管理" }).click();
 	const modal = window.locator(".config-layout");
 	await expect(modal).toBeVisible({ timeout: 10_000 });
@@ -265,7 +266,7 @@ test("usage: auth tab shows provider balance inline", async ({ app, window }) =>
 	});
 
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	await window.getByRole("tab", { name: "配置管理" }).click();
 	const modal = window.locator(".config-layout");
 	await expect(modal).toBeVisible({ timeout: 10_000 });

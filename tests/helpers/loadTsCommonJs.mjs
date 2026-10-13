@@ -77,6 +77,7 @@ export function loadTsCommonJs(filePath, options = {}) {
 				TextDecoder,
 				TextEncoder,
 				AbortController,
+				AbortSignal,
 				setTimeout,
 				clearTimeout,
 				setInterval,

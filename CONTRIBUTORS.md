@@ -21,16 +21,20 @@
 - **r0y1z2** ([@r0y1z2](https://github.com/r0y1z2)) — 项目会话置顶、输入框安全语音转写 (#177, #176)、Windows 资源管理器右键「小任务」紧凑窗口 (#243)
 - **sgafxh** ([@sgafxh](https://github.com/sgafxh)) — 请求体超限后的会话恢复、修复 Windows 启动 pi 闪 CMD 窗口 (#188, #180)
 - **lerrorgk** ([@lerrorgk](https://github.com/lerrorgk)) — 修复 nicobailon pi-subagents 异步派发误标完成，面板条目补齐全任务描述 (#206)
-- **juzijun233** ([@juzijun233](https://github.com/juzijun233)) — 稳定性与安全加固系列：主进程登录 shell PATH 探测改异步预热（消除启动冻结）、停止后迟到流式事件按无 runtime 拒绝、事件载荷补齐 sessionId + runtimeGeneration、主进程直发渲染层收敛到已订阅通道白名单、超大 diff 截断、PiRpcClient 行缓冲上限、Git 写操作校验 commit hash 与 reset 模式、渲染层按会话订阅隔离（分屏互不牵连）、webview 死属性与多余 any 断言清理
+- **juzijun233** ([@juzijun233](https://github.com/juzijun233)) — 稳定性与安全加固系列：主进程登录 shell PATH 探测改异步预热（消除启动冻结）、停止后迟到流式事件按无 runtime 拒绝、事件载荷补齐 sessionId + runtimeGeneration、主进程直发渲染层收敛到已订阅通道白名单、超大 diff 截断、PiRpcClient 行缓冲上限、Git 写操作校验 commit hash 与 reset 模式、渲染层按会话订阅隔离（分屏互不牵连）、webview 死属性与多余 any 断言清理、通道切换不再提供旧开发版降级的版本守卫（版本比较补全 semver 预发布语义）(#336)
 - **xiaYuTian11** ([@xiaYuTian11](https://github.com/xiaYuTian11)) — 侧栏项目树显示当前 Git 分支 (#232)、时间线滚动抖动与切会话跳顶跳底修复 (#224)、会话 Tab 宽度上限与字号调整 (#226)、技能重命名按类型分流以免搬走技能根目录 (#227)
 - **Q-xuan** ([@Q-xuan](https://github.com/Q-xuan)) — 行内代码里的文件引用重新可点 (#228)、修复 LaTeX 括号公式渲染 (#251)
 - **cmyk-xing** ([@cmyk-xing](https://github.com/cmyk-xing)) — 外观设置新增「功能模块」显示开关，按需收起飞书 / 桌宠 / 视觉桥 / 生图 / Web 服务 / Git / 用量统计 / 进程监控 / DSH 的 UI 入口 (#254)、修复引导页发送创建的新会话漏出历史旧消息 (#256)、启动时恢复上次窗口位置与最大化状态，不再一律居中 (#259)
+
+- **EEEEEEEEdison** ([@EEEEEEEEdison](https://github.com/EEEEEEEEdison)) — 右侧边栏上下分区与常驻会话状态面板 (#334)、TPS 测量模式（流式 / 端到端）(#327)
 
 以及所有提交 Issue、反馈建议和帮助推广的用户。
 
 ## 💖 特别支持
 
 - **微时佬友** ([@weishiair](https://github.com/weishiair)) — 提供 Grok 模型服务，用于 PiDeck 的软件开发 🎉
+- **橙子** — 提供订阅服务，用于 PiDeck 的软件开发 🎉
+- **罪** — 提供模型服务，用于 PiDeck 的软件开发 🎉
 
 ---
 

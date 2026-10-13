@@ -32,7 +32,7 @@ test("DSH 添加页走真实 host 发现/保存，校验失败保留草稿，顶
 	try {
 		await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 25_000 });
 		const config = window.locator(".settings-modal");
-		if (!(await config.isVisible())) await window.getByRole("button", { name: "设置", exact: true }).click();
+		if (!(await config.isVisible())) await window.getByRole("button", { name: /^设置/ }).click();
 		await expect(config).toBeVisible();
 		await config.getByRole("tab", { name: "配置管理", exact: true }).click();
 		await config.getByRole("tab", { name: "DSH 配置管理", exact: true }).click();

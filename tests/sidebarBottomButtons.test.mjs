@@ -16,9 +16,9 @@ const sidebar = readFileSync("src/renderer/src/components/sidebar/SidebarContent
 test("v3 sidebar bottom actions render inside a full-width beUI Dock", () => {
 	assert.match(sidebar, /import \{ Dock, DockItem \} from "\.\.\/motion\/dock";/);
 	assert.match(sidebar, /<Dock size=\{32\} className="w-full justify-between">/);
-	// 4 项 = 3 个动作（设置/反馈/主题）+ 1 个公告中心入口。官网按钮已并入侧栏顶部的
+	// 3 项 = 3 个动作（设置/反馈/主题）+ 1 个公告中心入口。官网按钮已并入侧栏顶部的
 	// AboutPopover（关于弹框，faf93859），不再占用 dock 空间。
-	assert.equal((sidebar.match(/<DockItem>/g) || []).length, 4);
+	assert.equal((sidebar.match(/<DockItem>/g) || []).length, 3);
 });
 
 test("dock keeps the three actions and delegates the homepage link to AboutPopover", () => {

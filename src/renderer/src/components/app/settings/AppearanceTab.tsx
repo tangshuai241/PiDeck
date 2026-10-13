@@ -12,12 +12,11 @@ import { Input } from "../../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { BrandingSection } from "./BrandingSection";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { ComposerFeaturesSection } from "./ComposerFeaturesSection";
 import { CustomThemeSection } from "./CustomThemeSection";
 import { Check, Minus, Plus } from "lucide-react";
-import { PiTuiLogoMark } from "../PiTuiLogo";
-import { resolveLogoStyle } from "../piTuiLogoData";
 import { cn } from "@/lib/utils";
 
 type AppearanceTabProps = {
@@ -72,7 +71,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 	return (
 		<>
 			{/* 主题与背景 */}
-			<SettingsSection title={t("settings.sectionThemeBackground")}>
+			<SettingsSection id="settings-section-appearance-theme-background" title={t("settings.sectionThemeBackground")}>
 				<SettingRow
 					anchor="appearance-navigation-mode"
 					title={
@@ -115,40 +114,8 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						</SelectContent>
 					</Select>
 				</SettingRow>
-				{/* Logo 风格：classic = PiDeck 现状四块拼图；pi-tui = pi 官方 TUI 三色像素标。保存后所有 logo 落点即时切换（含下次启动的开屏画面）。 */}
-				<SettingRow
-					title={
-						<>
-							<span>{t("settings.logoStyle")}</span>
-							<DirtyMarker dirty={isDirty("logoStyle")} label={t("settings.logoStyle")} />
-						</>
-					}
-					description={t("settings.logoStyleDesc")}
-				>
-					<Select value={resolveLogoStyle(draft.logoStyle)} onValueChange={(value) => updateDraft({ logoStyle: value as AppSettings["logoStyle"] })}>
-						<SelectTrigger className="w-44">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="classic">
-								<span className="flex items-center gap-2">
-									{/* 经典银灰标需要黑底承托，不能直接放在浅色菜单上；保留完整 π 轮廓与镂空。 */}
-									<svg viewBox="140 140 520 520" width="16" height="16" className="size-4 shrink-0 rounded-xs bg-black p-px" aria-hidden="true" shapeRendering="crispEdges">
-										<path fill="#f4f4f5" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
-										<path fill="#a7a8ab" d="M517.36 400H634.72V634.72H517.36Z" />
-									</svg>
-									<span>{t("settings.logoStyleClassic")}</span>
-								</span>
-							</SelectItem>
-							<SelectItem value="pi-tui">
-								<span className="flex items-center gap-2">
-									<PiTuiLogoMark size={16} />
-									<span>{t("settings.logoStylePiTui")}</span>
-								</span>
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</SettingRow>
+				{/* Logo 风格 / 自定义 logo 图 / 应用显示名称：品牌区专属几行（含选图异步态），拆到 BrandingSection 控制本文件体量 */}
+				<BrandingSection draft={draft} updateDraft={updateDraft} isDirty={isDirty} />
 				{draft.theme === "schedule" && (
 					<SettingRow
 						title={
@@ -261,7 +228,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 字体 */}
-			<SettingsSection title={t("settings.sectionFonts")}>
+			<SettingsSection id="settings-section-appearance-fonts" title={t("settings.sectionFonts")}>
 				{/* 窗口缩放：与字号设置同分组，避免「字变大」两个入口分散在不同分组；
            提示文案说明其与字号档位的区别（缩放=整体，字号=仅文字）。 */}
 				<SettingRow
@@ -485,7 +452,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 聊天排版 */}
-			<SettingsSection title={t("settings.sectionChatLayout")}>
+			<SettingsSection id="settings-section-appearance-chat-layout" title={t("settings.sectionChatLayout")}>
 				<SettingRow anchor="appearance-content-width" title={<span>{t("settings.contentWidthPct")}</span>} description={t("settings.contentWidthPctDesc")}>
 					<div className="flex w-full items-center gap-2">
 						<input type="range" min="60" max="100" step="1" value={draft.chatContentWidthPct} onChange={(event) => updateDraft({ chatContentWidthPct: parseInt(event.target.value) })} className="min-w-0 flex-1 accent-[var(--color-accent)]" aria-label={t("settings.contentWidthPct")} />
@@ -516,7 +483,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 窗口样式 */}
-			<SettingsSection title={t("settings.sectionWindowStyle")}>
+			<SettingsSection id="settings-section-appearance-window-style" title={t("settings.sectionWindowStyle")}>
 				{/* 会话 Tab 宽度上限：仅封顶不设最小宽，Tab 仍按内容收缩；拖动时先本地夹取预览，保存时主进程再归一化。 */}
 				<SettingRow anchor="appearance-session-tab-width" title={<span>{t("settings.sessionTabMaxWidth")}</span>} description={t("settings.sessionTabMaxWidthDesc")}>
 					<div className="flex w-full items-center gap-2">

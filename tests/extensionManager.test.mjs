@@ -568,3 +568,68 @@ test("list(true) 的 latestVersion 来自 registry 快路解析值，请求带 c
 		await rm(home, { recursive: true, force: true });
 	}
 });
+
+/**
+ * 回归（2026-10 用户反馈）：npm registry 不可达、npm view 回退又被超时杀掉时，
+ * 扩展行必须仍然显示本地已装版本。旧实现把「读 package.json」与「查 registry」
+ * 串在同一个 Promise.all 里，任一失败整行只剩「当前：- · 最新：-」，用户看到的就是
+ * 「检查扩展版本失败」+ 两个空值。
+ */
+test("registry 快路与 npm view 回退都失败时仍显示本地已装版本", async () => {
+	const home = await mkdtemp(join(tmpdir(), "pideck-extmgr-version-degrade-"));
+	try {
+		// 真实 installed package.json：degrade 用例靠它证明「当前」列不依赖网络。
+		const installedDir = join(home, "npm", "node_modules", "context-mode");
+		await mkdir(installedDir, { recursive: true });
+		await writeFile(join(installedDir, "package.json"), JSON.stringify({ name: "context-mode", version: "1.0.0" }), "utf8");
+		const raw = ["User packages:", "  npm:context-mode", `    ${installedDir}`].join("\n");
+
+		const npmCalls = [];
+		const load = createTsSandbox({
+			stubs: {
+				"node:os": { homedir: () => home },
+				"node:child_process": {
+					execFile: (command, args, _options, callback) => {
+						npmCalls.push({ command: String(command), args: [...args] });
+						// 基址解析成功（快路真的发一次 HTTP）；npm view 以「超时被杀」形态失败：
+						// stderr 为空、只有 error.message，正是真实 registry 挂掉时的子进程结果。
+						if (args.includes("registry")) {
+							queueMicrotask(() => callback(null, "https://registry.npmjs.org/\n", ""));
+							return;
+						}
+						const error = new Error("Command failed: npm view context-mode version");
+						error.killed = true;
+						queueMicrotask(() => callback(error, "", ""));
+					},
+				},
+				"../fs/trash": { trashPath: (path) => rm(path, { recursive: true, force: true }) },
+				"../logging/sharedLogger": { getAppLogger: () => null },
+				"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+			},
+			globals: {
+				fetch: () => {
+					throw new Error("fetch failed: ECONNRESET");
+				},
+			},
+		});
+		const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
+		const manager = new ExtensionManager({ createInvocation: (command, args) => ({ command, args, shell: false }), createProcessEnv: () => ({}) }, () => ({}));
+		manager.runPi = async () => raw;
+		manager.scanLocalExtensions = async () => LOCAL_SCAN_ROWS;
+
+		const result = await manager.list(true);
+		const row = result.extensions.find((extension) => extension.source === "npm:context-mode");
+		assert.ok(row, "npm:context-mode 行必须出现在列表里");
+		assert.equal(row.currentVersion, "1.0.0", "网络失败不得把本地已装版本一起吞掉");
+		assert.equal(row.latestVersion, undefined);
+		assert.equal(row.hasUpdate, false, "最新版本未知时不得凭猜测报有更新");
+		assert.ok(row.updateError, "最新版本查不到必须留下可见提示");
+		assert.deepEqual(
+			npmCalls.filter((call) => !call.args.includes("registry")).map((call) => call.args.join(" ")),
+			["view context-mode version"],
+			"快路失败后仍必须回退一次 npm view",
+		);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});

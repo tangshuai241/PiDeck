@@ -522,3 +522,74 @@ test("a summary-carried authoritative name upgrades a scanned weak fallback titl
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+// ── 2026-10-11 复现：复制/分支命令写入的标题必须压过扫描竞态的兜底名 ──
+
+/**
+ * 现场：复制一个 12MB 会话。新文件由 clone 建立，扫描在 PiDeck 写入 (fork) 名之前
+ * 先索引了它 → 标题锁成 fallback（首条消息正文）；rename 把权威名追加在文件尾部，
+ * 但大文件只读头/尾 64KB 窗口，后续消息很快把它推出尾窗 → 升级永远不触发，
+ * 侧栏永久显示「首条消息正文」，也看不到 (fork)。
+ *
+ * 契约：fork/clone/copy 命令层写入的标题（titleAuthority: "command"）在注册时
+ * 覆盖未确认（undefined）与内容派生（fallback）的标题，落 manual 终态。
+ */
+test("a fork/copy command title overrides a raced scanned fallback title", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-command-"));
+	try {
+		// 第 0 步：扫描抢在改名落盘前索引新文件 → 弱兜底锁成 fallback（现场形态）。
+		const fetcher = async () => ({ name: "我老师问我能不能做个PPT，我给大二学生讲下pi", valid: true, nameFromSessionInfo: false });
+		const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+		await catalog.load();
+		const [raced] = await catalog.mergeScanned("project-1", [lightSummary()]);
+		assert.equal((await readEntry(dir, raced.id)).titleOrigin, "fallback");
+
+		// 第 1 步：命令层注册产物（改名已物理写入文件），携带 (fork) 权威名。
+		const registered = await catalog.ensureRuntimeTarget({
+			projectId: "project-1",
+			title: "Pi 机理与应用：90分钟课程规划 (fork)",
+			source: "pi",
+			environment: "native",
+			filePath: "C:/sessions/2026-08-22T04-22-29-162Z_abc.jsonl",
+			forked: true,
+			titleAuthority: "command",
+		});
+		assert.equal(registered.id, raced.id, "同一文件必须命中同一 catalog 条目");
+		assert.equal(registered.title, "Pi 机理与应用：90分钟课程规划 (fork)", "命令写的权威名必须压过扫描兜底");
+		const onDisk = await readEntry(dir, raced.id);
+		assert.equal(onDisk.titleOrigin, "manual", "命令写入的标题落 manual 终态");
+		assert.equal(onDisk.forked, true);
+
+		// 第 2 步：终态后，迟到的弱兜底扫描不得把它改回去。
+		const [again] = await catalog.mergeScanned("project-1", [lightSummary({ updatedAt: 2000 })]);
+		assert.equal(again.title, "Pi 机理与应用：90分钟课程规划 (fork)");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+// 反例（防误伤）：用户改名是终态，命令层标题不得覆盖它。
+test("a command title never overrides a user-owned manual title", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-command-manual-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const [scanned] = await catalog.mergeScanned("project-1", [lightSummary({ name: "用户自己改的名字", nameFromSessionInfo: true })]);
+		assert.equal((await readEntry(dir, scanned.id)).titleOrigin, "manual");
+
+		const registered = await catalog.ensureRuntimeTarget({
+			projectId: "project-1",
+			title: "用户自己改的名字 (fork)",
+			source: "pi",
+			environment: "native",
+			filePath: "C:/sessions/2026-08-22T04-22-29-162Z_abc.jsonl",
+			forked: true,
+			titleAuthority: "command",
+		});
+		assert.equal(registered.title, "用户自己改的名字", "manual 是终态，命令层不得改写");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

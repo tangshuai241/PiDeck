@@ -198,3 +198,30 @@ test("项目 prompt 目录 junction 指向项目外时不读取或写入", async
 		assert.equal(readFileSync(join(outsideDir, "secret.md"), "utf8").includes("secret"), true);
 	});
 });
+
+test("list 扫描只读文件头：超大 .md 的 frontmatter 元数据仍可解析（不整文件进内存）", async () => {
+	await withTemporaryHome(async (home) => {
+		const { PromptManager } = loadPromptManagerModule();
+		const manager = new PromptManager(home);
+		const promptsDir = join(home, ".pi", "agent", "prompts");
+		await mkdir(promptsDir, { recursive: true });
+		// 200KB 模板：frontmatter 在头部，正文极长——扫描只需头部即可解析出描述
+		const body = "y".repeat(200 * 1024);
+		await writeFile(join(promptsDir, "huge.md"), `---\ndescription: huge template meta\n---\n\n${body}`, "utf8");
+		const { templates } = await manager.list();
+		const huge = templates.find((t) => t.name === "huge");
+		assert.ok(huge, "超大模板仍应出现在列表");
+		assert.equal(huge.description, "huge template meta");
+	});
+});
+
+test("扫描读取上界契约：readFileHead 句柄定位读 + 常量上界", () => {
+	const source = readFileSync("src/main/prompts/PromptManager.ts", "utf8");
+	assert.match(source, /TEMPLATE_META_MAX_BYTES = 64 \* 1024/, "应有 64KB 元数据读取上界常量");
+	assert.match(source, /handle\.read\(buf, 0, TEMPLATE_META_MAX_BYTES, 0\)/, "句柄定位读文件头");
+	// 两处列表扫描都不得再用全量 readFile 读模板正文
+	const listScan = source.slice(source.indexOf("async list()"), source.indexOf("async listByProject"));
+	const projectScan = source.slice(source.indexOf("async listByProject"));
+	assert.ok(!listScan.includes('readFile(fullPath, "utf8")'), "list() 全局扫描不得全量读文件");
+	assert.ok(!projectScan.slice(0, 2500).includes('readFile(fullPath, "utf8")'), "listByProject() 项目扫描不得全量读文件");
+});

@@ -63,3 +63,16 @@ test("git:fetch skips non-repositories instead of throwing", () => {
 	assert.match(fetchFn, /return;/);
 	assert.match(gitIpc, /if \(!\(await gitService\.isGitRepo\(cwd\)\)\) return;/);
 });
+
+test("QuickGen spawn 必须挂 error 监听（ENOENT 无监听会崩主进程）且清理后挂起请求能结算", () => {
+	const spawnAt = gitIpc.indexOf("const childProcess = spawn(");
+	const errorListenerAt = gitIpc.indexOf('childProcess.on("error"');
+	assert.ok(spawnAt > 0, "QuickGen spawn 调用存在");
+	assert.ok(errorListenerAt > spawnAt, "spawn 后必须挂 error 监听");
+	// 监听必须先于首个 RPC 请求（set_model）：否则 ENOENT 请求挂起期间无人清理
+	assert.ok(errorListenerAt < gitIpc.indexOf("await genRpcClient.request("), "error 监听必须在首个 RPC 请求之前注册");
+	assert.match(gitIpc, /if \(genProcess === childProcess\) stopGenProcess\(\);/, "只清理当前实例，旧进程的迟到 error 不得抹掉新进程全局态");
+	// 兑底链完整性：genBusy 复位靠 quickGenerate 的 finally，挂起请求靠 PiRpcClient.close 拒绝
+	const quickGen = gitIpc.slice(gitIpc.indexOf("async function quickGenerate"));
+	assert.match(quickGen, /finally\s*\{[\s\S]*?genBusy = false/, "genBusy 必须在 finally 复位（spawn 失败不锁死后续生成）");
+});

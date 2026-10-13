@@ -20,7 +20,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { cpSync } from "node:fs";
+import { copyFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -145,7 +145,9 @@ export function generateContentManifest({ domain = null, check = false, setVersi
 			.sort((a, b) => a.localeCompare(b));
 		if (!sources.length) throw new Error(`no template sources found in ${config.sourceDir}`);
 		for (const name of sources) {
-			cpSync(join(config.sourceDir, name), join(config.contentDir, name));
+			// 这里只同步单个 Markdown 文件。直接覆盖避免 cpSync 先 unlink 目标，
+			// Windows 上允许读写但禁止删除的现有句柄不应阻断模板刷新。
+			copyFileSync(join(config.sourceDir, name), join(config.contentDir, name));
 		}
 	}
 

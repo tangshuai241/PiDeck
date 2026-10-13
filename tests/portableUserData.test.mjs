@@ -157,8 +157,8 @@ test("resolveChannelDevDataDir：便携版 dev 独立目录落 exe 同级 data-c
 	assert.equal(resolveChannelDevDataDir({ appDataDir: "C:\\Users\\me\\AppData\\Roaming", portableExeDir: "D:\\tools\\PiDeckDev" }), join("D:\\tools\\PiDeckDev", "data-channel-dev"));
 });
 
-test("resolveChannelDevDataDir：安装版 dev 独立目录落 %APPDATA%/pi-desktop-channel-dev", () => {
-	assert.equal(resolveChannelDevDataDir({ appDataDir: "C:\\Users\\me\\AppData\\Roaming" }), join("C:\\Users\\me\\AppData\\Roaming", "pi-desktop-channel-dev"));
+test("resolveChannelDevDataDir：安装版 dev 独立目录落 %APPDATA%/PiDeck-channel-dev", () => {
+	assert.equal(resolveChannelDevDataDir({ appDataDir: "C:\\Users\\me\\AppData\\Roaming" }), join("C:\\Users\\me\\AppData\\Roaming", "PiDeck-channel-dev"));
 });
 
 test("resolveAppUserDataDir：dev 打包态便携版 + 决策 channel-dev → exe 同级 data-channel-dev/", () => {

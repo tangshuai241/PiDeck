@@ -134,7 +134,21 @@ const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: b
 	}
 	return (
 		<div className="rpc-log-entry-wrap">
-			<div className={`rpc-log-entry ${directionClass}`} onClick={() => onToggle(log)} title={log.summary}>
+			<div
+				className={`rpc-log-entry ${directionClass}`}
+				/* 展开查看完整 payload 的唯一入口，键盘必须可达；开发者面板同样遵守模态/行交互惯例 */
+				role="button"
+				tabIndex={0}
+				aria-expanded={expanded}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						onToggle(log);
+					}
+				}}
+				onClick={() => onToggle(log)}
+				title={log.summary}
+			>
 				<time>
 					{new Date(log.time).toLocaleTimeString(undefined, {
 						hour: "2-digit",

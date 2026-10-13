@@ -52,6 +52,9 @@ export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
+/** 「停止响应」后排队消息抑制自动投递的会话集合（useQueuedPrompt 的 UI 投影：
+ *  逻辑真值在该 hook 的 ref 里，这里只供队列面板显示「已暂停自动发送」提示，避免 toast 瞬时易逝后无从得知队列不会自动发）。 */
+export const queueDrainSuppressedByIdAtom = atom<Record<string, true>>({});
 
 /**
  * 生成进行中切换模型：pi 不支持运行中 set_model，只写入会话记录；
@@ -249,6 +252,8 @@ export const promoteSessionComposerStateAtom = atom(null, (get, set, input: { fr
 	};
 	set(sessionDraftByIdAtom, move(get(sessionDraftByIdAtom)));
 	set(sessionAttachmentsByIdAtom, move(get(sessionAttachmentsByIdAtom)));
+	// 草稿中的引用 token 只是指针；首次提升与失败回退都必须携带全文快照。
+	set(sessionQuotesByIdAtom, move(get(sessionQuotesByIdAtom)));
 	set(sessionPasteFilesByIdAtom, move(get(sessionPasteFilesByIdAtom)));
 	set(sessionComposerModeByIdAtom, move(get(sessionComposerModeByIdAtom)));
 	set(sessionSendStateByIdAtom, move(get(sessionSendStateByIdAtom)));
@@ -270,6 +275,10 @@ export const removeSessionComposerStateAtom = atom(null, (get, set, sessionId: s
 	const sendStates = { ...get(sessionSendStateByIdAtom) };
 	delete sendStates[sessionId];
 	set(sessionSendStateByIdAtom, sendStates);
+	const quotes = { ...get(sessionQuotesByIdAtom) };
+	delete quotes[sessionId];
+	// 引用快照可能含大段全文（引用仓拷贝），漏清会让旧会话的全文永久驻留内存
+	set(sessionQuotesByIdAtom, quotes);
 	const modelPending = { ...get(modelPendingByIdAtom) };
 	delete modelPending[sessionId];
 	set(modelPendingByIdAtom, modelPending);

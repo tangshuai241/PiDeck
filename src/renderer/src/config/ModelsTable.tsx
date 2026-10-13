@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Brain, Coins, EyeOff, Fingerprint, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Brain, Coins, Eye, EyeOff, Fingerprint, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { t } from "../i18n";
-import { MODEL_THINKING_LEVELS, orderModelThinkingLevels } from "../../../shared/modelThinkingLevels";
+import { MODEL_THINKING_LEVELS, enabledModelThinkingLevels, formatModelThinkingLevelsSummary, modelThinkingLevelState, orderModelThinkingLevels } from "../../../shared/modelThinkingLevels";
+import type { ModelThinkingLevel } from "../../../shared/modelThinkingLevels";
 import type { ModelItem } from "./configTypes";
-import { ConfigSelect, ConfigComboboxInput, openDocsInSystemBrowser } from "./ConfigShared";
+import { ConfigComboboxInput, ConfigSelect, openDocsInSystemBrowser } from "./ConfigShared";
 import { getUserAgentOptions } from "./userAgentPresets";
 import { emptyTierDraft, normalizeTiers, toTierDrafts, type CostTierDraft } from "./modelCostTiers";
 import { countSelectedModelIndexes, getModelSelectionState } from "./modelBatchSelection";
@@ -34,7 +35,11 @@ export type ModelsTableProps = {
 	onUpdateModelUserAgent?: (index: number, value: string) => void;
 	/** 读取该行当前的逐模型 UA 覆盖（可选；与 onUpdateModelUserAgent 成对出现才渲染操作列的 UA 按钮）。 */
 	getModelUserAgentOverride?: (index: number) => string;
-	onUpdateModelThinkingLevel: (index: number, key: "xhigh" | "max", value: "" | "xhigh" | "max") => void;
+	/**
+	 * 勾选 / 取消某思考档位（写模型自己的 thinkingLevelMap，见 withModelThinkingLevelEnabled）：
+	 * 勾选任意档位同时把模型标成 reasoning；xhigh/max 必须在 map 里显式给值才存在。
+	 */
+	onUpdateModelThinkingLevel: (index: number, level: ModelThinkingLevel, enabled: boolean) => void;
 	/**
 	 * 逐模型「默认思考档位」（可选）：写入 pi settings.json 的 modelThinkingLevels（键 `provider/modelId`），
 	 * 新建会话与运行中切模型时由 pi 按「显式选择 > 每模型默认 > 全局默认」取值再按能力收敛。
@@ -45,9 +50,14 @@ export type ModelsTableProps = {
 	getModelThinkingLevelDefault?: (index: number) => string;
 	/**
 	 * 读取该行模型 Pi 已确认的可用思考档位（可选）：undefined = 未知（展示「未知」，仍允许手动配置），
-	 * 空数组 = Pi 的权威空结果（不可编辑默认档位）。
+	 * 空数组 = Pi 的权威空结果。它只作为只读参考展示（草稿勾选态由 thinkingLevelMap 实时推导）。
 	 */
 	getModelAvailableThinkingLevels?: (index: number) => readonly string[] | undefined;
+	/**
+	 * 该行还没有可探测的 Pi 数据（新增供应商页的 provider 未落盘）：探测行显示
+	 * 「保存后由 Pi 探测」而不是「未知」。默认 false（已保存模型都该有探测结果）。
+	 */
+	thinkingLevelsProbePending?: boolean;
 	onDeleteModel: (index: number) => void;
 	/** 重置为自适应（显式刷 endpoint），可选：不传则不渲染重置按钮。 */
 	onResetModel?: (index: number) => void;
@@ -62,15 +72,19 @@ export type ModelsTableProps = {
 	selectedIndexes?: ReadonlySet<number>;
 	onToggleSelectIndex?: (index: number) => void;
 	onToggleAll?: (total: number) => void;
-	onDeleteSelected?: (indexes: number[]) => void;
 	/** 聚焦新添加行的 ID 输入框（可选）。 */
 	focusModelKey?: string | null;
 	/** 聚焦完成后清理（可选；对应 ModelsTab 的 pendingModelFocusKey 清空）。 */
 	onFocusHandled?: () => void;
 	/** 上移/下移模型（改变该 provider 下模型的实际顺序） */
 	onMoveModel?: (index: number, direction: "up" | "down") => void;
-	/** 隐藏模型回调（加入 hiddenModels 列表） */
+	/** 隐藏模型回调（切换 hiddenModels 列表） */
 	onHideModel?: (index: number) => void;
+	/**
+	 * 读取该行是否已隐藏（可选，与 onHideModel 成对）：按钮据此显示成「已隐藏/可恢复」。
+	 * 卡片与编辑页的隐藏区在别处，行内只有这个按钮能看出状态——没有回显就成了盲点。
+	 */
+	getModelHidden?: (index: number) => boolean;
 };
 
 /**
@@ -146,10 +160,12 @@ export function ModelsTable(props: ModelsTableProps) {
 								</Label>
 							</TableHead>
 						)}
+						{/* ID 与名称同宽：两列都是「长文本 + 输入框」，宽度不一致会显得表格歪（用户反馈） */}
 						<TableHead className="w-48 min-w-0">{t("config.modelId")}</TableHead>
-						<TableHead className="w-40 min-w-0">{t("config.modelDisplayName")}</TableHead>
-						<TableHead className="w-24">{t("config.contextWindow")}</TableHead>
-						<TableHead className="w-24">{t("config.maxTokens")}</TableHead>
+						<TableHead className="w-48 min-w-0">{t("config.modelDisplayName")}</TableHead>
+						{/* token 数字列加宽一档：原生步进器占住右侧约 17px，96px 会把七位数字裁掉 */}
+						<TableHead className="w-28">{t("config.contextWindow")}</TableHead>
+						<TableHead className="w-28">{t("config.maxTokens")}</TableHead>
 						<TableHead className="w-24">{t("config.thinkingLevels")}</TableHead>
 						<TableHead className="w-24">{t("config.capabilities")}</TableHead>
 						<TableHead className="w-20 text-right pr-3">{t("config.actions")}</TableHead>
@@ -180,26 +196,34 @@ export function ModelsTable(props: ModelsTableProps) {
 							props.onUpdateModel(i, "cost", Object.keys(nextCost).length > 0 ? nextCost : undefined);
 						};
 						const modelAdvancedFields = Object.keys(m).filter((key) => !KNOWN_MODEL_FIELDS.has(key));
-						const xhighValue = m.thinkingLevelMap?.xhigh === "xhigh" || m.thinkingLevelMap?.xhigh === "max" ? m.thinkingLevelMap.xhigh : "";
-						const maxValue = m.thinkingLevelMap?.max === "xhigh" || m.thinkingLevelMap?.max === "max" ? m.thinkingLevelMap.max : "";
-						const hasOnlyManagedThinkingLevelMap = m.thinkingLevelMap && Object.keys(m.thinkingLevelMap).every((key) => key === "xhigh" || key === "max");
-						const modelComplexFields = ["api", "baseUrl", "thinkingLevelMap", "cost", "headers", "compat"].filter((key) => m[key] !== undefined && (key !== "thinkingLevelMap" || !hasOnlyManagedThinkingLevelMap));
+						// thinkingLevelMap 整表由档位勾选列表管理，不再算「高级字段」（计费弹框的保留提示不再列它）
+						const modelComplexFields = ["api", "baseUrl", "cost", "headers", "compat"].filter((key) => m[key] !== undefined);
+
+						// 思考档位勾选态只依赖模型自身（reasoning + thinkingLevelMap），与 Popover 里的勾选列表同源，
+						// 草稿改动实时预演（不读 Pi 的能力探测结果——那回答的是「已保存配置」，含尚未保存的新行）。
+						const thinkingLevelOptions = MODEL_THINKING_LEVELS.map((level) => ({ level, state: modelThinkingLevelState(m, level) }));
+						const enabledThinkingLevels = enabledModelThinkingLevels(m);
+						// 单元格摘要：范围折叠（CC Switch 风格，如 `off → max`、`off, low → max`），放得下整列宽。
+						const thinkingSummary = enabledThinkingLevels.length > 0 ? formatModelThinkingLevelsSummary(enabledThinkingLevels) : t("config.thinkingLevelsNotSet");
 
 						// 每模型默认档位（settings.json 的 modelThinkingLevels）：与 UA 同模式，成对回调才渲染。
 						const canEditThinkingDefault = Boolean(props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault);
 						const thinkingDefaultValue = canEditThinkingDefault ? props.getModelThinkingLevelDefault!(i) : "";
 						const availableThinkingLevels = canEditThinkingDefault ? props.getModelAvailableThinkingLevels?.(i) : undefined;
-						// Pi 已明确回答「无可用档位」（非推理模型）时不给编辑：写了也会被 pi clamp 掉；
-						// 能力未知（undefined）仍允许手动配置（与模型表其余字段同一政策）。
-						const thinkingDefaultDisabled = availableThinkingLevels !== undefined && availableThinkingLevels.length === 0;
-						const thinkingDefaultLevels = availableThinkingLevels && availableThinkingLevels.length > 0 ? orderModelThinkingLevels(availableThinkingLevels) : [...MODEL_THINKING_LEVELS];
-						// 档位值不做白名单：当前值不在能力列表里时由 ConfigSelect 的「自定义」项兜底展示（不丢用户旧值）。
-						const thinkingDefaultOptions = [{ value: "", label: t("config.thinkingLevelDefaultInherit") }, ...thinkingDefaultLevels.map((level) => ({ value: level, label: level }))];
-						const thinkingAvailabilityText = availableThinkingLevels === undefined ? t("config.thinkingLevelsUnknown") : availableThinkingLevels.length === 0 ? t("config.thinkingLevelsNone") : t("config.thinkingLevelsAvailable", { levels: orderModelThinkingLevels(availableThinkingLevels).join(" / ") });
-						// 按钮摘要：默认档位与 xhigh/max 映射各占一段（都未设置时回退「关闭」，与旧展示兼容）。
-						const thinkingMappingSummary = xhighValue || maxValue ? [xhighValue, maxValue].filter(Boolean).join(" / ") : "";
-						const thinkingSummaryParts = [thinkingDefaultValue, thinkingMappingSummary].filter(Boolean);
-						const thinkingSummary = thinkingSummaryParts.length > 0 ? thinkingSummaryParts.join(" · ") : t("config.xhighOff");
+						// 候选只列已勾选档位（默认档位必须落在可用档位里）；当前值不在候选时由 ConfigSelect 的「自定义」项兜底，不丢用户旧值。
+						const thinkingDefaultOptions = [{ value: "", label: t("config.thinkingLevelDefaultInherit") }, ...enabledThinkingLevels.map((level) => ({ value: level, label: level }))];
+						// 没有勾选任何档位就没有候选默认档位（写了也会被 pi clamp），禁用编辑。
+						const thinkingDefaultDisabled = enabledThinkingLevels.length === 0;
+						const thinkingAvailabilityText =
+							availableThinkingLevels === undefined
+								? props.thinkingLevelsProbePending
+									? t("config.thinkingLevelsProbedAfterSave")
+									: t("config.thinkingLevelsUnknown")
+								: availableThinkingLevels.length === 0
+									? t("config.thinkingLevelsNone")
+									: t("config.thinkingLevelsProbed", { levels: formatModelThinkingLevelsSummary(orderModelThinkingLevels(availableThinkingLevels)) });
+						// 单元格只放得下摘要：悬停补充完整档位清单 + 每模型默认档位
+						const thinkingSummaryTitle = [`${t("config.thinkingLevels")}: ${enabledThinkingLevels.length > 0 ? enabledThinkingLevels.join(" / ") : t("config.thinkingLevelsNotSet")}`, thinkingDefaultValue ? `${t("config.thinkingLevelDefault")}: ${thinkingDefaultValue}` : ""].filter(Boolean).join(" · ");
 
 						// 逐模型 UA 覆盖值（空串 = 继承供应商级 UA）：操作列按钮据此判断是否已配置，弹框用它做初值
 						const userAgentOverride = hasUserAgentOverride ? props.getModelUserAgentOverride!(i) : "";
@@ -255,51 +279,55 @@ export function ModelsTable(props: ModelsTableProps) {
 											className="h-8 min-w-0"
 										/>
 									</TableCell>
-									{/* 思考级别列：一个按钮弹出 Popover，内含每模型默认档位（写 settings.json）+ xhigh / max 映射，
+									{/* 思考级别列：一个按钮弹出 Popover，内含档位勾选（写 thinkingLevelMap）+ 每模型默认档位（写 settings.json），
 									    避免行高被多行控件撑高 */}
 									<TableCell className="min-w-0 p-2">
 										<Popover>
 											<PopoverTrigger asChild>
-												<Button variant="outline" size="sm" className="h-7 w-full justify-between gap-1 px-2 font-mono text-micro" title={t("config.thinkingLevels")}>
+												<Button variant="outline" size="sm" className="h-7 w-full justify-between gap-1 px-2 font-mono text-micro" title={thinkingSummaryTitle}>
 													<span className="min-w-0 truncate">{thinkingSummary}</span>
 													<Brain className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
 												</Button>
 											</PopoverTrigger>
-											<PopoverContent align="start" className="w-56 p-2">
-												{canEditThinkingDefault && (
-													<div className="mb-1.5 border-b border-border-subtle pb-1.5">
-														<div className="mb-1 text-micro font-semibold text-text-secondary">{t("config.thinkingLevelDefault")}</div>
-														<ConfigSelect value={thinkingDefaultValue} options={thinkingDefaultOptions} onChange={(v) => props.onUpdateModelThinkingLevelDefault!(i, v)} disabled={thinkingDefaultDisabled} />
-														<div className="mt-1 text-[10px] leading-relaxed text-text-tertiary">{thinkingAvailabilityText}</div>
-														<div className="mt-0.5 text-[10px] leading-relaxed text-text-tertiary">{t("config.thinkingLevelDefaultHint")}</div>
-													</div>
-												)}
-												<div className="config-thinking-levels-cell">
-													{(
-														[
-															["xhigh", xhighValue],
-															["max", maxValue],
-														] as const
-													).map(([key, value]) => (
-														<div key={key} className="config-thinking-levels-row">
-															<span className="config-thinking-levels-key">{key}</span>
-															<ConfigSelect
-																value={value}
-																options={[
-																	{ value: "", label: t("config.xhighOff") },
-																	{ value: "xhigh", label: "xhigh" },
-																	{ value: "max", label: "max" },
-																]}
-																onChange={(v) => {
-																	// ConfigSelect 回传 string，白名单收窄到合法级别值（项目禁 as 强转）
-																	if (v === "" || v === "xhigh" || v === "max") {
-																		props.onUpdateModelThinkingLevel(i, key, v);
-																	}
+											<PopoverContent align="start" className="w-64 p-2">
+												{/* 档位勾选：勾上 = 该档位对该模型可用（写 models.json 的 thinkingLevelMap），取消 = 写 null / 删条目 */}
+												<div className="text-micro font-semibold text-text-secondary">{t("config.thinkingLevelsPick")}</div>
+												<div className="mt-1 flex flex-col">
+													{thinkingLevelOptions.map(({ level, state }) => (
+														<Label key={level} className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1 font-normal hover:bg-bg-hover">
+															<Checkbox
+																checked={state.enabled}
+																onCheckedChange={(checked) => {
+																	const enabled = checked === true;
+																	props.onUpdateModelThinkingLevel(i, level, enabled);
+																	// 取消的档位正好是每模型默认档位时一并清掉：否则默认档位指向不可用档位，pi 只能 clamp，
+																	// 用户看到的是「配了但不生效」（与 CC Switch 的档位编辑器一致）。
+																	if (!enabled && canEditThinkingDefault && thinkingDefaultValue === level) props.onUpdateModelThinkingLevelDefault!(i, "");
 																}}
 															/>
-														</div>
+															<span className="flex-1 font-mono text-control">{level}</span>
+															{/* 非恒等上游值（来自目录补全或手改配置）：展示出来，用户才知道实际发出去的是什么 */}
+															{state.wireValue && (
+																<span className="shrink-0 font-mono text-micro text-text-tertiary" title={t("config.thinkingLevelsWireValue")}>
+																	→ {state.wireValue}
+																</span>
+															)}
+														</Label>
 													))}
 												</div>
+												<div className="mt-1 text-[10px] leading-relaxed text-text-tertiary">{t("config.thinkingLevelsPickHint")}</div>
+												{m.reasoning !== true && <div className="mt-0.5 text-[10px] leading-relaxed text-text-tertiary">{t("config.thinkingLevelsReasoningHint")}</div>}
+												{canEditThinkingDefault && (
+													<div className="mt-1.5 border-t border-border-subtle pt-1.5">
+														{/* 说明跟在标题右侧（不另起一行）；下面是 Pi 对「已保存配置」的只读探测结果 */}
+														<div className="mb-1 flex items-baseline justify-between gap-2">
+															<span className="shrink-0 text-micro font-semibold text-text-secondary">{t("config.thinkingLevelDefault")}</span>
+															<span className="min-w-0 text-right text-[10px] leading-relaxed text-text-tertiary">{t("config.thinkingLevelDefaultHint")}</span>
+														</div>
+														<ConfigSelect value={thinkingDefaultValue} options={thinkingDefaultOptions} onChange={(v) => props.onUpdateModelThinkingLevelDefault!(i, v)} disabled={thinkingDefaultDisabled} />
+														<div className="mt-1 text-[10px] leading-relaxed text-text-tertiary">{thinkingAvailabilityText}</div>
+													</div>
+												)}
 											</PopoverContent>
 										</Popover>
 									</TableCell>
@@ -337,8 +365,15 @@ export function ModelsTable(props: ModelsTableProps) {
 												</>
 											)}
 											{props.onHideModel && (
-												<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onHideModel!(i)} title={t("config.hideModel")}>
-													<EyeOff className="size-3.5" aria-hidden="true" />
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													// 已隐藏的行：图标换成 Eye 并高亮，tooltip 也变成「恢复显示」
+													className={props.getModelHidden?.(i) ? "size-7 text-[color:var(--color-accent)]" : "size-7"}
+													onClick={() => props.onHideModel!(i)}
+													title={props.getModelHidden?.(i) ? t("config.showModel") : t("config.hideModel")}
+												>
+													{props.getModelHidden?.(i) ? <Eye className="size-3.5" aria-hidden="true" /> : <EyeOff className="size-3.5" aria-hidden="true" />}
 												</Button>
 											)}
 											{props.onResetModel && (

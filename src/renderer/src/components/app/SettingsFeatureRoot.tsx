@@ -16,8 +16,7 @@ const SettingsModal = lazy(() => import("./SettingsModal").then((module) => ({ d
 type SettingsFeatureRootProps = {
 	settings: AppSettings;
 	piUpdate: PiUpdateController;
-	webServiceChanging: boolean;
-	onRestartWebService: () => void;
+
 	appInfo: AppInfo;
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
 	/** 当前项目身份：项目资源 IPC 只接受主进程登记的 id。 */
@@ -113,7 +112,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 			piProxyChecking: props.piUpdate.piProxyChecking,
 			piProxyNotice: props.piUpdate.piProxyNotice,
 			piProxyNoticeTone: props.piUpdate.piProxyNoticeTone,
-			webServiceChanging: props.webServiceChanging,
+
 			appInfo: props.appInfo,
 			onAddPiCustomPath: props.piUpdate.addPiCustomPath,
 			onUpdatePiCustomPath: props.piUpdate.updatePiCustomPath,
@@ -142,14 +141,14 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 				});
 			},
 			onRestartApp: () => api.app.restart(),
-			onRestartWebService: props.onRestartWebService,
+
 			onClearCheckFlag: async () => {
 				await api.settings.update({ piEnvironmentChecked: false });
 				showNotice(t("environment.checkFlagCleared"));
 			},
 			// forceSystem=true：Web 服务页必须离开内置浏览器面板——面板在 Dialog 下层，
 			// 设置弹窗打开时会被遮挡；且外部端按桌面浏览器视口设计，系统浏览器体验更完整。
-			onOpenWebService: (url: string) => api.app.openExternal(url, true),
+
 			onClose: () => {
 				// 关闭时清掉未消费的深链，避免下次从侧栏打开仍跳到 Git 分区。
 				setFocus(null);
@@ -175,7 +174,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 			props.piUpdate.piProxyChecking,
 			props.piUpdate.piProxyNotice,
 			props.piUpdate.piProxyNoticeTone,
-			props.webServiceChanging,
+			,
 			props.appInfo,
 			props.piUpdate.addPiCustomPath,
 			props.piUpdate.updatePiCustomPath,
@@ -191,7 +190,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 			props.piUpdate.checkPiCliUpdate,
 			props.piUpdate.updatePiCli,
 			props.piUpdate.piUpdating,
-			props.onRestartWebService,
+			,
 			props.onChange,
 			props.projectId,
 			props.projectKind,

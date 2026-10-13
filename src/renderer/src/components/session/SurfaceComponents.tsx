@@ -1163,6 +1163,14 @@ export const UserBubble = memo(function UserBubble(props: {
 });
 
 export function ImagePreviewModal(props: { image: ImageContent; onClose: () => void }) {
+	// 模态惯例：Escape 可关（右上角关闭钮可聚焦，但键盘用户不应被迫 Tab 寻找）
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") props.onClose();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [props.onClose]);
 	const src = imageContentSrc(props.image);
 	if (!src) return null;
 	return (

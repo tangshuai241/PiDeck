@@ -10,7 +10,6 @@ import { ActiveSessionsTree } from "./ActiveSessionsTree";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
-import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
@@ -109,10 +108,10 @@ export function ProjectTree(props: {
 		const dragOver = props.controller.drag.overProjectId === project.id;
 		const dragPosition = dragOver ? props.controller.drag.overPosition : undefined;
 		const rootProjectSessions = props.controller.catalog.sessionsByProject[project.id] ?? [];
-		// 项目级「运行中」判定：任一 Agent 进程存活（starting/idle/running）即视为运行中。
-		// 与 ActiveSessionsTree 活动页同源，保证折叠时的项目 tag 与展开后的子行状态一致。
-		const hasLiveAgent = props.controller.catalog.agents.some((agent) => agent.projectId === project.id && isLiveRuntimeStatus(agent.status));
 		const relatedProjectIds = new Set([project.id, ...props.controller.catalog.projects.filter((candidate) => candidate.worktreeParentId === project.id).map((candidate) => candidate.id)]);
+		// 项目级「运行中」判定口径：会话 runtime 为 starting/running（且无待确认 ask）才算，
+		// 与子行/Tab 栏状态点语义一致（黄=在跑、蓝=空闲）。旧口径「Agent 进程存活
+		// （含 idle）」在会话跑完/停止但进程未退出时仍亮黄点，误导为还在跑（用户反馈）。
 		const hasRunningAgent = [...relatedProjectIds].some((projectId) =>
 			(props.controller.catalog.sessionsByProject[projectId] ?? []).some((session) => {
 				const status = props.controller.catalog.runtimeBySessionId[session.id]?.status;
@@ -186,7 +185,7 @@ export function ProjectTree(props: {
 									{/* 待确认徽章：当项目下有会话等待用户输入/确认时醒目展示 */}
 									<PendingAskBadge count={pendingAskCount} />
 									{/* 简洁模式汇总实际计算中状态（含worktree）；空闲进程不转。 */}
-									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasLiveAgent && <span className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} aria-hidden="true" />}
+									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasRunningAgent && <span className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} aria-hidden="true" />}
 								</div>
 								{/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
 								{project.missing && (

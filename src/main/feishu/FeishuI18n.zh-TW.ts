@@ -2,6 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
+ * source-sha256: 9f60058489f05df0531921901ebfd43830857ad6dfefbbe710054f178f173527（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { FeishuTranslationKey } from "./FeishuI18n";
 

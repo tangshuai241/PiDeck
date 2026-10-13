@@ -4,7 +4,7 @@ import test from "node:test";
 
 const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
 const worktreeTree = readFileSync("src/renderer/src/components/sidebar/WorktreeTree.tsx", "utf8");
-const webSidebar = readFileSync("src/renderer/src/web/WebSidebar.tsx", "utf8");
+
 const projectAvatar = readFileSync("src/renderer/src/components/sidebar/SidebarComponents.tsx", "utf8");
 const agentAvatar = readFileSync("src/renderer/src/components/session/SurfaceComponents.tsx", "utf8");
 const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
@@ -34,7 +34,7 @@ test("no workspace projects renders an empty-state add-directory guide", () => {
 
 test("all project rows omit aggregate running and history counts", () => {
 	// 数量徽标会把项目容器伪装成运行实体；桌面、worktree、Web 三种入口都保持同一语义。
-	for (const source of [projectTree, worktreeTree, webSidebar]) {
+	for (const source of [projectTree, worktreeTree]) {
 		assert.doesNotMatch(source, /project-running-badge|project-session-count|workspace-tree-count/);
 	}
 });

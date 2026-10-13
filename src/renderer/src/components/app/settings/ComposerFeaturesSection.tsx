@@ -34,6 +34,7 @@ export const ComposerFeaturesSection = memo(function ComposerFeaturesSection(pro
 
 	return (
 		<SettingsSection
+			id="settings-section-appearance-composer-features"
 			title={
 				<span className="inline-flex items-center gap-1.5">
 					{t("settings.composer.title")}

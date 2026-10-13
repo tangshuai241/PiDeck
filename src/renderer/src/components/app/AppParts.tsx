@@ -15,7 +15,7 @@ export type { WorkspaceDrawerPanel as DrawerPanel } from "../../hooks/useWorkspa
 
 // Re-exports from leaf modules (A12 migration in progress)
 import { PiLogoCanvas } from "./PiLogoCanvas";
-import { PiTuiLogoCanvas, useLogoStyle } from "./PiTuiLogo";
+import { PiTuiLogoCanvas, useAppDisplayName, useBrandGlyph } from "./PiTuiLogo";
 import { TextShimmer } from "../motion/text-shimmer";
 import { detectRendererPlatform } from "../../lib/detectRendererPlatform";
 export { WorktreeCreateDialog } from "../sidebar/SidebarComponents";
@@ -102,6 +102,8 @@ function loadDevBranch(): Promise<string | undefined> {
  */
 export function BrandLockup() {
 	const [branch, setBranch] = useState<string | undefined>(undefined);
+	// 品牌名与自定义 logo 走渲染层镜像 atom（App.tsx 从 settings 同步）：Web 无人写入 → 恒取默认 PiDeck / 内置标。
+	const displayName = useAppDisplayName();
 	useEffect(() => {
 		void loadDevBranch().then(setBranch);
 	}, []);
@@ -154,18 +156,19 @@ export function BrandLockup() {
 			reduceMq.removeEventListener("change", onReduceChange);
 		};
 	}, []);
-	const brandTitle = branch ? `PiDeck · ${branch}` : "PiDeck";
-	const logoStyle = useLogoStyle();
+	const brandTitle = branch ? `${displayName} · ${branch}` : displayName;
+	const { style: logoStyle, customLogo } = useBrandGlyph();
 	// macOS 窗口左上角已有原生交通灯，π logo + 字标挤在同一行视觉过重；
 	// darwin 平台只保留字标（品牌语义仍由 aria-label 承载），其余平台维持原样。
 	const showLogo = detectRendererPlatform() !== "darwin";
 	return (
 		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label={brandTitle} title={branch ? brandTitle : undefined}>
-			{/* 默认静态定格；点击 logo 才播落位动画（classic=四块拼图 / pi-tui=三块落位），不随会话启动自动播。 */}
-			{showLogo && (logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={18} playOnClick /> : <PiLogoCanvas size={18} playOnClick />)}
+			{/* 默认静态定格；点击 logo 才播落位动画（classic=四块拼图 / pi-tui=三块落位），不随会话启动自动播。
+			    自定义图没有动画可播，不拦点击：让它和字标一样冒泡到 AboutPopover 触发器（点图=打开关于），与动画 logo 的「点击只播动画」语义不冲突。 */}
+			{showLogo && (customLogo ? <img src={customLogo} alt="" className="size-[18px] shrink-0 object-contain" /> : logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={18} playOnClick /> : <PiLogoCanvas size={18} playOnClick />)}
 			<span className="flex min-w-0 flex-col justify-center gap-1">
-				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-[18px] font-[PiDeckDepartureMono] font-bold uppercase leading-none">
-					PiDeck
+				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-[18px] font-[PiDeckDepartureMono] font-bold leading-none">
+					{displayName}
 				</TextShimmer>
 				{branch && <span className="truncate text-control font-medium leading-none text-muted-foreground">{branch}</span>}
 			</span>

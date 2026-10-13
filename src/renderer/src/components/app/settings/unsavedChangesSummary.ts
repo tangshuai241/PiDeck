@@ -6,7 +6,7 @@ import { t, type TranslationKey } from "../../../i18n";
  * 用户可能先改外观再改语言，但「常用设置」里的项更容易对上导航。
  */
 
-export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen" | "acp";
+export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "proxy" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen";
 
 /** 单条变更项：tab 名 + 字段名（均为 i18n key，渲染时再翻译）。 */
 export type SettingsUnsavedItem = {
@@ -32,7 +32,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	shortcuts: "settings.tabs.shortcuts",
 	appearance: "settings.tabs.appearance",
 	proxy: "settings.tabs.proxy",
-	web: "settings.tabs.web",
+
 	editors: "settings.tabs.editors",
 	git: "settings.tabs.git",
 	dev: "settings.tabs.dev",
@@ -44,7 +44,6 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
-	acp: "settings.tabs.acp",
 };
 
 /**
@@ -69,8 +68,9 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "idleAgentTimeoutMin", tab: "common", itemKey: "settings.idleAgentTimeoutMin" },
 	{ field: "enableNotifications", tab: "notification", itemKey: "settings.enableNotifications" },
 	{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings.askNotification" },
+	{ field: "alertOnlyWhenUnfocused", tab: "notification", itemKey: "settings.alertOnlyWhenUnfocused" },
 	{ field: "agentCountReminderEnabled", tab: "notification", itemKey: "settings.agentCountReminder" },
-	{ field: "announcementNotificationEnabled", tab: "notification", itemKey: "settings.announcementNotification" },
+
 	{ field: "toastDurationMs", tab: "notification", itemKey: "settings.toastDuration" },
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },
 	{ field: "closeToTray", tab: "common", itemKey: "settings.closeToTray" },
@@ -86,6 +86,10 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "customTheme", tab: "appearance", itemKey: "settings.sectionCustomThemes" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },
+	// 品牌自定义三项：都紧跟「主题与背景」里的 Logo 行（自定义图与风格联动，但不合并——图与风格各自可单独改）
+	{ field: "logoStyle", tab: "appearance", itemKey: "settings.logoStyle" },
+	{ field: "logoCustomImage", tab: "appearance", itemKey: "settings.logoCustomImage" },
+	{ field: "appDisplayName", tab: "appearance", itemKey: "settings.appDisplayName" },
 	{ field: "zoomFactor", tab: "appearance", itemKey: "settings.zoomFactor" },
 	{ field: "fontSize", tab: "appearance", itemKey: "settings.fontSize" },
 	{ field: "uiFontSize", tab: "appearance", itemKey: "settings.uiFontSize" },
@@ -142,10 +146,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "piRpcNoExtensions", tab: "dev", itemKey: "settings.piRpcNoExtensions" },
 	{ field: "piRpcNoSkills", tab: "dev", itemKey: "settings.piRpcNoSkills" },
 	{ field: "standbyRuntimeEnabled", tab: "dev", itemKey: "settings.standbyRuntimeEnabled" },
-	{ field: "webServiceEnabled", tab: "web", itemKey: "settings.enableWebService" },
-	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
-	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },
-	{ field: "webServiceRequiresAuth", tab: "web", itemKey: "settings.webUseTokenAuth" },
+
 	{ field: "externalEditors", tab: "editors", itemKey: "settings.sectionEditors" },
 	// Git 区块原在常用设置，随独立 tab 挪到「开发者」簇（web/editors 之后、dev 之前）
 	{ field: "enableGitManagement", tab: "git", itemKey: "settings.gitManagement" },
@@ -154,7 +155,6 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "favoriteModels", tab: "git", itemKey: "settings.gitCommitMessageModel" },
 	{ field: "gitCommitMessagePrompt", tab: "git", itemKey: "settings.gitCommitMessagePrompt" },
 	{ field: "developerDiagnostics", tab: "dev", itemKey: "settings.developerDiagnostics" },
-	{ field: "telemetryEnabled", tab: "dev", itemKey: "settings.telemetry" },
 ];
 
 const UNKNOWN_ITEM: FieldCatalogEntry = {
@@ -171,7 +171,7 @@ function itemIdentity(tab: SettingsUnsavedTabId, itemKey: TranslationKey): strin
  * 把 dirty 字段收成关闭确认要用的一条摘要。
  * visionDirty 不是 AppSettings 字段（写 pi-deck-vision.json），单独挂到视觉桥 tab。
  */
-export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; acpDirty?: boolean }): SettingsUnsavedSummary | null {
+export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean }): SettingsUnsavedSummary | null {
 	const dirty = new Set(input.dirtyFields);
 	const seen = new Set<string>();
 	const items: Array<{ tab: SettingsUnsavedTabId; itemKey: TranslationKey }> = [];
@@ -202,10 +202,6 @@ export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<s
 		push("imagegen", "settings.tabs.imagegen");
 	}
 
-	if (input.acpDirty) {
-		push("acp", "settings.tabs.acp");
-	}
-
 	if (items.length === 0) return null;
 	return {
 		items: items.map((item) => ({
@@ -217,7 +213,7 @@ export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<s
 }
 
 /** 左侧导航要打黄点的 tab：按字段目录归并，视觉桥草稿单独算 vision。 */
-export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; acpDirty?: boolean }): Set<SettingsUnsavedTabId> {
+export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean }): Set<SettingsUnsavedTabId> {
 	const dirty = new Set(input.dirtyFields);
 	const tabs = new Set<SettingsUnsavedTabId>();
 	for (const entry of FIELD_CATALOG) {
@@ -225,7 +221,7 @@ export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visi
 	}
 	if (input.visionDirty) tabs.add("vision");
 	if (input.imageGenDirty) tabs.add("imagegen");
-	if (input.acpDirty) tabs.add("acp");
+
 	return tabs;
 }
 

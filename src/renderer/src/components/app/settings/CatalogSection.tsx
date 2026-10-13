@@ -100,7 +100,7 @@ export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpd
 	const hasInvalidOverlayFiles = (status?.hasOverlayFiles ?? false) && !overlayActive;
 
 	return (
-		<SettingsSection title={t("settings.catalogSectionTitle")} description={t("settings.catalogSectionDesc")}>
+		<SettingsSection id="settings-section-dev-catalog" title={t("settings.catalogSectionTitle")} description={t("settings.catalogSectionDesc")}>
 			<div className="flex flex-col gap-2">
 				{/* 目录更新源：与应用更新同源，方便用户确认走的是哪个 GitHub 镜像 */}
 				<div className="flex items-center gap-1.5 text-caption text-muted-foreground">

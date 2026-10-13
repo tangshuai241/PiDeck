@@ -1,6 +1,7 @@
 import { test, expect } from "./mock-pi-fixture";
 import type { Page } from "@playwright/test";
 import type { ElectronApplication } from "@playwright/test";
+import { openFirstSession } from "./open-session";
 
 /**
  * Ask 提问 UI 全链路 E2E（mock pi 真实 RPC）：
@@ -14,19 +15,12 @@ import type { ElectronApplication } from "@playwright/test";
 const timeline = (window: Page) => window.locator(".message-timeline");
 const askBar = (window: Page) => window.locator(".ask-inline-bar");
 
+/**
+ * 打开第一个会话并使合成器可用。UI 2.0 起欢迎页不再有「启动 Agent」按钮，
+ * 改为侧栏常驻的「新建会话」（app.newSession），复用 open-session 公共前置。
+ */
 async function startAgent(window: Page) {
-	const startButton = window.getByRole("button", { name: "启动 Agent" });
-	for (let attempt = 0; attempt < 4; attempt += 1) {
-		await startButton.click();
-		const gone = await startButton
-			.waitFor({ state: "hidden", timeout: 5000 })
-			.then(() => true)
-			.catch(() => false);
-		if (gone) break;
-	}
-	const composer = window.locator(".composer .rich-input");
-	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
-	return composer;
+	return openFirstSession(window);
 }
 
 /** 发送一条消息并等待 ask 卡片出现 */

@@ -11,7 +11,7 @@ test("供应商中文名可新建和重命名，窄窗添加/编辑表单不横�
 	test.setTimeout(90_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 25_000 });
 	const config = window.locator(".settings-modal");
-	if (!(await config.isVisible())) await window.getByRole("button", { name: "设置", exact: true }).click();
+	if (!(await config.isVisible())) await window.getByRole("button", { name: /^设置/ }).click();
 	await expect(config).toBeVisible();
 	await config.getByRole("tab", { name: "配置管理", exact: true }).click();
 	await config.getByRole("tab", { name: "Pi 配置管理", exact: true }).click();

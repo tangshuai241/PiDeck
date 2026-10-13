@@ -29,10 +29,11 @@ PiDeck is an open-source project and everyone is welcome to contribute.
 - [**r0y1z2**](https://github.com/r0y1z2) — Project session pinning, secure composer voice transcription (#177, #176)
 - [**sgafxh**](https://github.com/sgafxh) — Recovery from request-body-size-limit rejections, Windows pi console-window fix (#188, #180)
 - [**lerrorgk**](https://github.com/lerrorgk) — Fixed nicobailon pi-subagents async dispatch being mis-marked complete; panel entries now include the full task description (#206)
-- [**juzijun233**](https://github.com/juzijun233) — Stability and security hardening series: login-shell PATH probing moved to async warm-up, late streaming events rejected, event payload triples, subscribed-channel allowlist, oversized diff truncation, PiRpcClient line-buffer cap, per-session subscription isolation for split panes
+- [**juzijun233**](https://github.com/juzijun233) — Stability and security hardening series: login-shell PATH probing moved to async warm-up, late streaming events rejected, event payload triples, subscribed-channel allowlist, oversized diff truncation, PiRpcClient line-buffer cap, per-session subscription isolation for split panes; the channel-switch version guard so an older dev build is no longer offered (#336)
 - [**xiaYuTian11**](https://github.com/xiaYuTian11) — Current Git branch in the sidebar project tree (#232), timeline scroll jitter and jump-to-top/bottom fixes (#224), session tab width cap and font size (#226), skill rename routed by skill type (#227)
 - [**Q-xuan**](https://github.com/Q-xuan) — Inline-code file references are clickable again (#228)
 - [**cmyk-xing**](https://github.com/cmyk-xing) — Feature-module visibility switches in appearance settings (#254); guide-page bootstrap messages no longer leak into newly created sessions (#256); Windows reopen at their last position/size/maximized state (#259)
+- [**EEEEEEEEdison**](https://github.com/EEEEEEEEdison) — Right sidebar split into an upper drawer pane and a persistent session-status pane (#334); streaming and end-to-end TPS measurement modes (#327)
 
 ## How to Contribute
 

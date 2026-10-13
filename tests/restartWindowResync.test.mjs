@@ -25,10 +25,7 @@ test("edit 的 fork 分支必须与 resend 对称：finally 清 mutation overlay
 test("restart 成功路径必须重下发消息窗口（桌面 IPC 与 web 服务路径一致）", () => {
 	// 窗口 id 稳定性由 loadMessages 的会话级身份延续保证（stabilizeProjectedIdsFromIdentities），
 	// 重下发不会触发整窗 remount/动画重放；这里只断言两个入口都把窗口带上。
-	for (const [file, source] of [
-		["src/main/ipc/sessionIpc.ts", sessionIpc],
-		["src/main/index.ts", mainIndex],
-	]) {
+	for (const [file, source] of [["src/main/ipc/sessionIpc.ts", sessionIpc]]) {
 		const index = source.indexOf("emitReplacementState(result.value.runtime,");
 		assert.ok(index >= 0, `${file} 的 restart 处理器必须重下发 runtime 状态`);
 		assert.match(source.slice(index, index + 64), /emitReplacementState\(result\.value\.runtime, true\)/, `${file} 的 restart 处理器必须带消息窗口重下发`);

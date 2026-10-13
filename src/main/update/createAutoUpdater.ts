@@ -1,3 +1,4 @@
+import { mainProcessT, normalizeMainProcessLocale } from "../../shared/i18n/mainProcessCopy";
 /**
  * electron-updater 真实封装（只在 Electron 主进程构造）。
  *
@@ -23,7 +24,7 @@ export type { AutoUpdaterLike, AutoUpdaterEventHandlers } from "./autoUpdaterTyp
 export const UPDATE_FEED_URL_ENV = "PIDEK_UPDATE_FEED_URL";
 
 /** 兜底更新缓存目录名，与 electron-builder 默认规则（name + "-updater"）对齐。 */
-export const DEFAULT_UPDATER_CACHE_DIR_NAME = "pi-desktop-updater";
+export const DEFAULT_UPDATER_CACHE_DIR_NAME = "pideck-updater";
 
 /** 自动生成的兜底配置文件文件名，存放在应用 userData 目录中。 */
 export const FALLBACK_APP_UPDATE_CONFIG_FILENAME = "pideck-fallback-app-update.yml";
@@ -109,7 +110,7 @@ export function shouldDisableDifferentialDownload(options: { isPortable?: boolea
  * 创建真实 electron-updater 包装。
  * @param options.environment 测试注入的 feed URL（development 构建可用）。
  */
-export function createRealAutoUpdater(options?: { feedUrl?: string; isAutoDownloadEnabled?: () => boolean }): AutoUpdaterLike {
+export function createRealAutoUpdater(options?: { feedUrl?: string; isAutoDownloadEnabled?: () => boolean; copy?: (key: "update.devInactive") => string }): AutoUpdaterLike {
 	// 延迟 require：模块顶层 import electron-updater 会在纯 Node 测试进程崩。
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -167,6 +168,9 @@ export function createRealAutoUpdater(options?: { feedUrl?: string; isAutoDownlo
 		// 必须显式开启 forceDevUpdateConfig 才会真的请求该 feed。
 		autoUpdater.setFeedURL({ provider: "generic", url: feedUrl });
 		autoUpdater.forceDevUpdateConfig = true;
+	} else {
+		// 旧安装包的 app-update.yml 可能仍指向上游；运行时显式指定 fork，避免更新覆盖 TPA 改动。
+		autoUpdater.setFeedURL({ provider: "github", owner: UPDATE_REPO_OWNER, repo: UPDATE_REPO });
 	}
 	autoUpdater.autoDownload = options?.isAutoDownloadEnabled?.() ?? true;
 	autoUpdater.autoInstallOnAppQuit = false;
@@ -209,7 +213,7 @@ export function createRealAutoUpdater(options?: { feedUrl?: string; isAutoDownlo
 			// electron-updater 在未激活（dev 未切镜像源）时默认静默返回 null。把它提升为错误，
 			// 避免 UpdateService 把「根本未检查」误报成「已是最新」；文案给出可操作指引。
 			if (!result) {
-				throw new Error("更新检查未激活：开发模式下默认不检查，请在设置中选择镜像更新源后重试");
+				throw new Error(options?.copy?.("update.devInactive") ?? mainProcessT(normalizeMainProcessLocale(app.getLocale?.()), "update.devInactive"));
 			}
 		},
 		downloadUpdate: () => autoUpdater.downloadUpdate().then(() => undefined),

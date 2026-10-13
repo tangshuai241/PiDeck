@@ -162,15 +162,16 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 	return (
 		<>
 			{/* 系统通知（原常用设置「通知」区）：会话完成/Ask 提问/Agent 数量提醒三个独立开关 */}
-			<SettingsSection title={t("settings.notificationSection")}>
+			<SettingsSection id="settings-section-notification-channels" title={t("settings.notificationSection")}>
 				<SettingSwitchRow anchor="notification-enable" title={t("settings.enableNotifications")} checked={draft.enableNotifications} onChange={(checked) => updateDraft({ enableNotifications: checked })} />
+				{/* 仅失焦提醒：按窗口焦点门控系统通知 + 提示音（应用内 toast 不受影响） */}
+				<SettingSwitchRow anchor="notification-unfocused-only" title={t("settings.alertOnlyWhenUnfocused")} description={t("settings.alertOnlyWhenUnfocusedDesc")} checked={draft.alertOnlyWhenUnfocused} onChange={(checked) => updateDraft({ alertOnlyWhenUnfocused: checked })} />
 				<SettingSwitchRow anchor="notification-ask" title={t("settings.askNotification")} description={t("settings.askNotificationDesc")} checked={draft.askNotificationEnabled} onChange={(checked) => updateDraft({ askNotificationEnabled: checked })} />
 				<SettingSwitchRow anchor="notification-agent-count" title={t("settings.agentCountReminder")} description={t("settings.agentCountReminderDesc")} checked={draft.agentCountReminderEnabled} onChange={(checked) => updateDraft({ agentCountReminderEnabled: checked })} />
-				<SettingSwitchRow anchor="notification-announcement" title={t("settings.announcementNotification")} description={t("settings.announcementNotificationDesc")} checked={draft.announcementNotificationEnabled} onChange={(checked) => updateDraft({ announcementNotificationEnabled: checked })} />
 			</SettingsSection>
 
 			{/* 应用内通知（toast）：展示时长全局可配 + 历史回看 */}
-			<SettingsSection title={t("settings.inAppNotificationSection")}>
+			<SettingsSection id="settings-section-notification-in-app" title={t("settings.inAppNotificationSection")}>
 				<SettingRow anchor="notification-toast-duration" title={t("settings.toastDuration")} description={t("settings.toastDurationDesc")}>
 					<Select value={String(draft.toastDurationMs)} onValueChange={(value) => updateDraft({ toastDurationMs: Number(value) })}>
 						<SelectTrigger className="h-9 min-w-0" aria-label={t("settings.toastDuration")}>
@@ -192,7 +193,7 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 				</SettingRow>
 			</SettingsSection>
 
-			<SettingsSection title={t("settings.sound.title")} description={t("settings.sound.sectionDesc")}>
+			<SettingsSection id="settings-section-notification-sound" title={t("settings.sound.title")} description={t("settings.sound.sectionDesc")}>
 				<SettingSwitchRow title={t("settings.sound.enabled")} description={t("settings.sound.enabledDesc")} checked={settings.enabled} dirty={isDirty("soundAlert")} onChange={(value) => updateSound({ enabled: value })} />
 				<SettingRow
 					title={
@@ -211,13 +212,13 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 			</SettingsSection>
 
 			{/* 三个事件行直接铺在 SettingsSection 外框里，不再套 SettingBox 内框。 */}
-			<SettingsSection title={t("settings.sound.eventsTitle")} description={t("settings.sound.eventsDesc")}>
+			<SettingsSection id="settings-section-notification-sound-events" title={t("settings.sound.eventsTitle")} description={t("settings.sound.eventsDesc")}>
 				{(["done", "error", "waiting"] as const).map((kind) => (
 					<SoundEventRow key={kind} kind={kind} settings={settings} customSounds={customSounds} isDirty={isDirty} onChange={(config) => updateEvent(kind, config)} />
 				))}
 			</SettingsSection>
 
-			<SettingsSection title={t("settings.sound.customTitle")} description={t("settings.sound.customDesc")}>
+			<SettingsSection id="settings-section-notification-sound-custom" title={t("settings.sound.customTitle")} description={t("settings.sound.customDesc")}>
 				<SettingRow title={t("settings.sound.import")} description={t("settings.sound.importDesc")}>
 					<div className="flex items-center gap-2">
 						{importError && <span className="text-xs text-destructive">{importError}</span>}

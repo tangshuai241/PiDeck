@@ -368,25 +368,22 @@ export class GitService {
 
 	/**
 	 * 获取当前暂存区（staged）的完整 diff 文本，用于 AI 生成提交摘要。
-	 * 优先返回暂存区的 diff，无暂存文件时返回工作区 diff。
+	 * 只返回暂存区 diff，无暂存内容时返回空串（由调用方提示「先暂存」）；
+	 * **git 执行失败会抛出**：调用方必须能区分「空暂存区」和「读 diff 失败」——两者文案与后续动作
+	 * 完全不同，曾因这里 `catch { return "" }` 把失败静默当成空串，前端只能显示
+	 * 「模型没有返回提交摘要」误导用户去查模型配置（issue #338）。
 	 * @param cwd 仓库工作目录
 	 * @param maxBytes 最大返回字符数（默认 100KB），超出截断。maxBuffer 固定为 10MB 确保 git 完整输出。
 	 */
 	async getStagedDiff(cwd: string, maxBytes = 100 * 1024): Promise<string> {
-		try {
-			// 先试暂存区 diff
-			const { stdout } = await execGit(["diff", "--staged", "--unified=3"], {
-				cwd,
-				timeoutMs: GIT_MUTATION_TIMEOUT_MS,
-				maxBuffer: 10 * 1024 * 1024,
-			});
-			// 无暂存内容时直接返回空，不再回退到工作区 diff；由调用方提示用户先暂存
-			if (!stdout.trim()) return "";
-			const truncated = stdout.length > maxBytes ? stdout.slice(0, maxBytes) + "\n\n... (diff truncated)" : stdout;
-			return truncated;
-		} catch {
-			return "";
-		}
+		const { stdout } = await execGit(["diff", "--staged", "--unified=3"], {
+			cwd,
+			timeoutMs: GIT_MUTATION_TIMEOUT_MS,
+			maxBuffer: 10 * 1024 * 1024,
+		});
+		// 无暂存内容时返回空，不回退到工作区 diff：由调用方提示用户先暂存
+		if (!stdout.trim()) return "";
+		return stdout.length > maxBytes ? stdout.slice(0, maxBytes) + "\n\n... (diff truncated)" : stdout;
 	}
 
 	// ── 以下为 Git 增强方法（复刻 VS Code git.ts） ──────────────────────

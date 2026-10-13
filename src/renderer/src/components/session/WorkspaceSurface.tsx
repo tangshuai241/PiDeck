@@ -446,6 +446,14 @@ function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean
 	}
 }
 
+/* 文件树行高：与行上 Tailwind `h-[28px]` 同一数值，挂顶分层的层间距按它算。 */
+const FILE_ROW_HEIGHT_PX = 28;
+/* 挂顶最多几层（对齐 VSCode workbench.tree.stickyScroll.maxLineCount 默认 3）：
+   只让最外层若干层目录挂顶，更深的目录行直接随内容滚走。这样挂顶区高度有上限（3×28px），
+   父目录逐级留在上方当面包屑；同一档位的行盒宽窄不同，若改成「更深者与父层共用槽位」
+   会出现浅层行左段从深层行左边露出来的残影。 */
+const FILE_STICKY_MAX_LEVELS = 3;
+
 function FileNode(props: {
 	node: FileTreeNode;
 	expandedDirs: Set<string>;
@@ -550,11 +558,28 @@ function FileNode(props: {
 				</button>
 			</div>
 		);
+	/* 目录行挂顶（VSCode sticky scroll 语义）：滚进目录内部后，父目录逐级贴在面板顶部，
+	   只挂最外层 FILE_STICKY_MAX_LEVELS 层，更深的目录行随内容滚走（见常量注释）。
+	   - 行必须自带不透明底，否则滚动内容会从行底下透出（bg-background 与抽屉底色同一 token）；
+	   - z-10 必需：兄弟层 .file-children 是 position:relative，按绘制顺序排在本行之后，
+	     不给正 z 值的话挂顶行会被自己的子行盖住（实测叠字）。 */
+	const stickyRow = depth < FILE_STICKY_MAX_LEVELS;
 	return (
 		<div className="file-node" style={rowStyle}>
 			<Collapsible open={expanded} onOpenChange={() => onToggleDirectory(node.path)}>
 				<CollapsibleTrigger asChild>
-					<button type="button" className={cn("directory group", fileRowButtonClass, isDragOver && "bg-muted ring-1 ring-border")} style={rowStyle} title={node.relativePath} draggable onDragStart={handleDragStart} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onContextMenu={menu}>
+					<button
+						type="button"
+						className={cn("directory group", fileRowButtonClass, stickyRow && "sticky z-10 bg-background", isDragOver && "bg-muted ring-1 ring-border")}
+						style={stickyRow ? { ...rowStyle, top: `${depth * FILE_ROW_HEIGHT_PX}px` } : rowStyle}
+						title={node.relativePath}
+						draggable
+						onDragStart={handleDragStart}
+						onDragOver={handleDragOver}
+						onDragLeave={handleDragLeave}
+						onDrop={handleDrop}
+						onContextMenu={menu}
+					>
 						<ChevronRight
 							className={cn(
 								"file-node-chevron size-3.5 shrink-0 transition-transform",
@@ -568,7 +593,10 @@ function FileNode(props: {
 						<span className="file-node-name">{node.name}</span>
 					</button>
 				</CollapsibleTrigger>
-				<CollapsibleContent>
+				{/* overflow-clip 取代默认的 overflow-hidden：hidden 会让本层变成「不滚动的 scrollport」，
+				   深层目录行的 sticky 只相对它生效（等于不挂顶）；clip 同样按 padding box 裁剪、
+				   高度动画观感不变，但不建立滚动容器，挂顶仍相对抽屉滚动层（.files-panel）。 */}
+				<CollapsibleContent className="overflow-clip">
 					{/* 懒加载占位与加载失败态：二者互斥，都不会再盖住文件名。
 					 - 占位独立成行（不是行内绝对定位），children 到位后整行消失；
 					 - hasChildren=false 表示目录 listing 已失败或目录为空，不展示占位。

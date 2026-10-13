@@ -279,3 +279,59 @@ test("响应体超过 maxBytes 时中止读取并回退", async () => {
 	assert.equal(await resolver.resolveLatestVersion("huge-pkg"), "fallback-large");
 	assert.ok(cancelled >= 1, "超限后必须 cancel reader 断开连接");
 });
+
+test("onFallback 报出回退包名与原因，快路命中时不报", async () => {
+	const { createNpmRegistryVersionResolver } = loadResolverModule();
+	const reports = [];
+
+	// 快路命中：不得触发诊断回调
+	const ok = recordingFetch({ [`${REGISTRY_BASE}pkg-ok`]: streamResponse({ "dist-tags": { latest: "1.0.0" } }) });
+	const okResolver = createNpmRegistryVersionResolver({
+		resolveRegistryBase: async () => REGISTRY_BASE,
+		npmViewFallback: async () => "fallback",
+		onFallback: (info) => reports.push(info),
+		fetchImpl: ok.fetchImpl,
+	});
+	assert.equal(await okResolver.resolveLatestVersion("pkg-ok"), "1.0.0");
+
+	// 非 2xx：报出包名 + HTTP 状态（这是「registry 不可达」的唯一事后证据）
+	const failing = recordingFetch({ [`${REGISTRY_BASE}pkg-fail`]: streamResponse("nope", { status: 500 }) });
+	const failResolver = createNpmRegistryVersionResolver({
+		resolveRegistryBase: async () => REGISTRY_BASE,
+		npmViewFallback: async () => "fallback",
+		onFallback: (info) => reports.push(info),
+		fetchImpl: failing.fetchImpl,
+	});
+	assert.equal(await failResolver.resolveLatestVersion("pkg-fail"), "fallback");
+
+	// 基址缺失（npm config get registry 子进程挂了 / 输出非法）同样要报
+	const noBase = createNpmRegistryVersionResolver({
+		resolveRegistryBase: async () => null,
+		npmViewFallback: async () => "fallback",
+		onFallback: (info) => reports.push(info),
+	});
+	assert.equal(await noBase.resolveLatestVersion("pkg-nobase"), "fallback");
+
+	assert.deepEqual(
+		reports.map((info) => info.packageName),
+		["pkg-fail", "pkg-nobase"],
+		"命中快路的包不得报回退（否则日志会把正常路径当成故障）",
+	);
+	assert.match(reports[0].reason, /HTTP 500/);
+	assert.match(reports[1].reason, /base unresolved/);
+});
+
+test("onFallback 抛错不得影响回退结果（诊断必须 fail-safe）", async () => {
+	const { createNpmRegistryVersionResolver } = loadResolverModule();
+	const { fetchImpl } = recordingFetch({});
+	const resolver = createNpmRegistryVersionResolver({
+		resolveRegistryBase: async () => REGISTRY_BASE,
+		npmViewFallback: async (packageName) => `fallback-${packageName}`,
+		onFallback: () => {
+			throw new Error("logger blew up");
+		},
+		fetchImpl,
+	});
+
+	assert.equal(await resolver.resolveLatestVersion("pkg-a"), "fallback-pkg-a");
+});

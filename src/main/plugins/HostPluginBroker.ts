@@ -3,6 +3,7 @@ import type { HostPluginContext, HostPluginResponse } from "../../shared/types/h
 import type { HostPluginManager } from "./HostPluginManager";
 import type { HostPluginSessions } from "./HostPluginSessions";
 import type { HostPluginStorage } from "./HostPluginStorage";
+import { LocalServiceRegistry } from "../localServices/LocalServiceRegistry";
 import { parsePluginRequest } from "./hostPluginPolicy";
 import { HostPluginNetwork } from "./HostPluginNetwork";
 
@@ -16,15 +17,19 @@ type Binding = {
 	windowAt: number;
 	/** Every network operation belongs to this binding and is cancelled when its scope is revoked. */
 	requests: Set<AbortController>;
+	/** 本地服务启停的取消范围：撤销授权时立刻停掉还在轮询的 start/stop。 */
+	scope: AbortController;
 };
 
 export type HostPluginNavigateSink = (input: { projectId: string; sessionId: string; entryId?: string }) => void;
 export type HostPluginOpenExternalSink = (url: string) => void;
+export type HostPluginOpenBrowserSink = (url: string) => void;
 
 export class HostPluginBroker {
 	private readonly bindings = new Map<number, Binding>();
 	private readonly navigateSinks = new Set<HostPluginNavigateSink>();
 	private readonly openExternalSinks = new Set<HostPluginOpenExternalSink>();
+	private readonly openBrowserSinks = new Set<HostPluginOpenBrowserSink>();
 	private readonly unsubscribe: () => void;
 	constructor(
 		private readonly manager: HostPluginManager,
@@ -32,6 +37,8 @@ export class HostPluginBroker {
 		private readonly storage: HostPluginStorage,
 		private readonly projectNameOf?: (projectId: string) => string | undefined,
 		private readonly network = new HostPluginNetwork(),
+		/** 本地服务适配器表。缺省是空表：没装配适配器的服务一律 `service-unavailable`（fail-closed）。 */
+		private readonly services = new LocalServiceRegistry([]),
 	) {
 		// Manager revocation happens before persistence: do not leave a live socket while disable writes to disk.
 		this.unsubscribe = manager.onChanged(() => {
@@ -43,6 +50,9 @@ export class HostPluginBroker {
 	private cancel(binding: Binding): void {
 		for (const request of binding.requests) request.abort(new Error("plugin-revoked"));
 		binding.requests.clear();
+		// 服务启停可能还在轮询等进程起来；撤销授权/换上下文时一并停掉，scope 换成新的一轮。
+		binding.scope.abort(new Error("plugin-revoked"));
+		binding.scope = new AbortController();
 	}
 
 	/** 存进来的范围一律先在桌面侧补全显示名：插件拿到 context 就能直接渲染。 */
@@ -52,7 +62,7 @@ export class HostPluginBroker {
 
 	bind(senderId: number, pluginId: string, fingerprint: string, context: HostPluginContext): void {
 		this.unbind(senderId);
-		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set() });
+		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set(), scope: new AbortController() });
 	}
 
 	update(senderId: number, context: HostPluginContext): void {
@@ -81,6 +91,12 @@ export class HostPluginBroker {
 		return () => this.openExternalSinks.delete(sink);
 	}
 
+	/** 本地服务的 Web UI 同样由桌面层打开（内置浏览器只在渲染层持有）：broker 只转发主进程适配器给出的回环地址。 */
+	onOpenBrowser(sink: HostPluginOpenBrowserSink): () => void {
+		this.openBrowserSinks.add(sink);
+		return () => this.openBrowserSinks.delete(sink);
+	}
+
 	private authorized(senderId: number, binding: Binding, generation: number): boolean {
 		return this.bindings.get(senderId) === binding && binding.generation === generation && this.manager.getEnabled(binding.pluginId)?.fingerprint === binding.fingerprint;
 	}
@@ -105,6 +121,9 @@ export class HostPluginBroker {
 			// workbench 下的方法权限逐个对应，不用前缀推断：新增方法忘了登记会报错而不是白拿权限。
 			if (request.method === "workbench.navigate" && !plugin.manifest.permissions.includes("workbench.navigate")) throw new Error("permission-denied");
 			if (request.method === "workbench.openExternal" && !plugin.manifest.permissions.includes("workbench.openExternal")) throw new Error("permission-denied");
+			// 服务控制是「权限 + 点名」双重门：插件只能动自己声明过、且 PiDeck 已实现的服务。
+			// 四个方法逐个登记（不用前缀推断）：新增服务方法忘了登记会报错，而不是白拿权限。
+			if ((request.method === "service.status" || request.method === "service.start" || request.method === "service.stop" || request.method === "service.openUi") && (!plugin.manifest.permissions.includes("service.local") || !plugin.manifest.services?.includes(request.id))) throw new Error("permission-denied");
 			let value: unknown;
 			switch (request.method) {
 				case "network.request": {
@@ -146,6 +165,24 @@ export class HostPluginBroker {
 					await this.storage.remove(binding.pluginId, request.key, () => this.authorized(senderId, binding, generation));
 					value = null;
 					break;
+				case "service.status":
+				case "service.start":
+				case "service.stop": {
+					const adapter = this.services.get(request.id);
+					if (!adapter) throw new Error("service-unavailable");
+					value = request.method === "service.status" ? await adapter.status(binding.scope.signal) : request.method === "service.start" ? await adapter.start(binding.scope.signal) : await adapter.stop(binding.scope.signal);
+					break;
+				}
+				case "service.openUi": {
+					const adapter = this.services.get(request.id);
+					if (!adapter) throw new Error("service-unavailable");
+					// 地址来自主进程适配器（已收口到回环），插件拿不到也改不了，只能要求「打开」。
+					const status = await adapter.status(binding.scope.signal);
+					if (!status.running || !status.uiUrl) throw new Error("service-not-running");
+					if (this.authorized(senderId, binding, generation)) for (const sink of this.openBrowserSinks) sink(status.uiUrl);
+					value = null;
+					break;
+				}
 				case "workbench.openExternal":
 					// 与导航同一条线路：转发前复查授权，插件被撤销后不再弹浏览器。
 					if (this.authorized(senderId, binding, generation)) for (const sink of this.openExternalSinks) sink(request.url);
@@ -176,5 +213,6 @@ export class HostPluginBroker {
 		for (const senderId of this.bindings.keys()) this.unbind(senderId);
 		this.navigateSinks.clear();
 		this.openExternalSinks.clear();
+		this.openBrowserSinks.clear();
 	}
 }

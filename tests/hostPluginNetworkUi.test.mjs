@@ -11,6 +11,7 @@ const { parseHostPluginManifest } = loadTsCommonJs("src/main/plugins/hostPluginM
 const { HostPluginPermissionDetails, HOST_PLUGIN_PERMISSION_OPTIONS } = loadTsCommonJs("src/renderer/src/config/HostPluginPermissionDetails.tsx", {
 	stubs: { "../i18n": { t: (key) => key }, "@/lib/utils": loadTsCommonJs("src/renderer/src/lib/utils.ts") },
 });
+const { LOCAL_SERVICE_IDS } = loadTsCommonJs("src/shared/localServices.ts");
 const draft = (over = {}) => ({ ...initialHostPluginScaffoldDraft(), id: "demo.network", name: "Network demo", ...over });
 const manifest = (over = {}) => ({ schemaVersion: 1, apiVersion: 1, id: "demo.network", name: "Network demo", version: "0.1.0", permissions: [], contributes: { panels: [{ id: "main", title: "Network demo", entry: "app.html" }], commands: [] }, ...over });
 
@@ -55,12 +56,16 @@ test("network scaffold form refuses missing, duplicate or malformed grants", () 
 
 test("consent lists every requested capability and exact origin/port, warning about data export and local services", () => {
 	const permissions = Array.from(HOST_PLUGIN_PERMISSION_OPTIONS, ([permission]) => permission);
-	const value = parseHostPluginManifest(manifest({ permissions, network: { httpsOrigins: ["https://api.example.com", "https://other.example.com:8443"], localPorts: [4187, 8090] } }));
+	const value = parseHostPluginManifest(manifest({ permissions, services: [LOCAL_SERVICE_IDS[0]], network: { httpsOrigins: ["https://api.example.com", "https://other.example.com:8443"], localPorts: [4187, 8090] } }));
 	const html = renderToStaticMarkup(React.createElement(HostPluginPermissionDetails, { manifest: value, warnings: true }));
 	for (const [, key] of HOST_PLUGIN_PERMISSION_OPTIONS) assert.ok(html.includes(key), key);
 	for (const destination of ["https://api.example.com", "https://other.example.com:8443", "http://127.0.0.1:4187", "http://127.0.0.1:8090"]) assert.ok(html.includes(destination), destination);
 	assert.ok(html.includes("hostPlugins.networkDataWarning"));
 	assert.ok(html.includes("hostPlugins.networkLocalWarning"));
+	// 服务控制同样要在授权前点名：只写 “可控制本地服务” 不是授权，具体服务 id 才是。
+	assert.ok(html.includes("hostPlugins.serviceDestinations"));
+	assert.ok(html.includes(LOCAL_SERVICE_IDS[0]));
+	assert.ok(html.includes("hostPlugins.serviceLocalWarning"));
 });
 
 test("offline consent shows no network warning and network-only consent does not claim session access", () => {

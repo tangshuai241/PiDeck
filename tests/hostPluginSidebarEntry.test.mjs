@@ -13,7 +13,7 @@ const rendererIcons = readFileSync("src/renderer/src/components/plugins/hostPlug
 test("host plugin dock entry renders under the automation entry in the sidebar action block", () => {
 	assert.match(sidebar, /import \{ HostPluginDockButtons \} from "\.\.\/plugins\/HostPluginDockButtons";/);
 	const automationIndex = sidebar.indexOf("<AutomationDockButton />");
-	const pluginIndex = sidebar.indexOf("<HostPluginDockButtons />");
+	const pluginIndex = sidebar.indexOf("<HostPluginDockButtons");
 	const tabsIndex = sidebar.indexOf("<Tabs");
 	assert.ok(automationIndex > -1, "automation entry missing");
 	assert.ok(pluginIndex > automationIndex, "plugin entries should sit below the automation entry");
@@ -26,8 +26,12 @@ test("dock rows only come from enabled plugins and share the panel atom open pat
 	assert.match(dock, /hostPluginPanelAtom/);
 	assert.match(dock, /rows\.length === 0/);
 	assert.doesNotMatch(dock, /hostPluginsMount|desktopApi\.hostPlugins\.mount/);
-	// page 面板是常驻覆盖层：再点同一面板 = 关闭；modal 面板仍是纯打开
-	assert.match(dock, /selected\?\.pluginId === row\.pluginId && selected\?\.panelId === row\.panelId && row\.presentation === "page" \? openPanel\(null\)/);
+	// page 面板是常驻覆盖层：再点同一面板 = 关闭；modal 面板仍是纯打开；popover 面板由 PopoverTrigger 接管点击
+	assert.match(dock, /onClick=\{row\.presentation === "popover" \? undefined : \(\) => \(selectedRow && row\.presentation === "page" \? openPanel\(null\) : openPanel\(\{ pluginId: row\.pluginId, panelId: row\.panelId \}\)\)\}/);
+	// popover 面板就地展开在侧栏那一行旁边，且给 HostPluginSurface（内部 flex-1）一个定高 flex 列
+	assert.match(dock, /<PopoverTrigger asChild>/);
+	assert.match(dock, /<PopoverContent[^>]*side="right"/);
+	assert.match(dock, /flex h-\[280px\] flex-col/);
 });
 
 test("page panels render as a non-modal overlay over the session column, not a dialog", () => {
@@ -39,7 +43,7 @@ test("page panels render as a non-modal overlay over the session column, not a d
 	assert.match(overlay, /absolute inset-0/);
 	assert.match(overlay, /HostPluginSurface/);
 	// 弹框宿主必须跳过 page 面板，两处呈现互斥
-	assert.match(host, /panel\.presentation !== "page"/);
+	assert.match(host, /presentation !== "page"/);
 	// App 在会话列挂 overlay，会话树保持挂载
 	assert.match(app, /HostPluginPageOverlay projectId=\{activeProject\?\.id\}/);
 	const wrapIndex = app.indexOf('<div className="relative flex h-full min-h-0 min-w-0 flex-col">');
@@ -66,9 +70,12 @@ test("panel icons stay allowlisted end to end with a puzzle fallback", () => {
 });
 
 test("plugin panel presents as a page-sized modal aligned with the automation modal", () => {
-	assert.match(host, /size="xl"/);
+	// modal 面板保持近全屏；popover 面板是紧凑面板（几行控件），退化成小对话框而不是整窗页面
+	assert.match(host, /size=\{compact \? "default" : "xl"\}/);
 	assert.match(host, /stagger/);
 	assert.match(host, /h-\[min\(760px,calc\(100vh-64px\)\)\]/);
+	assert.match(host, /const compact = presentation === "popover";/);
+	assert.match(host, /h-\[min\(340px,calc\(100vh-64px\)\)\]/);
 });
 
 test("settings tab exposes the development guide entry linking the canonical guide", () => {

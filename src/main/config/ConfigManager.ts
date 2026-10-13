@@ -641,7 +641,9 @@ export class ConfigManager {
 
 					// 成功路径若依赖检测侧自动补 /v1，而用户配置仍是根路径，
 					// 会话侧会原样用 baseUrl → 返回建议 baseUrl 供 UI 自动改写。
-					const sessionBaseUrlNeedsVersion = needsSessionBaseUrlVersionHint(baseUrl, request.url);
+					// apiType 必须传：Anthropic 系探测走 /v1/models 但会话侧 SDK 自拼 /v1/messages，
+					// 这种协议补版本段反而会让会话 404（issue #337）。
+					const sessionBaseUrlNeedsVersion = needsSessionBaseUrlVersionHint(baseUrl, request.url, apiType);
 					const suggestedBaseUrl = suggestNormalizedBaseUrl(baseUrl, request.url, apiType) ?? undefined;
 					return {
 						success: true,
@@ -675,7 +677,7 @@ export class ConfigManager {
 			error: lastError ?? this.translate("mainConfig.fetchModelsFailed"),
 			...(lastDebugDetails ? { debugDetails: lastDebugDetails } : {}),
 			requestUrl: lastRequestUrl,
-			sessionBaseUrlNeedsVersion: needsSessionBaseUrlVersionHint(baseUrl, lastRequestUrl),
+			sessionBaseUrlNeedsVersion: needsSessionBaseUrlVersionHint(baseUrl, lastRequestUrl, apiType),
 		};
 	}
 

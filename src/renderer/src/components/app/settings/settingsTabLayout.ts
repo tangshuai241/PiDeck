@@ -33,10 +33,11 @@ export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "pet" },
 	{ id: "vision" },
 	{ id: "imagegen" },
-	{ id: "acp" },
+	{ id: "videogen" },
+
 	{ id: "hostplugins" },
-	{ id: "web", dividerBefore: true },
-	{ id: "editors" },
+
+	{ id: "editors", dividerBefore: true },
 	{ id: "git" },
 	{ id: "dev", dividerBefore: true },
 	{ id: "usage" },
@@ -62,7 +63,7 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
 	appearance: "settings.tabs.appearance",
 	terminal: "settings.tabs.terminal",
 	proxy: "settings.tabs.proxy",
-	web: "settings.tabs.web",
+
 	editors: "settings.tabs.editors",
 	git: "settings.tabs.git",
 	dev: "settings.tabs.dev",
@@ -75,7 +76,8 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
-	acp: "settings.tabs.acp",
+	videogen: "settings.tabs.videogen",
+
 	hostplugins: "settings.tabs.hostplugins",
 };
 
@@ -89,7 +91,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	appearance: ["外观", "主题", "深色", "浅色", "字体", "theme", "appearance", "dark"],
 	terminal: ["终端", "配色", "字体", "光标", "terminal", "console", "font", "shell"],
 	proxy: ["代理", "网络", "proxy", "http proxy", "网络代理"],
-	web: ["局域网", "web 服务", "远程", "手机访问", "lan", "webserver"],
+
 	editors: ["外部编辑器", "vscode", "编辑器", "editor", "ide"],
 	git: ["git", "版本控制", "提交", "commit", "分支", "branch"],
 	dev: ["开发者", "调试", "dev", "developer", "debug"],
@@ -102,6 +104,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	process: ["进程", "监控", "内存", "process", "monitor"],
 	vision: ["视觉", "图片识别", "视觉桥", "vision", "multimodal"],
 	imagegen: ["生图", "画图", "图片生成", "imagegen", "image"],
-	acp: ["acp", "agent", "cli", "工具", "外部 agent", "gemini", "kimi", "claude code", "opencode"],
+	videogen: ["生视频", "视频生成", "videogen", "video"],
+
 	hostplugins: ["插件", "宿主插件", "工作台插件", "plugin", "host plugin", "扩展安装", "pideck 插件"],
 };

@@ -135,3 +135,20 @@ test("draftCommands: get_commands 用元数据级短超时，不得继承 prompt
 	await manager.draftCommands("project-1");
 	assert.ok(observedTimeout <= 10_000, `preview RPC timeout must stay metadata-bounded, got ${observedTimeout}`);
 });
+
+test("getCommands (live runtime): get_commands 同样用元数据级短超时，不得继承 prompt 级 rpcTimeout", async () => {
+	// live 会话与 standby 预览暴露面相同：卡死的 pi 进程不能把活会话的斜杠菜单
+	// 拖到 rpcTimeout（默认 600s）。超时后 reject → Coordinator 转
+	// SESSION_COMMAND_FAILED → 渲染层回退静态建议（useSessionComposerController
+	// 的 catch 分支），语义与能力缺失路径一致。
+	let observedTimeout;
+	const manager = createManager({
+		rpc: async (_request, timeout) => {
+			observedTimeout = timeout;
+			return { success: true, data: { commands: [{ name: "live:cmd", description: "Live", source: "skill" }] } };
+		},
+	});
+	const commands = await manager.getCommands("agent-standby");
+	assert.equal(commands[0]?.name, "live:cmd");
+	assert.ok(observedTimeout <= 10_000, `live get_commands timeout must stay metadata-bounded, got ${observedTimeout}`);
+});

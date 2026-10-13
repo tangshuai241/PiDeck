@@ -80,8 +80,6 @@ test("legacy spinner shells delegate rotation to the shared utility", () => {
 		["src/renderer/src/components/overlays/OverlayComponents.tsx", 'className="loader animate-pideck-spin"'],
 		["src/renderer/src/components/session/WorkspaceSurface.tsx", 'className="mini-loader animate-pideck-spin"'],
 		["src/renderer/src/components/feishu/FeishuLinkIndicator.tsx", 'className="feishu-link-spinner animate-pideck-spin"'],
-		["src/renderer/src/config/extensionsRecommendedPackages.tsx", 'className="skillhub-installing-dot animate-pideck-spin"'],
-		["src/renderer/src/web/WebTimeline.tsx", 'className="tool-card-spinner animate-pideck-spin"'],
 	]) {
 		assert.match(readFileSync(filePath, "utf8"), new RegExp(selector));
 	}

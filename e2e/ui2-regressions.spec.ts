@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { openFirstSession, makeSeedProject } from "./open-session";
+import { openFirstSession, makeSeedProject, openSettings } from "./open-session";
 
 const seedProject = makeSeedProject("Ui2RegE2E");
 test.use({ seedProjects: [seedProject] });
@@ -12,7 +12,7 @@ test.use({ seedProjects: [seedProject] });
 test("settings select: option is clickable through dialog layers", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 

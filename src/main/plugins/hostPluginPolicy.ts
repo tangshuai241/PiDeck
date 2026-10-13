@@ -1,5 +1,6 @@
 /** Pure policy shared by the view host and broker; failures never fall back to a broader capability. */
 import type { HostPluginContext, HostPluginRequest } from "../../shared/types/hostPlugin";
+import { isLocalServiceId } from "../../shared/localServices";
 import { isHostPluginAsset, isPluginRecord } from "./hostPluginManifest";
 import { parseHostPluginNetworkRequest } from "./hostPluginNetworkPolicy";
 
@@ -101,6 +102,11 @@ export function parsePluginRequest(value: unknown): HostPluginRequest {
 		}
 		if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) throw new Error("invalid-request");
 		return { method: value.method, url: parsed.toString() };
+	}
+	if (value.method === "service.status" || value.method === "service.start" || value.method === "service.stop" || value.method === "service.openUi") {
+		// 服务 ID 必须命中 PiDeck 自己实现的白名单；命令、参数、端口全在主进程适配器里，插件无从传入。
+		if (!isLocalServiceId(value.id)) throw new Error("invalid-request");
+		return { method: value.method, id: value.id };
 	}
 	throw new Error("unsupported-method");
 }

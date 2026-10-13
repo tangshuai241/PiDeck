@@ -137,6 +137,12 @@ function loadConfigManager() {
 				);
 				return m.exports;
 			}
+			// providerUsageCustom（余额面板解析）在 trust 测试里不被调用，空实现即可。
+			// 它的 providerUsagePath/providerUsageBooster 是无扩展名相对导入，落到下面的兜底 require
+			// 会被 Node 的 ESM 解析判 ERR_MODULE_NOT_FOUND，必须在映射表里截断。
+			if (id === "./providerUsageCustom") {
+				return { parseSub2ApiPanelBalance: () => undefined };
+			}
 			// 兜底：相对 specifier 指向未显式 stub 的 .ts 源文件时，按 ConfigManager 所在目录
 			// （src/main/config）解析成绝对路径再 require（node 24 类型剥离只认带扩展名的路径；
 			// ConfigManager 每加一个 import 都会走到这里）。

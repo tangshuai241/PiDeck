@@ -50,7 +50,7 @@ export function ComposerImageGenOptions(props: {
 					props.onSelectionChange(next.providerId, next.modelId);
 				}}
 			>
-				<SelectTrigger size="sm" className="composer-bar-btn h-7 max-w-[16rem] gap-1 rounded-md border-transparent px-1.5 text-control font-medium text-foreground hover:bg-muted/60" title={t("imagegen.providerModel")} aria-label={t("imagegen.providerModel")}>
+				<SelectTrigger size="sm" className="composer-bar-btn h-7 max-w-[16rem] gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-medium text-foreground hover:bg-muted/60 data-[state=open]:bg-muted/60" title={t("imagegen.providerModel")} aria-label={t("imagegen.providerModel")}>
 					<SelectValue placeholder={t("imagegen.providerModel")}>
 						<span className="min-w-0 truncate">{triggerLabel || t("imagegen.providerModel")}</span>
 					</SelectValue>
@@ -76,7 +76,7 @@ export function ComposerImageGenOptions(props: {
 			{extra.size ? <ImageGenSizeCombobox value={props.size} disabled={props.disabled} onChange={props.onSizeChange} /> : null}
 			{extra.output_format ? (
 				<Select value={outputFormat} disabled={props.disabled} onValueChange={props.onOutputFormatChange}>
-					<SelectTrigger size="sm" className="composer-bar-btn h-7 max-w-[5.5rem] gap-1 rounded-md border-transparent px-1.5 text-control font-medium uppercase text-foreground hover:bg-muted/60" title={t("imagegen.outputFormatHint")} aria-label={t("imagegen.outputFormat")}>
+					<SelectTrigger size="sm" className="composer-bar-btn h-7 max-w-[5.5rem] gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-medium uppercase text-foreground hover:bg-muted/60 data-[state=open]:bg-muted/60" title={t("imagegen.outputFormatHint")} aria-label={t("imagegen.outputFormat")}>
 						<SelectValue placeholder={t("imagegen.outputFormat")} />
 					</SelectTrigger>
 					<SelectContent align="start">

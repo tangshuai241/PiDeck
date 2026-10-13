@@ -14,9 +14,11 @@ import {
 	sessionQuotesByIdAtom,
 	sessionRecordsAtom,
 	sessionRuntimeByIdAtom,
+	sessionSendStateByIdAtom,
 	setSessionAttachmentsAtom,
 	setSessionDraftAtom,
 	setSessionQuotesAtom,
+	type SessionQuoteMap,
 	setSessionSendStateAtom,
 	upsertSessionAtom,
 	dshRuntimeStatusAtom,
@@ -68,7 +70,7 @@ export type UseSessionSendOptions = {
 	showUnknown?: () => void;
 	/** ACP 首启失败回收（可选）：会话激活从未成功（仍 draft 且被 agent 拒收）时由外层
 	 *  删除会话并回收草稿到引导页；返回 true 表示已清理，发送链路立即结算。 */
-	pruneFailedAcpDraft?: (sessionId: string) => Promise<boolean> | boolean;
+
 	/** Called when streamingBehavior is "steer" before sending. Returns true if enqueued. */
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
 };
@@ -128,7 +130,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		setQuotes({ sessionId: targetSessionId, value: {} });
 	}
 
-	function restoreRejectedSnapshot(targetSessionId: string, message: string, imageSnapshot?: ImageContent[]) {
+	function restoreRejectedSnapshot(targetSessionId: string, message: string, imageSnapshot?: ImageContent[], quoteSnapshot?: SessionQuoteMap) {
 		options.onDraftMutation?.(targetSessionId);
 		setDraft({
 			sessionId: targetSessionId,
@@ -139,6 +141,10 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				sessionId: targetSessionId,
 				value: (current) => [...imageSnapshot, ...current],
 			});
+		}
+		if (quoteSnapshot) {
+			// token 与全文必须一同回填；发送期间新增的引用保留，以免重试变成孤儿 token。
+			setQuotes({ sessionId: targetSessionId, value: (current) => ({ ...quoteSnapshot, ...current }) });
 		}
 	}
 
@@ -177,14 +183,16 @@ export function useSessionSend(options: UseSessionSendOptions) {
 	 * keepDraft=true（快捷消息直发）时跳过：那段文字原本不在草稿里，回填会污染用户输入
 	 * （弹框里点一下就能重发，代价远低于把用户写了一半的内容顶下去）。
 	 */
-	function restoreRejectedPrompt(targetSessionId: string, keepDraft: boolean, message: string, imageSnapshot?: ImageContent[]) {
+	function restoreRejectedPrompt(targetSessionId: string, keepDraft: boolean, message: string, imageSnapshot?: ImageContent[], quoteSnapshot?: SessionQuoteMap) {
 		if (keepDraft) return;
-		restoreRejectedSnapshot(targetSessionId, message, imageSnapshot);
+		restoreRejectedSnapshot(targetSessionId, message, imageSnapshot, quoteSnapshot);
 	}
 
 	return async function sendSessionPrompt(streamingBehavior?: "steer" | "followUp", overrideText?: string) {
 		const sourceSessionId = options.sessionId;
-		if (sendingSessionIdsRef.current.has(sourceSessionId)) return;
+		// atom 随 bootstrap 提升且跨 Composer 重挂载保留；局部 ref 只守当前实例。
+		const existingSend = store.get(sessionSendStateByIdAtom)[sourceSessionId];
+		if (sendingSessionIdsRef.current.has(sourceSessionId) || existingSend?.status === "activating" || existingSend?.status === "sending") return;
 
 		// overrideText 有值 = 快捷消息直发：正文来自弹框条目而非当前草稿。
 		// 这里固定三条约束（下面所有分支都靠 keepDraft 收口）：草稿/附件不参与本次发送、
@@ -319,9 +327,22 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		if (publishBeforeActivation) publishOptimisticSubmission(sourceSessionId);
 
 		let sessionId = sourceSessionId;
+		let trackedRecord = recordAtEntry;
+		let submissionPublished = publishBeforeActivation;
+		// 身份由来源会话与 requestId 决定，不由焦点或组件挂载决定：切栏仍可后台完成，
+		// 删除/新请求接管后则禁止恢复草稿、回绑 runtime 或发布迟到状态。
+		const isCurrentRequest = () => (!trackedRecord || Boolean(store.get(sessionRecordsAtom)[sessionId])) && (!submissionPublished || store.get(sessionSendStateByIdAtom)[sessionId]?.requestId === requestId);
+		const releaseIfRetired = () => {
+			if (isCurrentRequest()) return false;
+			sendingSessionIdsRef.current.delete(sourceSessionId);
+			return true;
+		};
 		try {
 			sessionId = options.ensureSessionId ? await options.ensureSessionId(sourceSessionId) : sourceSessionId;
 		} catch (error) {
+			if (releaseIfRetired()) return;
+			// 普通发送已乐观清空草稿；队列与 /compact 尚未消费，不能重复回填。
+			if (publishBeforeActivation) restoreRejectedPrompt(sourceSessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			setSendState({
 				sessionId: sourceSessionId,
@@ -332,6 +353,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			return;
 		}
 
+		trackedRecord = store.get(sessionRecordsAtom)[sessionId] ?? trackedRecord;
+		if (releaseIfRetired()) return;
 		const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
 		const runtimeTarget = runtime?.agentId
 			? {
@@ -401,6 +424,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (!publishBeforeActivation) {
+			submissionPublished = true;
 			if (resolveSendMode(sessionId) === "alignment") beginAlignmentSubmission(store, sessionId, requestId);
 			setSendState({
 				sessionId,
@@ -436,8 +460,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		try {
 			preparedMessage = options.prepareMessage ? await options.prepareMessage(message) : message;
 		} catch (error) {
+			if (releaseIfRetired()) return;
 			// 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发
-			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot);
+			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			// ensureSessionId 已把 composer 状态搬到真实会话；失败也必须结算同一身份。
 			setSendState({
@@ -449,11 +474,12 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			return;
 		}
 
+		if (releaseIfRetired()) return;
 		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.templates);
 		if (emptyTemplateName) {
 			// 展开器保留空模板的 /命令原文；按 verdict 拦截，避免误发到主进程。
 			// 回填原始草稿（含引用 token），保留 chip 形态
-			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot);
+			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
 			rejectEmptyTemplate(sessionId, emptyTemplateName);
 			sendingSessionIdsRef.current.delete(sourceSessionId);
 			return;
@@ -488,10 +514,18 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				...(description ? { description } : {}),
 				...(streamingBehavior ? { streamingBehavior } : {}),
 			});
-			// 新一轮开始：bump 本会话 tick，timeline 侧非最新轮据此收起。
-			// sendPrompt resolve = pi 已接受消息，旧轮即将/已经结束，此时收掉最省资源。
-			store.set(bumpNewTurnCollapseTickAtom, sessionId);
-			if (result.agentId) {
+			if (!isCurrentRequest()) return;
+			const currentRuntime = store.get(sessionRuntimeByIdAtom)[sessionId];
+			// 新代可来自本次启动；旧代/同代异进程不能回写运行时、路径或历史。
+			// 但拒收/未知仍要按本请求结算，不能因换代丢掉草稿或未知投递提示。
+			const staleRuntime = result.agentId && currentRuntime && ((result.runtimeGeneration !== undefined && result.runtimeGeneration < currentRuntime.runtimeGeneration) || ((result.runtimeGeneration ?? currentRuntime.runtimeGeneration) === currentRuntime.runtimeGeneration && currentRuntime.agentId !== result.agentId));
+			if (staleRuntime && result.accepted) {
+				setSendState({ sessionId, state: { status: "idle" } });
+				return;
+			}
+			// 只有已接受的消息才开始新一轮；拒绝/未知投递不能折叠现有时间线。
+			if (result.accepted) store.set(bumpNewTurnCollapseTickAtom, sessionId);
+			if (result.agentId && !staleRuntime) {
 				bindRuntime({
 					sessionId,
 					agentId: result.agentId,
@@ -542,7 +576,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				options.showUnknown?.();
 			} else {
 				// 拒绝时回填原始草稿（含 token）保留 chip 形态；unknown 快照仍存展开后文本（已实际投递的内容）
-				restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot);
+				restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
 				setSendState({
 					sessionId,
 					state: { status: "error", requestId, error: deliveryError },
@@ -551,15 +585,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				// ACP 首启失败回收：激活从未成功（status 仍 draft，agent 侧会话未建、无任何消息）
 				// 的 acp 会话是纯垃圾条目（-32602/spawn 失败都走这）——外层删会话并把回填后的
 				// 草稿搬回引导页，不在历史列表留「xxx agent」空会话。prune 成功即结算：后续状态都指向已删会话。
-				if (record?.backend === "acp" && record.status === "draft") {
-					const pruned = await options.pruneFailedAcpDraft?.(sessionId);
-					if (pruned) {
-						sendingSessionIdsRef.current.delete(sourceSessionId);
-						return;
-					}
-				}
 			}
 		} catch (error) {
+			if (!isCurrentRequest()) return;
 			setSendState({
 				sessionId,
 				state: {

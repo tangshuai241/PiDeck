@@ -161,6 +161,43 @@ test("list purges residual built-in file already marked removed", async () => {
 	rmSync(fixtureHome, { recursive: true, force: true });
 });
 
+test("list keeps hidden built-ins off the extensions page without writing any enable/disable state", async () => {
+	const fixtureHome = mkdtempSync(join(tmpdir(), "pideck-hidden-builtin-list-"));
+	mkdirSync(join(fixtureHome, ".pi", "agent", "extensions"), { recursive: true });
+	// 历史 opt-in 残留：两个已隐藏的内置扩展都在 enabledBuiltInExtensions 里
+	const enabledBuiltInExtensions = ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"];
+	let settings = { removedBuiltInExtensions: [], enabledBuiltInExtensions };
+	const { ExtensionManager } = loadExtensionManager({ homeDir: fixtureHome, runPiOutput: "User packages:\n" });
+	const manager = new ExtensionManager(
+		{
+			check: async () => ({ installed: true, version: "0.80.0" }),
+			createInvocation: (cmd, args) => ({ command: cmd, args, shell: false }),
+			createProcessEnv: () => process.env,
+			resolveCommand: () => "pi",
+		},
+		() => ({}),
+		() => settings,
+		async (patch) => {
+			settings = { ...settings, ...patch };
+			return settings;
+		},
+	);
+
+	const result = await manager.list(false);
+	const sources = result.extensions.map((extension) => extension.source);
+	assert.equal(sources.includes("pi-deck-gui-bridge.ts"), false);
+	assert.equal(sources.includes("pi-deck-ext-points.ts"), false);
+	// 对照组：非隐藏的内置扩展照旧补齐（否则上面两条可能是「补齐循环整个没跑」造成的假绿）
+	assert.equal(sources.includes("pi-deck-todo.ts"), true);
+	// 本需求刻意不走禁用/启用写入：历史 opt-in 残留原样不动
+	assert.equal(settings.enabledBuiltInExtensions?.length, 2);
+	assert.equal(settings.enabledBuiltInExtensions?.[0], "pi-deck-gui-bridge.ts");
+	assert.equal(settings.enabledBuiltInExtensions?.[1], "pi-deck-ext-points.ts");
+	assert.equal(settings.removedBuiltInExtensions?.length, 0);
+
+	rmSync(fixtureHome, { recursive: true, force: true });
+});
+
 test("toggleBuiltIn opt-in writes enabledBuiltInExtensions and never touches removed", async () => {
 	const fixtureHome = mkdtempSync(join(tmpdir(), "pideck-optin-toggle-"));
 	let settings = { removedBuiltInExtensions: [], enabledBuiltInExtensions: [] };

@@ -12,17 +12,35 @@ const TRAY_ICON_SIZE = 16;
  * 解析 logo 风格对应的图标位图；资源缺失（打包漏带/清理工具误删）返回 null，由调用方保持当前图标。
  *
  * 窗口与托盘共用这一条解析路径：两处各自 createFromPath 会在新增风格时漏改其中一处。
+ * custom 风格读 logoCustomImage（data URL）；图缺失/解不开时回落默认位图，不出现「无图标」。
  */
-export function resolveLogoImage(style: LogoStyle | string | null | undefined): { resolved: LogoStyle; image: NativeImage } | null {
-	const resolved = resolveLogoStyle(style);
-	const imagePath = resolved === "pi-tui" ? piTuiIconPath : classicIconPath;
-	const image = nativeImage.createFromPath(imagePath);
+export function resolveLogoImage(style: LogoStyle | string | null | undefined, customLogoDataUrl?: string | null): { resolved: LogoStyle; image: NativeImage } | null {
+	let resolved = resolveLogoStyle(style);
+	let image: NativeImage | null = null;
+	if (resolved === "custom") {
+		image = createCustomLogoImage(customLogoDataUrl);
+		// 回落档与渲染层 LogoMark 保持一致（都走默认标），否则同一设置下窗口图标与界面会各显一个标
+		if (!image) resolved = "pi-tui";
+	}
+	if (!image) image = nativeImage.createFromPath(resolved === "pi-tui" ? piTuiIconPath : classicIconPath);
 	if (image.isEmpty()) {
 		// 图标资源缺失只影响本风格图标不生效，降级日志不抛
 		void getAppLogger()?.warn("app-logo", "Logo style icon image is empty, keeping current icon", { resolved });
 		return null;
 	}
 	return { resolved, image };
+}
+
+/** 自定义 logo 位图：只收内联 data:image/*（挡住路径/远程 URL），解不开返回 null 由调用方回落默认位图。 */
+function createCustomLogoImage(dataUrl: string | null | undefined): NativeImage | null {
+	if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) return null;
+	try {
+		const image = nativeImage.createFromDataURL(dataUrl);
+		return image.isEmpty() ? null : image;
+	} catch (error) {
+		void getAppLogger()?.warn("app-logo", "Failed to decode custom logo image, falling back to default mark", { error: error instanceof Error ? error.message : String(error) });
+		return null;
+	}
 }
 
 /**
@@ -33,8 +51,8 @@ export function resolveLogoImage(style: LogoStyle | string | null | undefined): 
  * macOS 走 app.dock.setIcon（窗口左上角是交通灯，无窗口图标概念）。
  * 托盘不在此函数内：Tray 实例归 index.ts 持有，见下方 applyTrayLogoStyle。
  */
-export function applyWindowLogoStyle(style: LogoStyle | string | null | undefined, getMainWindow: () => BrowserWindow | null): void {
-	const entry = resolveLogoImage(style);
+export function applyWindowLogoStyle(style: LogoStyle | string | null | undefined, getMainWindow: () => BrowserWindow | null, customLogoDataUrl?: string | null): void {
+	const entry = resolveLogoImage(style, customLogoDataUrl);
 	if (!entry) return;
 	const { resolved, image } = entry;
 	const win = getMainWindow();
@@ -60,8 +78,8 @@ export function applyWindowLogoStyle(style: LogoStyle | string | null | undefine
  * 托盘可能尚未创建（setupTray 在 whenReady 之后）或已被退出清理销毁，两种情况都静默跳过——
  * 下次 setupTray 会按当时的设置值重新建出正确风格。
  */
-export function applyTrayLogoStyle(style: LogoStyle | string | null | undefined, getTray: () => Tray | null): void {
-	const entry = resolveLogoImage(style);
+export function applyTrayLogoStyle(style: LogoStyle | string | null | undefined, getTray: () => Tray | null, customLogoDataUrl?: string | null): void {
+	const entry = resolveLogoImage(style, customLogoDataUrl);
 	if (!entry) return;
 	const { resolved, image } = entry;
 	const tray = getTray();

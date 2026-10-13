@@ -43,6 +43,8 @@ export type SessionPaneServices = {
 			behavior?: "steer" | "followUp";
 		},
 	) => boolean;
+	/** 「停止响应」时抑制排队消息自动投递；App 注入 queue.suppressSessionQueueAutoDrain。 */
+	queueSuppressAutoDrain?: (sessionId: string) => void;
 	insertQuickPrompt: (sessionId: string, message: string) => void;
 	ensureSessionId?: (sessionId: string) => Promise<string>;
 	resendUserMessage?: (message: ChatMessage) => void;

@@ -94,6 +94,8 @@ function timelineHarness() {
 			"lucide-react": {},
 			"./timelineFailureNotice": { reduceFailureNoticePass: ({ state }) => ({ state, toasts: [] }) },
 			"./SessionStartSurface": {},
+			"./SessionAlignmentTimeline": {},
+			"./SessionDocumentWorkTimeline": {},
 			"./NotifyMessageCard": {},
 			"../agents/message-scroller": {},
 		},

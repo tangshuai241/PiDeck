@@ -8,11 +8,12 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 保留真实 React/Jotai 订阅，只隔离设置镜像与无关的文案、别名解析。
 const logoStyleAtom = atom("pi-tui");
+const customLogoAtom = atom("");
 const { PiLogo, DshLogo, SessionSourceBadge } = loadTsCommonJs("src/renderer/src/components/session/SessionSourceBadge.tsx", {
 	stubs: {
 		// VM 用 CJS require，测试用 ESM import；共用同一个 Jotai hook，避免两个 Provider context。
 		jotai: { useAtomValue },
-		"../../atoms/app-ui-atoms": { logoStyleAtom },
+		"../../atoms/app-ui-atoms": { logoStyleAtom, customLogoAtom },
 		"../../i18n": { t: (key) => key },
 		"@/lib/utils": { cn: (...classes) => classes.filter(Boolean).join(" ") },
 	},
@@ -72,6 +73,24 @@ test("pi 会话来源徽标复用同一设置，避免另一份旧 SVG 不跟随
 	assertPiTuiLogo(renderLogo(SessionSourceBadge, { source: "pi" }, store));
 	store.set(logoStyleAtom, "classic");
 	assert.match(renderLogo(SessionSourceBadge, { source: "pi" }, store), /viewBox="140 140 520 520"/u);
+});
+
+test("自定义 logo 风格：来源徽标渲染用户图片，风格切回内置标后不再渲染图片", () => {
+	const store = createStore();
+	store.set(logoStyleAtom, "custom");
+	store.set(customLogoAtom, "data:image/png;base64,AAAA");
+	const html = renderLogo(PiLogo, {}, store);
+	assert.match(html, /<img src="data:image\/png;base64,AAAA"/u);
+	assert.match(html, /class="size-3\.5 object-contain"/u, "自定义图沿用调用方给的尺寸类");
+
+	// 选了 custom 但还没传图（或图被清掉）：回落内置标，不能渲染空 img
+	store.set(customLogoAtom, "");
+	assertPiTuiLogo(renderLogo(PiLogo, {}, store));
+
+	store.set(logoStyleAtom, "pi-tui");
+	store.set(customLogoAtom, "data:image/png;base64,AAAA");
+	// 非 custom 风格下即使镜像里残留图片也不渲染它
+	assertPiTuiLogo(renderLogo(PiLogo, {}, store));
 });
 
 test("切换 pi logo 风格不改变 DSH 或其他会话来源品牌", () => {

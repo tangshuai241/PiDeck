@@ -176,7 +176,7 @@ title: 贡献者
   <div class="contributor-info">
     <strong>juzijun233</strong>
     <span class="contributor-handle">@juzijun233</span>
-    <p>稳定性与安全加固系列：主进程 PATH 探测异步化（消除启动冻结）、迟到流式事件拒绝、事件三元组补齐、通道白名单、超大 diff 截断、PiRpcClient 行缓冲上限、按会话订阅隔离（分屏互不牵连）等</p>
+    <p>稳定性与安全加固系列：主进程 PATH 探测异步化（消除启动冻结）、迟到流式事件拒绝、事件三元组补齐、通道白名单、超大 diff 截断、PiRpcClient 行缓冲上限、按会话订阅隔离（分屏互不牵连）等；通道切换不再提供旧开发版的版本守卫 (#336)</p>
     <a href="https://github.com/juzijun233" target="_blank" rel="noreferrer">GitHub</a>
   </div>
 </div>
@@ -208,6 +208,16 @@ title: 贡献者
     <span class="contributor-handle">@cmyk-xing</span>
     <p>外观设置新增「功能模块」显示开关 (#254)、修复引导页发送创建的新会话漏出历史旧消息 (#256)、启动时恢复上次窗口位置与最大化状态 (#259)</p>
     <a href="https://github.com/cmyk-xing" target="_blank" rel="noreferrer">GitHub</a>
+  </div>
+</div>
+
+<div class="contributor-card">
+  <div class="contributor-avatar">EE</div>
+  <div class="contributor-info">
+    <strong>EEEEEEEEdison</strong>
+    <span class="contributor-handle">@EEEEEEEEdison</span>
+    <p>右侧边栏上下分区与常驻「会话状态」面板（可拖拽、比例跨重启保持）(#334)、TPS 测量模式（流式 / 端到端，设置页可切换）(#327)</p>
+    <a href="https://github.com/EEEEEEEEdison" target="_blank" rel="noreferrer">GitHub</a>
   </div>
 </div>
 

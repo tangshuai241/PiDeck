@@ -19,8 +19,10 @@ type ChannelSwitchDialogProps = {
  * 通道切换向导（ChannelSwitchService 快照驱动，无本地状态副本）。
  *
  * 状态机（对齐服务端 ChannelSwitchSnapshot.phase）：
- *   打开时 idle/error → query() → available（目标版本 + notes 摘要 + 数据模式预告，用户在此确认）
+ *   打开时 idle/error/up-to-date → query() → available（目标版本 + notes 摘要 + 数据模式预告，用户在此确认）
  *   → downloading（进度条）→ ready（立即安装：launch 后主进程唤起安装器并退出应用）；
+ *   up-to-date：当前版本已不低于目标通道最新版（如正式版高于 dev 预发布），提示已是最新并隐藏下载入口
+ *   （重开对话框会重新查询，目标通道发了更新版本即可再次进入 available）；
  *   error 保留「打开发布页」手动下载退化入口。
  * busy 并发被服务端拒绝时快照不变（仍在 downloading），此处静默吞掉异常即可。
  */
@@ -33,9 +35,9 @@ export function ChannelSwitchDialog(props: ChannelSwitchDialogProps) {
 	useEffect(() => {
 		if (!props.open) return;
 		setLaunchError(null);
-		// 首次进入（idle）或上次失败后重开：重新查询目标版本；
+		// 首次进入（idle）、上次失败后重开、或上次已是最新（目标通道可能已发新版本）时重新查询；
 		// available/downloading/ready 是进行中状态，重开照常展示快照，不重复发起网络请求。
-		if (!snapshot || snapshot.phase === "idle" || snapshot.phase === "error") {
+		if (!snapshot || snapshot.phase === "idle" || snapshot.phase === "error" || snapshot.phase === "up-to-date") {
 			void desktopApi.channelSwitch.query().catch(() => undefined);
 		}
 		// 仅响应 open 翻转；快照变化由 onStateChanged 订阅驱动渲染，不入依赖避免重复触发 query。
@@ -85,6 +87,19 @@ export function ChannelSwitchDialog(props: ChannelSwitchDialogProps) {
 								<p className="whitespace-pre-wrap text-caption text-muted-foreground">{target.notesExcerpt}</p>
 							</div>
 						)}
+					</div>
+				)}
+
+				{/* up-to-date：版本守卫命中——当前版本已不低于目标通道最新版，提示已是最新且不提供下载/安装按钮。 */}
+				{phase === "up-to-date" && (
+					<div className="space-y-2">
+						<p className="text-body font-medium">{t("settings.channelSwitchUpToDate")}</p>
+						<p className="text-caption text-muted-foreground">
+							{t("settings.channelSwitchUpToDateDetail", {
+								version: snapshot?.currentVersion ?? "",
+								channel: t(snapshot?.targetChannel === "dev" ? "settings.channelBadgeDev" : "settings.channelBadgeStable"),
+							})}
+						</p>
 					</div>
 				)}
 

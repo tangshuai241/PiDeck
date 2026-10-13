@@ -20,7 +20,7 @@ const runtimeStateSource = readFileSync("src/renderer/src/utils/agentRuntimeStat
 const queueStateSource = readFileSync("src/renderer/src/utils/queuedPromptQueue.ts", "utf8");
 const toolRuntimeStateSource = readFileSync("src/shared/toolRuntimeState.ts", "utf8");
 const agentManagerSource = readFileSync("src/main/pi/AgentManager.ts", "utf8");
-const webServiceSource = readFileSync("src/main/web/WebServiceManager.ts", "utf8");
+
 const sharedTypesSource = [readFileSync("src/shared/types.ts", "utf8"), readFileSync("src/shared/types/session.ts", "utf8")].join("\n");
 // Queue ownership now lives in useQueuedPrompt.
 const queuedPromptHookSource = readFileSync("src/renderer/src/hooks/useQueuedPrompt.ts", "utf8");
@@ -244,8 +244,7 @@ test("indeterminate prompt timeout never becomes a retryable rejection", () => {
 test("prompt acceptance is explicit across the main and renderer boundary", () => {
 	assert.match(agentManagerSource, /Promise<SendPromptResult>/);
 	assert.match(agentManagerSource, /accepted: false,[\s\S]{0,160}?error: errorMessage,[\s\S]{0,160}?i18nKey: "diagnostic\./);
-	assert.match(webServiceSource, /this\.sendJson\(response, \{ result \}\)/);
-	assert.doesNotMatch(webServiceSource, /sendError\(response, 409, result\.error\)/);
+
 	assert.match(agentManagerSource, /if \(cancelled\)[\s\S]*?命令已取消[\s\S]*?return \{ accepted: true \}/);
 	// sendPrompt 的显式接受/失败判定随 dispatchPromptSnapshot 迁入 useSessionPromptDispatch。
 	const promptDispatchSource = readFileSync("src/renderer/src/hooks/session/useSessionPromptDispatch.ts", "utf8");

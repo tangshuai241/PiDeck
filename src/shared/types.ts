@@ -39,7 +39,7 @@ export * from "./types/dshRunnerNode";
 export * from "./types/dshRunnerNodeRelease";
 export * from "./types/piRuntimeNode";
 export * from "./types/providerMigration";
-export * from "./types/announcement";
+
 export * from "./types/providerUsage";
 export * from "./types/pasteFile";
 export * from "./types/mcp";
@@ -48,7 +48,7 @@ export * from "./types/rewind";
 export * from "./types/health";
 export * from "./types/backup";
 export * from "./types/soundAlert";
-export * from "./types/packageCatalog";
+
 export * from "./types/automation";
 export * from "./types/contentUpdate";
 export * from "./types/piAuth";

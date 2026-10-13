@@ -8,10 +8,10 @@ const byId = Object.fromEntries(MCP_SERVICE_CATALOG.map((entry) => [entry.id, en
 
 test("MCP service catalog ships the verified batches (intl + CN) with categories and unique ids", () => {
 	const ids = Array.from(MCP_SERVICE_CATALOG, (entry) => entry.id);
-	assert.deepEqual(ids, ["pideck", "context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "amap", "tencent-map", "rail12306", "brave-search", "firecrawl", "figma"]);
+	assert.deepEqual(ids, ["pideck", "context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "tencent-docs", "baidu-netdisk", "amap", "tencent-map", "rail12306", "brave-search", "firecrawl", "exa", "tavily", "figma", "qcc"]);
 	assert.equal(new Set(ids).size, ids.length);
 	for (const entry of MCP_SERVICE_CATALOG) {
-		assert.ok(["dev", "work", "maps", "search", "design"].includes(entry.category), `${entry.id} category`);
+		assert.ok(["dev", "work", "data", "maps", "search", "design"].includes(entry.category), `${entry.id} category`);
 		assert.match(entry.docsUrl, /^https:\/\//);
 		assert.match(entry.titleKey, /^config\.mcp\.catalog\./);
 	}
@@ -68,6 +68,21 @@ test("auth kind, credential fields, and requiredness are declared consistently",
 	assert.deepEqual(plain(byId.amap.credentials[0].credential), { kind: "url-query", param: "key" });
 	assert.deepEqual(plain(byId["tencent-map"].credentials[0].credential), { kind: "url-query", param: "key" });
 	assert.equal(catalogNeedsCredential(byId.amap), true);
+	// Tavily：官方远程地址只接受 URL query 里的 tavilyApiKey，必填。
+	assert.equal(byId.tavily.auth, "url-key");
+	assert.equal(catalogNeedsCredential(byId.tavily), true);
+	assert.deepEqual(plain(byId.tavily.credentials[0].credential), { kind: "url-query", param: "tavilyApiKey" });
+	// 裸 token 头（官方要求原值，不能加 Bearer）：腾讯文档必填、Exa 可留空（keyless 限速）。
+	assert.deepEqual(plain(byId["tencent-docs"].credentials[0].credential), { kind: "header", header: "Authorization" });
+	assert.equal(catalogNeedsCredential(byId["tencent-docs"]), true);
+	assert.deepEqual(plain(byId.exa.credentials[0].credential), { kind: "header", header: "x-api-key" });
+	assert.equal(byId.exa.credentials[0].optional, true);
+	assert.equal(catalogNeedsCredential(byId.exa), false);
+	// 企查查：Bearer 头必填；百度网盘：Access Token 走环境变量，供本地桥接进程使用。
+	assert.deepEqual(plain(byId.qcc.credentials[0].credential), { kind: "header", header: "Authorization", scheme: "Bearer" });
+	assert.equal(catalogNeedsCredential(byId.qcc), true);
+	assert.equal(byId.qcc.category, "data");
+	assert.deepEqual(plain(byId["baidu-netdisk"].credentials[0].credential), { kind: "env", envKey: "BAIDU_NETDISK_ACCESS_TOKEN" });
 });
 
 test("buildCatalogDefinition writes each credential into its declared target", () => {
@@ -84,6 +99,15 @@ test("buildCatalogDefinition writes each credential into its declared target", (
 	// 飞书：凭据按 -a/-s 追加到 args。
 	const lark = plain(buildCatalogDefinition(byId.lark, ["cli_a1", "sec_b2"]));
 	assert.deepEqual(lark.args, ["-y", "@larksuiteoapi/lark-mcp", "mcp", "-a", "cli_a1", "-s", "sec_b2"]);
+	// Tavily：key 拼进 URL query（base 末尾已带 / 仍只加一个 ?）。
+	assert.deepEqual(plain(buildCatalogDefinition(byId.tavily, ["tvly-abc"])), { url: "https://mcp.tavily.com/mcp/?tavilyApiKey=tvly-abc" });
+	// 腾讯文档：声明里没有 scheme，Authorization 头必须写原值（加 Bearer 会被拒）。
+	assert.deepEqual(plain(buildCatalogDefinition(byId["tencent-docs"], ["docs-token"])), { url: "https://docs.qq.com/openapi/mcp", headers: { Authorization: "docs-token" } });
+	// Exa：x-api-key 原值；留空回到 keyless 定义。
+	assert.deepEqual(plain(buildCatalogDefinition(byId.exa, ["exa-key"])), { url: "https://mcp.exa.ai/mcp", headers: { "x-api-key": "exa-key" } });
+	assert.deepEqual(plain(buildCatalogDefinition(byId.exa, [""])), { url: "https://mcp.exa.ai/mcp" });
+	// 企查查：Bearer 头。
+	assert.deepEqual(plain(buildCatalogDefinition(byId.qcc, ["qcc-key"])), { url: "https://agent.qcc.com/mcp/company/stream", headers: { Authorization: "Bearer qcc-key" } });
 	// 钉钉：双 env 同时写入。
 	const dingtalk = plain(buildCatalogDefinition(byId.dingtalk, ["id-1", "secret-2"]));
 	assert.deepEqual(dingtalk.env, { DINGTALK_Client_ID: "id-1", DINGTALK_Client_Secret: "secret-2" });
@@ -98,12 +122,27 @@ test("brand icons cover every catalog entry except the documented fallbacks", ()
 	const branded = new Set(Object.keys(MCP_BRAND_ICONS));
 	const ids = new Set(MCP_SERVICE_CATALOG.map((entry) => entry.id));
 	for (const id of branded) assert.ok(ids.has(id), `orphan brand icon: ${id}`);
-	// simple-icons 未收录的服务回退 lucide（官方未收录则不硬造 logo）；钉钉/飞书用 ant-design / 飞书官方 CDN 图形
+	// simple-icons 未收录的服务回退 lucide（官方未收录则不硬造 logo）；钉钉/飞书用 ant-design / 飞书官方 CDN 图形。
 	const fallbacks = [...ids].filter((id) => !branded.has(id)).sort();
-	assert.deepEqual(fallbacks, ["amap", "context7", "firecrawl", "pideck", "rail12306", "tencent-map"]);
+	assert.deepEqual(fallbacks, ["amap", "context7", "firecrawl", "rail12306", "tencent-map"]);
+	// 新增条目必须带官方图形：tavily/exa 用官方 SVG（各自声明原始画板），
+	// 腾讯文档/企查查/百度网盘官方只发位图 → 内联官方 app 图标（data URI）；
+	// piDeck 的 π 标归一到 24 网格，与其它品牌图标同为 14px 满格。
+	assert.equal(MCP_BRAND_ICONS.pideck.viewBox, undefined);
+	assert.equal(MCP_BRAND_ICONS.pideck.path, "M0 0H18V12H12V18H6V24H0ZM6 6V12H12V6ZM18 12H24V24H18Z");
+	assert.equal(MCP_BRAND_ICONS.tavily.viewBox, "0 0 55 55");
+	assert.equal(MCP_BRAND_ICONS.exa.viewBox, "0 0 256 256");
+	for (const id of ["tencent-docs", "baidu-netdisk", "qcc"]) {
+		assert.match(MCP_BRAND_ICONS[id].png ?? "", /^data:image\/png;base64,[A-Za-z0-9+/=]+$/, `${id} inline png`);
+		assert.equal(MCP_BRAND_ICONS[id].path, undefined, `${id} keeps no vector path`);
+		assert.equal(MCP_BRAND_ICONS[id].multiPaths, undefined, `${id} keeps no multiPaths`);
+	}
 	for (const [id, icon] of Object.entries(MCP_BRAND_ICONS)) {
 		assert.match(icon.hex, /^#[0-9A-Fa-f]{6}$/, `${id} hex`);
-		if (icon.multiPaths) {
+		if (icon.png) {
+			// 官方位图：data URI 内联（离线可用，不新增远程依赖）
+			assert.match(icon.png, /^data:image\/png;base64,/, `${id} png`);
+		} else if (icon.multiPaths) {
 			// 官方彩色多 path：每段自带 fill，不再需要单色 path
 			assert.ok(icon.multiPaths.length >= 2, `${id} multiPaths count`);
 			for (const segment of icon.multiPaths) {
@@ -114,6 +153,7 @@ test("brand icons cover every catalog entry except the documented fallbacks", ()
 			assert.match(icon.path ?? "", /^[Mm]/, `${id} svg path`);
 		}
 		if (icon.viewSize !== undefined) assert.ok([16, 48, 1024].includes(icon.viewSize), `${id} viewSize`);
+		if (icon.viewBox !== undefined) assert.match(icon.viewBox, /^0 0 \d+(\.\d+)? \d+(\.\d+)?$/, `${id} viewBox`);
 	}
 });
 
@@ -125,4 +165,7 @@ test("stdio entries carry the exact package names from the official docs", () =>
 	assert.deepEqual(plain(byId.lark.base), { command: "npx", args: ["-y", "@larksuiteoapi/lark-mcp", "mcp"] });
 	assert.deepEqual(plain(byId.dingtalk.base), { command: "npx", args: ["-y", "dingtalk-mcp@latest"] });
 	assert.deepEqual(plain(byId.alipay.base), { command: "npx", args: ["-y", "@alipay/mcp-server-alipay"] });
+	// 百度网盘官方远程端点只有 SSE（pi 只支持 streamable HTTP）：经 mcp-remote 桥接，
+	// 桥接进程 http-first、405 回退 SSE，Authorization 头引用环境变量里的 Access Token。
+	assert.deepEqual(plain(byId["baidu-netdisk"].base), { command: "npx", args: ["-y", "mcp-remote@latest", "https://mcp-pan.baidu.com/sse", "--header", "Authorization: Bearer ${BAIDU_NETDISK_ACCESS_TOKEN}"] });
 });

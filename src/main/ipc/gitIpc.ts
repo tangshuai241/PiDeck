@@ -135,6 +135,13 @@ async function trySpawnGenProcess(withExtensions: boolean, projectPath: string, 
 	genProcessCwd = spawnCwd;
 	genProxyKey = computeGenProxyKey(settings, model.provider, model.modelId);
 
+	// spawn 失败（ENOENT/自定义 pi 路径失效/EACCES）时 'error' 事件无监听会直接崩掉主进程（AGENTS.md spawn 纪律）；
+	// 这里只做日志与清理：挂起的 set_model 由 stopGenProcess→rpcClient.close() 统一拒绝，genBusy 由 quickGenerate 的 finally 复位。
+	childProcess.on("error", (error) => {
+		void appLogger.warn("git", "QuickGen process spawn error", { message: error.message });
+		if (genProcess === childProcess) stopGenProcess();
+	});
+
 	genRpcClient = new PiRpcClient(childProcess.stdin!, childProcess.stdout!);
 
 	try {
@@ -512,10 +519,28 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 
 	ipcMain.handle(ipcChannels.gitGenerateCommitMessage, async (_event, projectId: string, repoPath?: string): Promise<GitGenerateCommitMessageResult> => {
 		const cwd = findGitCwd(projectId, repoPath);
-		if (!cwd) return { ok: true, message: "" };
+		if (!cwd) {
+			// 仓库目录没解析出来不等于「模型没返回摘要」：面板刚打开/刚 init/工作树被删时都会走到这里，
+			// 误报会把用户引去查模型设置（issue #338）。
+			void appLogger.warn("git", "Generate commit message failed: repository path unresolved", { projectId, repoPath });
+			return { ok: false, code: "GIT_COMMIT_NO_REPO", message: mainCopy("git.commitMessageNoRepo") };
+		}
 
-		const diff = await gitService.getStagedDiff(cwd);
-		if (!diff.trim()) return { ok: true, message: "" };
+		let diff: string;
+		try {
+			diff = await gitService.getStagedDiff(cwd);
+		} catch (err) {
+			// 读 diff 失败（cwd 失效/仓库损坏/git 超时）不能当成「空暂存区」，更不能吞成空串：
+			// 两者文案与后续动作完全不同——空 → 引导先暂存；失败 → 报 git 原始报错。
+			const msg = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("git", "Read staged diff for commit message failed", { error: msg, projectId, repoPath: cwd });
+			return { ok: false, code: "GIT_COMMIT_DIFF_FAILED", message: msg };
+		}
+		if (!diff.trim()) {
+			// 以真实暂存区为准：渲染层分组可能是旧快照（issue #338 的误报场景），必须给它可判别的码
+			void appLogger.info("git", "Generate commit message skipped: nothing staged", { projectId, repoPath: cwd });
+			return { ok: false, code: "GIT_COMMIT_EMPTY_DIFF", message: mainCopy("git.commitMessageEmptyDiff") };
+		}
 
 		const settings = settingsStore.get();
 		const provider = settings.gitCommitMessageProvider.trim();

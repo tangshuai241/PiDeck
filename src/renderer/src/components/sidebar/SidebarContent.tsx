@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
 import { Dock, DockItem } from "../motion/dock";
 import { UpdateDotHint } from "./UpdateDotHint";
-import { AnnouncementCenter } from "./AnnouncementCenter";
+
 import { AutomationDockButton } from "../automation/AutomationDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { BridgeGuiSlot } from "../bridge/BridgeSlot";
@@ -72,7 +72,7 @@ export type SidebarActions = {
 		createDraft: (projectId: string) => Promise<void>;
 		createAnonymous: (projectId: string) => Promise<void>;
 		/** 新建 ACP 工具会话(toolId → settings.acpTools 条目);后端固定 acp。 */
-		createAcp: (projectId: string, toolId: string) => Promise<void>;
+
 		deleteDraft: (session: SessionRecord) => Promise<void>;
 		rename: (projectId: string, session: SessionSummary) => void;
 		export: (projectId: string, session: SessionSummary) => Promise<void>;
@@ -209,6 +209,15 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuDraft = menu?.kind === "draft" ? controller.catalog.sessionsByProject[menu.projectId]?.find((session) => session.id === menu.sessionId) : undefined;
 	const menuSession = menuSessionRecord ? sessionRecordToSummary(menuSessionRecord) : undefined;
 	const menuSessionRuntimeAgent = menuSessionRecord ? getBoundSidebarRuntimeAgent(controller.catalog, menuSessionRecord.id) : undefined;
+	// 与上面 live 判据分开：error/closed 终态绑定不再是 live，但菜单必须保留「关闭 Agent」，
+	// 否则报错会话/草稿反而失去关闭出口（入口按「有 agentId 绑定」判定，不看状态）。
+	const boundAgentForSession = (sessionId: string | undefined) => {
+		if (!sessionId) return undefined;
+		const agentId = controller.catalog.runtimeBySessionId[sessionId]?.agentId;
+		return agentId ? controller.catalog.agents.find((agent) => agent.id === agentId) : undefined;
+	};
+	const menuSessionBoundAgent = menuSessionRecord ? boundAgentForSession(menuSessionRecord.id) : undefined;
+	const menuDraftBoundAgent = menuDraft ? boundAgentForSession(menuDraft.id) : undefined;
 
 	/**
 	 * 侧栏菜单的全状态运行控制（任意会话/agent 都有）。
@@ -292,7 +301,7 @@ export function SidebarContent(props: SidebarContentProps) {
 					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
 					<AutomationDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
-					<HostPluginDockButtons />
+					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
 
 				{/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
@@ -417,9 +426,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							</div>
 						</DockItem>
 						{/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}
-						<DockItem>
-							<AnnouncementCenter />
-						</DockItem>
+
 						<DockItem>
 							{/* 反馈入口：与设置/公告统一 styled Tooltip（原生 title 移除，防双弹）；aria-label 保留读屏契约 */}
 							<Tooltip delayDuration={300}>
@@ -697,6 +704,14 @@ export function SidebarContent(props: SidebarContentProps) {
 					onClose={controller.closeMenu}
 					// 草稿会话同样给运行控制：不必先打开会话发消息就能启动 Agent
 					runControl={buildSidebarRunControl(menuDraft.id)}
+					onCloseAgent={
+						menuDraftBoundAgent
+							? () => {
+									void actions.agents.close(menuDraftBoundAgent);
+									controller.closeMenu();
+								}
+							: undefined
+					}
 					onDelete={() => {
 						void actions.sessions.deleteDraft(menuDraft);
 						controller.closeMenu();
@@ -778,6 +793,14 @@ export function SidebarContent(props: SidebarContentProps) {
 						if (menuSessionRuntimeAgent) controller.openRpcLogs(menuSessionRuntimeAgent.id);
 						controller.closeMenu();
 					}}
+					onCloseAgent={
+						menuSessionBoundAgent
+							? () => {
+									void actions.agents.close(menuSessionBoundAgent);
+									controller.closeMenu();
+								}
+							: undefined
+					}
 					onArchiveSession={() => {
 						void actions.sessions.archive(menu.projectId, menuSession);
 						controller.closeMenu();

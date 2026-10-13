@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUp, ChevronDown, ChevronUp, Clock, Copy, FileText, FolderOpen, ListOrdered, LoaderCircle, Pencil, Split, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowUp, ChevronDown, ChevronUp, Clock, Copy, FileText, FolderOpen, ListOrdered, LoaderCircle, Pause, Pencil, Split, Square, X, XCircle } from "lucide-react";
 import { useId, type RefObject } from "react";
 import { useAtomValue, useStore } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
@@ -21,6 +21,7 @@ import { sessionRecordByIdAtomFamily } from "../../atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { sessionMessageCacheBySessionIdAtomFamily } from "../../atoms/session-atoms";
+import { queueDrainSuppressedByIdAtom } from "../../atoms/composer-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ExtensionWidgetCard } from "./ComposerParts";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
@@ -243,6 +244,8 @@ export function QueuedPromptPanel(props: {
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`queue:${sessionId ?? "unbound"}`, true);
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId ?? ""));
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId ?? ""));
+	// 停止响应后的队列抑制（toast 瞬时易逝）：面板常驻提示用户队列不会自动发送，需再发一条消息恢复。
+	const drainSuspended = useAtomValue(queueDrainSuppressedByIdAtom)[sessionId ?? ""] === true;
 	const askPanel = useAskPanel();
 	const store = useStore();
 	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
@@ -287,6 +290,14 @@ export function QueuedPromptPanel(props: {
 						{listVisible ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
 					</span>
 				</button>
+			) : null}
+			{drainSuspended ? (
+				<div className="flex h-8 shrink-0 items-center gap-2 px-3" data-testid="queue-drain-suspended">
+					<Pause size={12} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary" title={t("app.queuedDrainSuspendedAfterStop")}>
+						{t("app.queueDrainPausedBadge")}
+					</span>
+				</div>
 			) : null}
 			{listVisible ? (
 				<ul id={listId} className={multiple ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto overscroll-contain [contain:layout_paint]" : "flex flex-col"}>

@@ -162,7 +162,7 @@ jobs:
             PiDeck Dev（开发通道）构建，非正式版。
 
             - 分支 HEAD：${{ github.sha }}
-            - 与 stable 安装包可并存；userData 与 stable 共用（pi-desktop）。
+            - 与 stable 安装包可并存；userData 与 stable 共用（PiDeck）。
           fail_on_unmatched_files: false
           files: |
             release/*.exe

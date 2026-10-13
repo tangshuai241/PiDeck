@@ -1,3 +1,4 @@
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 /**
  * updateSources 更新源（GitHub 官方 + 镜像代理 + 自定义）纯函数单测。
  * 守护 URL 拼接、枚举归一化与自定义前缀校验规则；镜像清单与主进程 feedUrl
@@ -68,15 +69,15 @@ test("updateSourceFeedUrl: github 源返回 null（走内置 app-update.yml 通�
 	assert.equal(updateSourceFeedUrl("github", "https://custom.example.com"), null);
 });
 
-test("updateSourceFeedUrl: atomgit 源生成 AtomGit generic feed baseUrl", () => {
-	assert.equal(updateSourceFeedUrl("atomgit"), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+test("updateSourceFeedUrl: 应用不使用上游 AtomGit 安装包；运行时资源仍可用原镜像", () => {
+	assert.equal(updateSourceFeedUrl("atomgit"), null);
 	assert.equal(atomGitFeedUrl(), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
 	assert.equal(gitHubLatestDownloadBase(), "https://github.com/ayuayue/PiDeck/releases/latest/download");
 });
 
-test("updateSourceLatestReleaseUrl: macOS manual 检查走 AtomGit OpenAPI latest", () => {
-	assert.equal(updateSourceLatestReleaseUrl("atomgit"), "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
-	assert.equal(updateSourceLatestReleaseUrl("atomgit"), atomGitLatestReleaseApiUrl());
+test("updateSourceLatestReleaseUrl: macOS 应用检查使用 fork，资源镜像仍独立保留", () => {
+	assert.equal(updateSourceLatestReleaseUrl("atomgit"), null);
+	assert.equal(atomGitLatestReleaseApiUrl(), "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
 	assert.equal(updateSourceLatestReleaseUrl("github"), null);
 });
 
@@ -91,4 +92,14 @@ test("normalizeCustomMirrorHost: trim/去尾斜杠/协议校验", () => {
 	assert.equal(normalizeCustomMirrorHost("   "), null);
 	assert.equal(normalizeCustomMirrorHost(null), null);
 	assert.equal(normalizeCustomMirrorHost(undefined), null);
+});
+
+test("application publish metadata and update fallback point to the user's fork", () => {
+	const { UPDATE_REPO_OWNER, UPDATE_REPO, RELEASES_URL } = loadTsCommonJs("src/main/update/releaseRepo.ts");
+	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+	assert.equal(UPDATE_REPO_OWNER, "tangshuai241");
+	assert.equal(UPDATE_REPO, "PiDeck");
+	assert.equal(RELEASES_URL, "https://github.com/tangshuai241/PiDeck/releases");
+	assert.equal(pkg.build.publish.owner, UPDATE_REPO_OWNER);
+	assert.equal(pkg.build.publish.repo, UPDATE_REPO);
 });

@@ -143,7 +143,8 @@ test("模型页保存顺带落盘 settings 草稿，且不整页重载（避免�
 	// 保存 models 后若 settings 仍是脏的 → 走「只写不重载」保存。
 	assert.match(modal, /dirtyTabsRef\.current\.has\("config:settings"\)[\s\S]{0,40}?saveSettingsDraftOnly\(\)/);
 	// 「只写不重载」路径必须自己同步基准快照，否则脏检测会把刚清掉的黄点标回来。
-	assert.match(modal, /baselineSettingsRef\.current = deepClone\(settingsData\)/);
+	// 快照取的是清理后的对象（落盘前会按模型列表清孤儿档位键）。
+	assert.match(modal, /baselineSettingsRef\.current = deepClone\(pruned\)/);
 	// 两条「保存全部」路径都要用排好序的键列表（settings 最后）。
 	const orderedUses = modal.match(/for \(const key of orderDirtyKeysForSave\(roots\)\)/g) ?? [];
 	assert.equal(orderedUses.length, 2, "saveAllDirty 与保存并关闭都必须按 orderDirtyKeysForSave 顺序保存");
@@ -159,7 +160,8 @@ test("models 页加载 settings 失败时不渲染编辑入口（settingsLoaded 
 	assert.match(modal, /onUpdateModelThinkingLevelDefault=\{settingsLoaded \? handleUpdateModelThinkingLevelDefault : undefined\}/);
 	assert.match(modal, /getModelThinkingLevelDefault=\{settingsLoaded \?/);
 	// 每模型默认档位写 settings.json，脏标记必须记在 config:settings 上（不能记成 models）。
-	assert.match(modal, /withModelThinkingLevelDefault\(previous, providerName, model\.id, level\)\)[\s\S]{0,60}?markDirty\("config:settings"\)/);
+	// 键按 modelId 拼（卡片与编辑页共用此回调；它们各自把行下标翻译成 modelId）。
+	assert.match(modal, /withModelThinkingLevelDefault\(previous, providerName, modelId, level\)\)[\s\S]{0,60}?markDirty\("config:settings"\)/);
 	// 目录/只读展示与编辑入口在同一个共享表格里（ModelsTab 传 Pi capability 快照）。
 	assert.match(modelsTab, /useAvailableThinkingLevels\(\)/);
 	assert.match(modelsTab, /getModelAvailableThinkingLevels=\{\(i\) => \{/);

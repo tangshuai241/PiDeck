@@ -2,20 +2,18 @@ import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Loader2, Search, ShoppingBag, ToggleLeft, ToggleRight, Hammer } from "lucide-react";
+import { Loader2, Search, ShoppingBag, ToggleLeft, ToggleRight } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { extensionShortName, filterExtensionsByQuery } from "../utils/extensionFilter";
-import { ExtensionStoreTab } from "./ExtensionStoreTab";
-import { PluginDevSection } from "./PluginDevSection";
-import { ContentTabs } from "./ContentTabs";
+
 import { isProjectDiscoverySource, projectInstalledExtensionSources, type ResourceScope } from "./resourceScopeModel";
 import { buildProjectOverrideKeyIndex, matchesProjectOverride, type ProjectOverrideKeyIndex } from "./projectOverrideKeys";
 import { useResourceTogglePending } from "../hooks/useResourceTogglePending";
 import { DiscoveredExtensionRow, ExtensionTableRow, type DiscoveredExtensionItem } from "./extensionsTableRows";
-import { RecommendedPackagesPanel } from "./extensionsRecommendedPackages";
+
 import { BuiltInExtensionsUpdatePanel } from "./BuiltInExtensionsUpdatePanel";
 import { PiBuiltinExtensionsPanel } from "./PiBuiltinExtensionsPanel";
 
@@ -83,7 +81,8 @@ export function ExtensionsTab(props: {
 	onShowInFolder: (extension: PiExtensionSummary) => void;
 }) {
 	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
-	const [extTab, setExtTab] = useState<"local" | "store" | "dev">("local");
+	// 「插件开发」页签已下线（宿主插件系统接替）：PluginDevSection 源文件保留但不再有入口。
+
 	// 已安装列表搜索词：只服务本页渲染的局部 state（不过 IPC、不建全局 atom）
 	const [extensionQuery, setExtensionQuery] = useState("");
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
@@ -190,7 +189,7 @@ export function ExtensionsTab(props: {
 	const disabledGlobalSources = buildProjectOverrideKeyIndex(props.projectOverrides.disabledGlobalExtensions);
 	// 商店卡片的已安装判据：项目里安装的包只在 discovery（package-project）里，不进 data.extensions，
 	// 不并入就会让装完的卡片仍显示「安装」并再次触发 pi install -l（见 projectInstalledExtensionSources）。
-	const storeInstalledSources = useMemo(() => (props.scope === "project" ? projectInstalledExtensionSources(props.data.extensions, props.discoveryExtensions) : new Set(props.data.extensions.map((extension) => extension.source))), [props.scope, props.data.extensions, props.discoveryExtensions]);
+
 	// 已安装列表搜索：纯渲染层过滤（filterExtensionsByQuery），不走 IPC、不防抖。
 	// 空查询时该函数原样返回入参，因此「没有安装任何扩展」与「搜索无匹配」是两种可区分的空态；
 	// discovery 行走同一规则，杜绝分组表头残留与计数/行数不符。
@@ -283,24 +282,11 @@ export function ExtensionsTab(props: {
 			<PiBuiltinExtensionsPanel scope={props.scope} projectId={props.projectId} onChanged={props.onRefresh} />
 			{/* 一级 tab：已安装 / 扩展商店（shadcn Tabs，与 SkillsTab 的「本地/商店」结构对齐） */}
 			<div className="mb-3 flex items-center justify-between gap-3">
-				<ContentTabs
-					value={extTab}
-					onValueChange={(v) => {
-						if (v !== "local" && v !== "store" && v !== "dev") return;
-						setExtTab(v);
-						// 切回本地时刷新列表（原 TabsTrigger onClick 行为迁到 onValueChange 统一处理）
-						if (v === "local") props.onRefresh();
-					}}
-					items={[{ value: "local", label: t("config.nav.extensions") }, { value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> }, ...(props.scope === "global" ? [{ value: "dev", label: t("config.pluginDevTab"), icon: <Hammer size={14} strokeWidth={1.8} /> }] : [])]}
-				/>
+				<span className="text-control font-medium">{t("config.nav.extensions")}</span>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
-			{extTab === "dev" ? (
-				<PluginDevSection />
-			) : extTab === "store" ? (
-				<ExtensionStoreTab installedSources={storeInstalledSources} projectId={props.scope === "project" ? props.projectId : undefined} onInstalled={() => props.onRefresh()} />
-			) : (
+			{
 				<>
 					{showUpdateDialog && (
 						<div className="config-update-dialog-backdrop" role="dialog" aria-modal="true">
@@ -338,7 +324,6 @@ export function ExtensionsTab(props: {
 							</div>
 						</div>
 					)}
-					{false && <RecommendedPackagesPanel data={props.data} onRefresh={props.onRefresh} />}
 
 					{/* 已安装扩展列表 */}
 					<div className="config-section">
@@ -422,7 +407,7 @@ export function ExtensionsTab(props: {
 						</div>
 					</div>
 				</>
-			)}
+			}
 		</div>
 	);
 }

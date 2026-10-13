@@ -258,3 +258,19 @@ test("downgrade: 无可降级条目时返回原数组", () => {
 	const entries = [{ id: "a", type: "w", description: "", status: "completed", source: "toolcall", via: "acp-delegate" }];
 	assert.equal(downgradeStaleRunning(entries), entries);
 });
+
+test("merge: record 缺描述时用推导条目补齐（异步链终态 record 不带 task 文本）", () => {
+	// 场景：pi-subagents 异步 run 的终态由桥接扩展落 subagents:record（事件 payload
+	// 里没有 task），任务文本只有派发 args.task（推导条目）能提供。record 仍是终态
+	// 权威，只回填空描述——否则面板行会丢掉任务文案。
+	const records = [{ id: "async-run-1", type: "worker", description: "", status: "completed", startedAt: 1000, completedAt: 2000, source: "record" }];
+	const derived = [{ id: "async-run-1", type: "worker", description: "目标：迁移 vm 沙箱", status: "running", startedAt: 1000, source: "toolcall", via: "pi-subagents-tool" }];
+	const merged = mergeSubagentSources(records, derived);
+	assert.equal(merged.length, 1);
+	assert.equal(merged[0].status, "completed");
+	assert.equal(merged[0].source, "record");
+	assert.equal(merged[0].description, "目标：迁移 vm 沙箱");
+	// record 自带描述时不被推导覆盖
+	const withText = mergeSubagentSources([{ ...records[0], description: "record 文本" }], derived);
+	assert.equal(withText[0].description, "record 文本");
+});

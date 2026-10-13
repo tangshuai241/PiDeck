@@ -212,7 +212,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 			    自重规则（2026-08 用户反馈「组头喧宾夺主」修正）：降权只能走**颜色 / 填充 / 字重**，
 			    **不得再靠缩小字号**（那会退回上面的倒置）。
 			      ① 不填色：类别图标方块去掉底色，只留图标；运行中保留工具身份色作为「正在跑」信号。
-			      ④ 静止降色：标签 text-tertiary（#6b7280，对白底 4.82:1，过 WCAG AA），hover 回 secondary。
+			      ④ 静止降色：标签 text-tertiary（#636b79，对白底 5.37:1，过 WCAG AA），hover 回 secondary。
 			         **不用 opacity**——text-secondary 压到 60% 实测只有约 2.87:1，不过 AA。
 			      ② 降字重：标签 600 → 500（font-medium）。降之前组头是**整轮唯一的 600**：
 			         大折叠栏胶囊与「显示更早」都是 500，过程行与正文都是 400 —— 也就是说它是

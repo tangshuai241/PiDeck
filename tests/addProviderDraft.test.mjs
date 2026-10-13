@@ -319,3 +319,39 @@ test("mergeProviderDraft: strict 工具采样显式表态覆盖，未表态保�
 	});
 	assert.equal(turnedOn.compat.supportsStrictMode, true);
 });
+
+// ── 新增页的「页内草稿」字段 ──
+
+test("buildProviderConfigFromDraft: modelOverrides 写入 provider；空/未提供不写空对象", () => {
+	const withOverrides = buildProviderConfigFromDraft({
+		...emptyDraft(),
+		modelOverrides: { "deepseek-chat": { headers: { "User-Agent": "custom/1.0" } } },
+	});
+	assert.equal(json(withOverrides.modelOverrides), json({ "deepseek-chat": { headers: { "User-Agent": "custom/1.0" } } }));
+	assert.equal("modelOverrides" in buildProviderConfigFromDraft({ ...emptyDraft(), modelOverrides: {} }), false);
+	assert.equal("modelOverrides" in buildProviderConfigFromDraft(emptyDraft()), false);
+});
+
+test("mergeProviderDraft: modelOverrides 三态（undefined 保留原值 / {} 清空 / 有值整体覆盖）", () => {
+	const original = {
+		models: [{ id: "keep" }],
+		modelOverrides: { "deepseek-chat": { headers: { "User-Agent": "saved/1.0" } } },
+	};
+	// 表单不管这项（旧调用方/未接线）→ 原值原样保留
+	assert.equal(json(mergeProviderDraft(original, emptyDraft()).modelOverrides), json(original.modelOverrides));
+	// 显式清空（弹窗里删掉最后一个覆盖）→ 连字段一起删，不留空对象
+	assert.equal("modelOverrides" in mergeProviderDraft(original, { ...emptyDraft(), modelOverrides: {} }), false);
+	// 有值 → 整体以草稿为准（弹窗草稿初值来自原 provider，不会丢其它模型的覆盖）
+	const replaced = mergeProviderDraft(original, { ...emptyDraft(), modelOverrides: { "gpt-5.2": { headers: { "User-Agent": "relay/2.0" } } } });
+	assert.equal(json(replaced.modelOverrides), json({ "gpt-5.2": { headers: { "User-Agent": "relay/2.0" } } }));
+});
+
+test("新增页缓冲字段不进 models.json（只交给宿主落 settings/AppSettings）", () => {
+	const draft = { ...emptyDraft(), modelThinkingLevelDefaults: { "deepseek-chat": "max" }, hiddenModelIds: ["deepseek-reasoner"] };
+	const built = buildProviderConfigFromDraft(draft);
+	assert.equal("modelThinkingLevelDefaults" in built, false);
+	assert.equal("hiddenModelIds" in built, false);
+	const merged = mergeProviderDraft({ models: [{ id: "deepseek-chat" }] }, draft);
+	assert.equal("modelThinkingLevelDefaults" in merged, false);
+	assert.equal("hiddenModelIds" in merged, false);
+});

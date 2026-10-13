@@ -1,6 +1,7 @@
 import type { PiDesktopApi } from "../../preload";
 import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, emptyRemoteAccessState } from "../../shared/types";
 import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscriptionConfig";
+import { EMPTY_VIDEO_GEN_CONFIG } from "../../shared/videoGenConfig";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { ACP_TOOL_PRESETS } from "../../shared/acpToolPresets";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
@@ -22,7 +23,7 @@ const projects: Project[] = [
 	{
 		id: "builtin-chat",
 		name: "Chat",
-		path: "C:/Users/14012/AppData/Roaming/pi-desktop/chat-workspace",
+		path: "C:/Users/14012/AppData/Roaming/PiDeck/chat-workspace",
 		lastOpenedAt: now,
 		pinned: true,
 		sortOrder: -1,
@@ -131,10 +132,12 @@ let previewSettings: AppSettings = {
 	autoSessionTitle: true,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
+	// 仅失焦提醒开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
+	alertOnlyWhenUnfocused: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
 	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
-	announcementNotificationEnabled: true,
+	announcementNotificationEnabled: false,
 	// toast 展示时长：与主进程 defaultSettings 一致
 	toastDurationMs: DEFAULT_TOAST_DURATION_MS,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
@@ -159,7 +162,7 @@ let previewSettings: AppSettings = {
 	wslEnabled: false,
 	wslDistro: "Ubuntu",
 	wslUser: "root",
-	telemetryEnabled: true,
+	telemetryEnabled: false,
 	webServiceEnabled: false,
 	webServiceHost: "0.0.0.0",
 	webServicePort: 8765,
@@ -169,7 +172,7 @@ let previewSettings: AppSettings = {
 	workspaceContentOpenMode: "split",
 	contentMaxWidth: 1800,
 	chatContentWidthPct: 80,
-	sessionStatusPlacement: "sidebar",
+	sessionStatusPlacement: "composer",
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 	maxEditorFileSizeMB: 5,
@@ -293,8 +296,10 @@ export function createPreviewApi(): PiDesktopApi {
 			mount: async () => ({ ok: false, code: "desktop-only" }),
 			update: async () => ({ ok: false, code: "desktop-only" }),
 			unmount: async () => ({ ok: false, code: "desktop-only" }),
+			remove: async () => ({ ok: false, code: "desktop-only" }),
 			onChanged: () => () => undefined,
 			onNavigate: () => () => undefined,
+			onOpenBrowser: () => () => undefined,
 		},
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
@@ -1151,10 +1156,10 @@ export function createPreviewApi(): PiDesktopApi {
 				releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
-				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
+				userDataDir: "C:/Users/preview/AppData/Roaming/PiDeck",
 			}),
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
-			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
+
 			checkUpdate: async () => undefined,
 			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview" }),
 			onUpdateStatus: () => () => undefined,
@@ -1341,27 +1346,7 @@ export function createPreviewApi(): PiDesktopApi {
 				output: "Preview mode: extension update-one output",
 				updated: false,
 			}),
-			catalog: async () => ({
-				generatedAt: Date.now(),
-				fromCache: false,
-				items: [
-					{
-						name: "preview-extension",
-						description: "Preview mode extension",
-						author: "preview",
-						types: ["extension"],
-						downloadsPerMonth: 1,
-						publishedAt: Date.now(),
-						searchText: "preview-extension",
-						installSource: "npm:preview-extension",
-						pageUrl: "https://pi.dev/packages/preview-extension",
-					},
-				],
-				page: 1,
-				pageSize: 1,
-				total: 1,
-				lastPage: 1,
-			}),
+
 			// 内置扩展热更新（预览/Web 模式不联网、无覆盖层）
 			builtInStatus: async () => ({
 				builtin: { version: "1.0.0", fileCount: 13 },
@@ -1494,17 +1479,7 @@ export function createPreviewApi(): PiDesktopApi {
 				enabled,
 			}),
 		},
-		promptStore: {
-			search: async (_query, _opts) => ({ query: _query ?? "", count: 0, prompts: [] }),
-			get: async (_id) => ({ id: _id, title: "", description: "", content: "", type: "TEXT", author: "", category: "", tags: [], votes: 0, createdAt: "" }),
-			import: async (data) => ({
-				name: data.title.toLowerCase().replace(/[^\w-]+/g, "-"),
-				path: `C:/Users/preview/.pi/agent/prompts/${data.title.toLowerCase().replace(/[^\w-]+/g, "-")}.md`,
-				description: data.description,
-				content: data.content,
-				userCreated: true,
-			}),
-		},
+
 		yaoPrompts: {
 			list: async () => ({ categories: [], prompts: [], repoPath: "" }),
 			detail: async () => ({ title: "", description: "", promptContent: "", fullContent: "" }),
@@ -1516,77 +1491,14 @@ export function createPreviewApi(): PiDesktopApi {
 				userCreated: true,
 			}),
 		},
-		skillStore: {
-			search: async () => ({ query: "", count: 0, prompts: [] }),
-			import: async (data, _locationId) => ({
-				name: data.title.toLowerCase().replace(/[^\w-]+/g, "-"),
-				path: `C:/Users/preview/.pi/agent/skills/${data.title.toLowerCase().replace(/[^\w-]+/g, "-")}/SKILL.md`,
-				description: data.description,
-				enabled: true,
-				valid: true,
-				warnings: [],
-				id: `pi-global:preview`,
-				dir: "",
-				sourceId: "pi-global",
-				sourceLabel: "Preview",
-				type: "directory",
-			}),
-		},
-		skillHub: {
-			search: async () => ({ query: "", total: 0, items: [] }),
-			detail: async () => null,
-			install: async (slug) => ({ success: true, slug, installDir: "", message: "Preview install" }),
-		},
-		acp: {
-			// 预览模式：无 ACP 工具数据，返回空表/恒过校验保持 PiDesktopApi 形状完整；
-			// 生命周期接口返回固定缺省值（无安装检测、无事件流）
-			listTools: async () => [],
-			saveTools: async () => [],
-			validateTool: async () => ({ ok: true as const }),
-			detectTool: async () => ({ presetId: ACP_TOOL_PRESETS[0]?.id ?? "gemini", state: "unknown" as const }),
-			installTool: async () => ({ ok: false, output: "preview" }),
-			uninstallTool: async () => ({ ok: false, output: "preview" }),
-			onLifecycleEvent: () => () => undefined,
-			getSessionConfig: async () => null,
-			setSessionConfig: async () => [],
-			onSessionConfigChanged: () => () => undefined,
-		},
+
 		settings: {
 			get: async (): Promise<AppSettings> => ({ ...previewSettings }),
 			update: async (patch): Promise<AppSettings> => {
 				previewSettings = { ...previewSettings, ...patch };
 				return { ...previewSettings };
 			},
-			restartWebService: async () => undefined,
-			webServiceStatus: async () => ({
-				running: false,
-				host: "",
-				port: 0,
-				token: "",
-				requiresAuth: false,
-				tokenExpiresAt: null,
-			}),
-			rotateWebToken: async () => ({
-				running: false,
-				host: "",
-				port: 0,
-				token: "",
-				requiresAuth: false,
-				tokenExpiresAt: null,
-			}),
-			setWebToken: async () => ({
-				running: false,
-				host: "",
-				port: 0,
-				token: "",
-				requiresAuth: false,
-				tokenExpiresAt: null,
-			}),
-			webRemoteAccessState: async () => emptyRemoteAccessState(),
-			webRemoteAccessStart: async () => ({ ok: false as const, error: "preview" }),
-			webRemoteAccessStop: async () => ({ ok: false as const, error: "preview" }),
-			webRemoteAccessRefresh: async () => emptyRemoteAccessState(),
-			onWebRemoteAccessChanged: noop,
+
 			testPiProxy: async () => ({
 				success: true,
 				url: "https://api.openai.com/v1/models",
@@ -1743,15 +1655,7 @@ export function createPreviewApi(): PiDesktopApi {
 			importCustom: async () => ({ ok: false, error: "canceled" as const }),
 			removeCustom: async () => false,
 		},
-		announcements: {
-			// 预览模式：无公告数据，返回空快照保持 PiDesktopApi 形状完整（订阅空操作）
-			list: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [], notifiedIds: [] }),
-			refresh: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [], notifiedIds: [] }),
-			markRead: async () => true,
-			markAllRead: async () => true,
-			markNotified: async () => true,
-			onChanged: () => () => {},
-		},
+
 		terminal: {
 			// 预览模式只按归属键过滤：agent 目标用 agentId，project 目标用项目 id
 			list: async (target) => terminalTabs.filter((tab) => tab.agentId === (target.kind === "agent" ? target.agentId : target.projectId)),
@@ -1833,6 +1737,15 @@ export function createPreviewApi(): PiDesktopApi {
 			saveConfig: async (config) => ({ ok: true, config }),
 			readImageBlob: async () => null,
 		},
+		// 生视频预览桩：与生图同策略（LAN web 模式继承此桩，远程暂不支持生视频任务）
+		videogen: {
+			submit: async () => ({ ok: false, error: "notConfigured" }),
+			cancel: async () => ({ ok: false }),
+			getConfig: async () => ({ ...EMPTY_VIDEO_GEN_CONFIG, providers: [] }),
+			saveConfig: async (config) => ({ ok: true, config }),
+			listJobs: async () => [],
+			onEvent: () => () => {},
+		},
 		enhance: {
 			run: async () => ({ ok: false, errorKind: "sdk-unavailable", message: "preview mode" }),
 			cancel: async () => ({ ok: true }),
@@ -1880,6 +1793,9 @@ export function createPreviewApi(): PiDesktopApi {
 			abortInstall: async () => false,
 		},
 		// 模型目录预览桩：无内置目录可读，返回「不可用」空态，仅供预览不崩溃
+
+		// 快捷消息预览桩：预览模式没有真实配置文件（配置在 userData/quick-messages.json），
+		// 用固定夹具让弹框在预览/截图里可用，不假装能读写磁盘。
 		catalog: {
 			status: async () => ({ builtin: null, overlay: null, hasOverlayFiles: false, hasBackup: false }),
 			check: async () => ({ ok: false, code: "network", message: "preview stub" }),
@@ -1888,8 +1804,6 @@ export function createPreviewApi(): PiDesktopApi {
 			restorePrevious: async () => ({ ok: false, code: "no-backup", message: "preview stub" }),
 			openFile: async () => undefined,
 		},
-		// 快捷消息预览桩：预览模式没有真实配置文件（配置在 userData/quick-messages.json），
-		// 用固定夹具让弹框在预览/截图里可用，不假装能读写磁盘。
 		quickMessages: {
 			get: async () => ({
 				items: [...PREVIEW_QUICK_MESSAGES],

@@ -57,3 +57,16 @@ test("ConfigModal 后台自动发现也必须消费 suggestedBaseUrl（补 /v1 �
 	assert.ok(discoveryThen, "未找到后台自动发现的 .then(result) 分支");
 	assert.match(discoveryThen[0], /applySuggestedBaseUrl\s*\(\s*providerName\s*,\s*result\.suggestedBaseUrl\s*\)/);
 });
+
+test("ConfigManager 算建议/提示时必须传 apiType（issue #337：不传则 Anthropic 又会被补 /v1）", () => {
+	// 门控与建议都靠第三个参数 apiType 区分协议族（见 baseUrlPath.sessionBaseUrlVersionPolicy）：
+	// 少传一个参数就会静默退回「所有协议都补 /v1」，而单测只覆盖纯函数、不覆盖调用点。
+	const source = readFileSync("src/main/config/ConfigManager.ts", "utf8");
+	for (const fn of ["needsSessionBaseUrlVersionHint", "suggestNormalizedBaseUrl"]) {
+		const calls = source.match(new RegExp(`${fn}\\s*\\([^)]*\\)`, "g")) ?? [];
+		assert.ok(calls.length >= 1, `未找到 ${fn} 调用`);
+		for (const call of calls) {
+			assert.match(call, /,\s*apiType\s*\)$/, `${fn} 调用必须把 apiType 作为最后一个参数：${call}`);
+		}
+	}
+});

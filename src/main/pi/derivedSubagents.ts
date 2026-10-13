@@ -253,9 +253,11 @@ export function deriveToolSubagentEntries(rawEntries: readonly unknown[]): PiSub
  * record/锚点（权威）与工具推导条目合并：推导条目 id（acp_delegate_* / call_xxx）
  * 与 pi-subagents 插件的 agent id（UUID）天然不相交，合并只影响推导链自身。
  *
- * 同 id 时默认 record 优先；唯一例外：record 是「stopped 且无任何结果/错误文本」
- * ——即读取侧由残留 start 锚点合成的空壳——而推导条目已从终态信号拿到真实结局时，
- * 推导更准确，以推导为准。
+ * 同 id 时默认 record 优先；两个例外：
+ * - record 是「stopped 且无任何结果/错误文本」——即读取侧由残留 start 锚点合成的
+ *   空壳——而推导条目已从终态信号拿到真实结局时，推导更准确，以推导为准；
+ * - record 缺描述文本（由事件桥落盘的终态 record 不带 task）时用推导补齐：任务
+ *   文本只有会话文件里的派发 args 能提供，空描述会让面板行丢掉任务文案。
  */
 export function mergeSubagentSources(records: PiSubagentEntry[], derived: PiSubagentEntry[]): PiSubagentEntry[] {
 	const byId = new Map(records.map((record) => [record.id, record]));
@@ -268,6 +270,10 @@ export function mergeSubagentSources(records: PiSubagentEntry[], derived: PiSuba
 		const isBareStoppedShell = existing.status === "stopped" && existing.result == null && existing.error == null;
 		if (isBareStoppedShell && TERMINAL_STATUSES.has(entry.status)) {
 			byId.set(entry.id, entry);
+			continue;
+		}
+		if (!existing.description && entry.description) {
+			byId.set(entry.id, { ...existing, description: entry.description });
 		}
 	}
 	return [...byId.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));

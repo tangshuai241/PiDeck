@@ -192,7 +192,8 @@ export function isKnownEmptySessionRecord(record: Pick<SessionRecord, "status" |
 	// imagegen 会话历史独立存 ImageSessionStore，不体现在 filePath/messageCount：
 	// 已 promote 为 active 的生图会话不能判为空，否则重启后打开会跳过历史加载显示空引导页。
 	// 新建生图草稿仍为 draft，已在上面 return true，不受影响。
-	if (record.backend === "imagegen") return false;
+	// videogen 同理（VideoSessionStore 独立存储，任务占位也不在 filePath/messageCount 里）。
+	if (record.backend === "imagegen" || record.backend === "videogen") return false;
 	return true;
 }
 

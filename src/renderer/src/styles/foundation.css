@@ -101,9 +101,9 @@
   --color-bg-active: #dfe3e8;
   --color-text-primary: #202124;
   /* 灰阶加深一档：secondary/tertiary 在白底上对比不足是“发灰不亮”的主因之一，
-     secondary 7.5:1 / tertiary 4.8:1，均达 WCAG AA。 */
+     secondary 7.56:1 / tertiary 5.37:1（muted 弱底 4.89:1），均达 WCAG AA。 */
   --color-text-secondary: #4b5563;
-  --color-text-tertiary: #6b7280;
+  --color-text-tertiary: #636b79;
   /* 过程层文字（思考/工具调用）：比 tertiary 更浅，向背景混 35%——
      与正文（primary）的差异主要由颜色承担，字重保持可读不降档。
      亮色显式 #9fa3ac（tertiary 65% + 白 35% 的实测值），避免 color-mix 在
@@ -143,11 +143,17 @@
   --color-danger: #b42318;
   --color-danger-soft: #fdecea;
   /* 成功色（diff 添加侧 / 完成态）：与 danger 同构，strong 为更深的强调档 */
-  --color-success: #15803d;
+  /* 成功色：blue-600/green-700 在白底仅 4.5 临界，graphite 等皮肤非纯白底
+     （#ececec）上跌到 4.25 不达 AA；加深一档后白底 6+、皮肤底 5+，
+     与 strong #166534 保持两档距离（见 tests/themeContrast.test.mjs）。 */
+  --color-success: #14703a;
   --color-success-soft: #dcfce7;
   --color-success-strong: #166534;
-  --color-warning: #b7791f;
-  --color-info: #2563eb;
+  /* 警告色：同色相加深一档过 WCAG AA——原 #b7791f 在白底仅 3.64:1、
+     bg-warning/15 透明徽章底上仅 3.08:1，LogViewer 警告行/导入取消提示这类
+     真实文字用途不达标；amber-800 白底 6.85:1、15% 透明底 5.46:1（见 tests/themeContrast.test.mjs）。 */
+  --color-warning: #854d0e;
+  --color-info: #1d4ed8;
   /* 工具身份色（工具行图标 / MCP 来源徽标 / ask 工具卡）：默认继承 --color-info，
      保持各主题现有观感不变；皮肤可在自身色板块覆盖（fresh-green 用青绿替换冷蓝），
      与 --color-thinking 同属「身份色」——状态色（info/警告/危险）与身份色解耦，
@@ -500,7 +506,10 @@
   --color-bg-active: #333333;
   --color-text-primary: #ecece7;
   --color-text-secondary: #b8b8b2;
-  --color-text-tertiary: #8a8a84;
+  /* 暗色下 tertiary 提亮一档：原 #8a8a84 在 bg-muted #262626 上 4.36:1 不足 AA，
+     graphite 皮肤更亮的 #303030 弱底上仅 3.8:1；#9a9a94 全部 4.6~5.3:1，
+     仍低于 secondary #b8b8b2 保持层级（见 tests/themeContrast.test.mjs）。 */
+  --color-text-tertiary: #9a9a94;
   /* 暗色下 faint 显式定义：color-mix 会把 tertiary 向 bg-app(#121212) 混，
      算出来约 #595c59，在暗底上对比不足看不清；暗色「浅」= 比 tertiary 更亮，
      取 #a0a09a（比正文 tertiary 亮一档但仍低于 secondary，保持过程层语义）。 */
@@ -527,12 +536,18 @@
   --color-accent-soft: #2a2a2a;
   /* 危险色暗色提亮：#b42318 深红在暗底上发闷，destructive 按钮/错误态改用亮红；
      soft 同步换成深红底（直接沿用浅色 #fdecea 会在暗色界面出现粉底徽章）。 */
-  --color-danger: #ef4444;
+  /* 危险色暗色提亮：red-400 档——danger-soft 徽章底、sea-blue/graphite 等皮肤较亮面板上
+     red-500 #ef4444 仅 4.0~4.1:1 不达 AA；与 success(#4ade80)/warning(#fbbf24) 同取 400 档，
+     黑字/深底全部 4.8~6.8:1（家族策略见 tests/themeContrast.test.mjs）。 */
+  --color-danger: #f87171;
   --color-danger-soft: #3a1d1d;
   /* 成功色暗色提亮：同 danger 策略，soft 用深绿底（沿用浅绿会在暗色界面出现荧光底） */
   --color-success: #4ade80;
   --color-success-soft: #14291c;
   --color-success-strong: #86efac;
+  /* 警告色暗色提亮：补齐 danger/success 的家族策略（此前漏覆盖、长期继承浅色 #b7791f，
+     在暗底上发闷且透明徽章底不足 AA）；amber-400 在 #121212 上 11.2:1、bg-warning/15 底 8.3:1。 */
+  --color-warning: #fbbf24;
   --color-brand-green: #9ca3af;
   --color-brand-purple: #9ca3af;
   --color-brand-blue: #9ca3af;
@@ -580,7 +595,7 @@
 :root[data-theme="dark"][data-accent="green"] {
   /* 森系绿暗色（参考 Proma theme-forest-dark 森息夜语）：雾绿灰主色 hsl(145,25%,42%)；
      accent-soft 用其 --accent（hsl 150 12% 22% = #313f38）作悬停/选中暖调。 */
-  --color-accent: #508667;
+  --color-accent: #55906c;
   --color-accent-strong: #66a380;
   --color-accent-soft: #313f38;
   --color-brand-green: #87c5a1;
@@ -601,7 +616,7 @@
 }
 :root[data-theme="dark"][data-accent="purple"] {
   --color-accent: #a78bfa;
-  --color-accent-strong: #8b5cf6;
+  --color-accent-strong: #9064f8;
   --color-accent-soft: #241f3a;
   --color-logo-green: #a78bfa;
   --color-logo-green-mid: #8b5cf6;
@@ -652,8 +667,11 @@
   --color-bg-hover: #dadece;
   --color-bg-active: #c9d0be;
   --color-text-primary: #273529;
-  --color-text-secondary: #515f4e;
-  --color-text-tertiary: #697463;
+  --color-text-secondary: #4b5744;
+  --color-text-tertiary: #5a6656;
+  /* 皮肤底非纯白：基础 faint #9fa3ac 在 #f6f7f2 上仅 2.35:1 低于 2.5 地板，
+     按皮肤色相给显式值（见 tests/themeContrast.test.mjs）。 */
+  --color-text-faint: #8d998e;
   --color-border-subtle: #d4dacd;
   --color-border-default: #c8cfbf;
   --color-border-strong: #bac2ae;
@@ -676,7 +694,7 @@
   --color-bg-active: #36443d;
   --color-text-primary: #e9edea;
   --color-text-secondary: #b2bdb6;
-  --color-text-tertiary: #7b8e83;
+  --color-text-tertiary: #8ea294;
   --color-border-subtle: #2f3a34;
   --color-border-default: #384740;
   --color-border-strong: #40544a;
@@ -696,7 +714,9 @@
   --color-bg-active: #dedede;
   --color-text-primary: #1f1f22;
   --color-text-secondary: #4a4a4d;
-  --color-text-tertiary: #6e6e72;
+  --color-text-tertiary: #66666a;
+  /* 同 fresh-green：非纯白底需自己的 faint（基础 #9fa3ac 在 #ececec 上 2.14:1） */
+  --color-text-faint: #8f8f8b;
   --color-border-subtle: #d8d8d8;
   --color-border-default: #d0d0d0;
   --color-border-strong: #c7c7c7;
@@ -714,7 +734,7 @@
   --color-bg-active: #383838;
   --color-text-primary: #ecece7;
   --color-text-secondary: #b8b8b2;
-  --color-text-tertiary: #8a8a84;
+  --color-text-tertiary: #9a9a94;
   --color-border-subtle: #3a3a3a;
   --color-border-default: #444444;
   --color-border-strong: #4f4f4f;
@@ -732,7 +752,9 @@
   --color-bg-active: #dfeaf3;
   --color-text-primary: #1c2e3d;
   --color-text-secondary: #3f586b;
-  --color-text-tertiary: #5f7488;
+  --color-text-tertiary: #55697d;
+  /* 同 fresh-green：非纯白底需自己的 faint（基础 #9fa3ac 在 #eef5fb 上 2.30:1） */
+  --color-text-faint: #8a97a8;
   --color-border-subtle: #dbe7f0;
   --color-border-default: #d3e1ec;
   --color-border-strong: #c9d9e6;
@@ -768,7 +790,9 @@
   --color-bg-active: #e8dfd0;
   --color-text-primary: #33291c;
   --color-text-secondary: #5d5140;
-  --color-text-tertiary: #7c6f5a;
+  --color-text-tertiary: #71654f;
+  /* 同 fresh-green：非纯白底需自己的 faint（基础 #9fa3ac 在 #f7f2ea 上 2.27:1） */
+  --color-text-faint: #94907f;
   --color-border-subtle: #e6dccb;
   --color-border-default: #ded2bf;
   --color-border-strong: #d4c6b0;
@@ -786,7 +810,7 @@
   --color-bg-active: #3e362b;
   --color-text-primary: #f0e9dd;
   --color-text-secondary: #c2b6a2;
-  --color-text-tertiary: #9a8d77;
+  --color-text-tertiary: #ab9f8a;
   --color-border-subtle: #453c2f;
   --color-border-default: #51473a;
   --color-border-strong: #5d5344;

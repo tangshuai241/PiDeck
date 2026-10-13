@@ -542,7 +542,7 @@ test("switching update source rebuilds the generic feed URL immediately", async 
 	// 设置页切换到 atomgit 更新源：保存即生效（无需重启）
 	await settings.update({ updateSource: "atomgit" });
 	service.applyUpdateSource();
-	assert.equal(updater.feedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+	assert.equal(updater.feedUrl, null);
 
 	// 回到官方源：重置 feed，恢复原生 GitHub provider
 	await settings.update({ updateSource: "github" });
@@ -587,7 +587,10 @@ test("real updater setFeedUrl: github -> mirror -> github round trip rebuilds th
 
 	// 初始 github 源：currentFeedUrl 初始即 null，early-return，不触碰 provider。
 	real.setFeedUrl(null);
-	assert.deepEqual(setFeedURLCalls, []);
+	assert.equal(setFeedURLCalls.length, 1);
+	assert.equal(setFeedURLCalls[0].provider, "github");
+	assert.equal(setFeedURLCalls[0].owner, "tangshuai241");
+	setFeedURLCalls.length = 0;
 
 	// 切到镜像：generic provider 整体接管。（vm 沙箱跨 realm，不能 deepEqual 对象，逐字段断言。）
 	real.setFeedUrl(atomgitUrl);
@@ -600,7 +603,7 @@ test("real updater setFeedUrl: github -> mirror -> github round trip rebuilds th
 	real.setFeedUrl(null);
 	assert.equal(setFeedURLCalls.length, 2);
 	assert.equal(setFeedURLCalls[1].provider, "github");
-	assert.equal(setFeedURLCalls[1].owner, "ayuayue");
+	assert.equal(setFeedURLCalls[1].owner, "tangshuai241");
 	assert.equal(setFeedURLCalls[1].repo, "PiDeck");
 	assert.equal(electronUpdaterStub.autoUpdater.forceDevUpdateConfig, true);
 
@@ -615,7 +618,7 @@ test("atomgit source is applied as generic feed URL on start", async (t) => {
 	});
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
-	assert.equal(updater.feedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+	assert.equal(updater.feedUrl, null);
 });
 
 test("dev channel: feed is forced to GitHub and allowPrerelease=true regardless of the configured source", async (t) => {
@@ -643,7 +646,7 @@ test("stable channel behavior is unchanged: atomgit feed applies and prerelease 
 	});
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
-	assert.equal(updater.feedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+	assert.equal(updater.feedUrl, null);
 	// 显式重置 false（声明式保障，防残留）；绝不为 stable 开启预发布。
 	assert.deepEqual(updater.allowPrereleaseCalls, [false]);
 });
@@ -664,7 +667,7 @@ test("manual delivery on dev channel checks GitHub even when atomgit source is c
 	assert.equal(receivedUrl, undefined);
 });
 
-test("manual delivery uses latestReleaseUrl from the configured atomgit source per check", async (t) => {
+test("manual app updates ignore the upstream mirror and use the fork repository", async (t) => {
 	let receivedUrl;
 	const { service, settings } = createManualService((latestReleaseUrl) => {
 		receivedUrl = latestReleaseUrl;
@@ -674,7 +677,7 @@ test("manual delivery uses latestReleaseUrl from the configured atomgit source p
 	await settings.update({ updateSource: "atomgit" });
 	await service.checkNow();
 	// macOS manual 检查：AtomGit 源 URL 传进检查器（GitHub 源时为 undefined）
-	assert.equal(receivedUrl, "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
+	assert.equal(receivedUrl, undefined);
 });
 
 test("manual check rejection is a check error, not a download error", async (t) => {

@@ -42,7 +42,7 @@ jobs:
       - name: Upload Linux ${{ matrix.arch }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pi-desktop-linux-${{ matrix.arch }}
+          name: PiDeck-linux-${{ matrix.arch }}
           if-no-files-found: error
           path: |
             release/*.AppImage

@@ -595,6 +595,11 @@ export class SessionCatalog {
 		wslUser?: string;
 		importedSourceId?: string;
 		piSessionId?: string;
+		/**
+		 * 命令层权威标题（fork/clone/copy 专用）：命令刚把 (fork) 后缀名物理写进会话文件，
+		 * 授权本次注册把标题当作权威名落库（见下方覆盖规则）。
+		 */
+		titleAuthority?: "command";
 		/** fork/clone 产物注册时直接标记（parentSession 链接已由 pi 写入文件头，此处同源标记）。 */
 		forked?: boolean;
 		/** fork/clone 产物继承源会话的模型偏好与思考档位：子会话 JSONL 里没有新的 model_change，扫描回读拿不到，重启后模型选择器会空。 */
@@ -661,6 +666,22 @@ export class SessionCatalog {
 				entry.wslUser = input.wslUser;
 				entry.importedSourceId = input.importedSourceId;
 				entry.piSessionId = input.piSessionId;
+				// 命令层标题覆盖规则（fork/clone/copy）：命令刚刚把 (fork) 名写进会话文件，但扫描
+				// 可能抢在改名落盘前先索引了新文件，用正文兜底（首条消息，或复制进来的父会话名）
+				// 把标题锁成 fallback —— 而大文件只读头/尾窗口，rename 追加的 session_info 很快被
+				// 后续消息推出尾窗，fallback→权威名的升级再也触发不了，侧栏就永久停在首条消息
+				// 正文上、也看不到 (fork)（2026-10-11 复现）。
+				// 写入范围：未确认（undefined）或内容派生的猜测（fallback）才允许覆盖；用户改名
+				// （manual）/扩展自动名（auto）/存量 legacy 一律不动；占位名（Untitled/时间戳
+				// stem）不往条目里写。
+				if (input.titleAuthority === "command") {
+					const commandTitle = catalogDisplayTitle(input.title);
+					const currentOrigin = resolveTitleOrigin(entry);
+					if (commandTitle && !isPlaceholderCatalogTitle(commandTitle) && commandTitle !== entry.title && (currentOrigin === undefined || currentOrigin === "fallback")) {
+						entry.title = commandTitle;
+						assignTitleOrigin(entry, "manual");
+					}
+				}
 				// fork 标记只增补不清空：同一文件可能先以普通扫描注册、后经 fork 注册逻辑走到这里。
 				if (input.forked) entry.forked = true;
 				entry.status = "active";

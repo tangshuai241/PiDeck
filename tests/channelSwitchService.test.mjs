@@ -3,6 +3,8 @@
  * - 桩注入：netFetch 返回固定 releases / 3 块数据的下载 body；getTempDir 返回一次性 tmp；
  *   spawnInstaller / quitApp / sendToRenderer / registerQuitCleanup 全部收集器；无真实网络。
  * - query：dev 目标（当前 stable）返回 prerelease 最新并推 querying→available 快照；
+ * - query 版本守卫：目标通道最新版不高于当前版本时推 up-to-date 快照（不提供下载），
+ *   反向契约（当前 beta 客户端升级同号正式版）仍进 available；
  * - download：进度百分比单调，完成后 ready 快照带 installerPath，文件内容等于分块拼接；
  * - digest：匹配通过；缺失跳过不报错；不匹配报错并推 error 快照；
  * - 网络失败 → error 快照，含 releases 页地址作手动下载退化入口；
@@ -65,8 +67,8 @@ function makeBody(chunks) {
 	};
 }
 
-/** 组装服务与收集器；每个用例独立 tmp 目录，测试结束清理。 */
-function makeService(t, { netFetch }) {
+/** 组装服务与收集器；每个用例独立 tmp 目录，测试结束清理。currentVersion 默认 0.0.0 保持既有 available 流。 */
+function makeService(t, { netFetch, currentChannel = () => "stable", currentVersion = () => "0.0.0" }) {
 	const tempDir = mkdtempSync(join(tmpdir(), "pideck-channel-switch-"));
 	t.after(() => rmSync(tempDir, { recursive: true, force: true }));
 	const cleanups = [];
@@ -74,7 +76,8 @@ function makeService(t, { netFetch }) {
 	const launched = [];
 	let quitRequested = false;
 	const service = new ChannelSwitchService({
-		currentChannel: () => "stable",
+		currentChannel,
+		currentVersion,
 		netFetch,
 		getTempDir: () => tempDir,
 		spawnInstaller: (filePath) => launched.push(filePath),
@@ -140,6 +143,41 @@ test("query：dev 目标（当前 stable）返回 prerelease 最新并推 queryi
 	assert.equal(sent[1].target.version, "0.8.0-beta.1");
 	// getStatus 与最后推送一致（get-status handler 数据源）。
 	assert.equal(service.getStatus().phase, "available");
+});
+
+test("query 版本守卫：当前 0.9.0 高于目标 dev 0.8.0-beta.9 → 不进 available，推 up-to-date 快照", async (t) => {
+	const { service, sent } = makeService(t, {
+		currentVersion: () => "0.9.0",
+		netFetch: async () => makeQueryResponse(releasesJson({ prereleaseVersion: "0.8.0-beta.9", stableVersion: "0.7.5" })),
+	});
+	const release = await service.queryTargetChannelLatest();
+	// 返回值语义不变（仍是目标通道最新 release），只是快照不再提供下载入口。
+	assert.equal(release.version, "0.8.0-beta.9");
+	assert.deepEqual(
+		sent.map((snapshot) => snapshot.phase),
+		["querying", "up-to-date"],
+	);
+	const last = sent.at(-1);
+	assert.equal(last.target, undefined, "up-to-date 快照不携带可下载 target");
+	assert.equal(last.targetChannel, "dev");
+	assert.equal(last.currentVersion, "0.9.0");
+	// getStatus 与最后推送一致（get-status handler 数据源）。
+	assert.equal(service.getStatus().phase, "up-to-date");
+});
+
+test("query 版本守卫：当前 0.8.0-beta.9（dev 构建）+ 目标 stable 0.8.0 → 仍进 available（beta 升级正式版契约）", async (t) => {
+	const { service, sent } = makeService(t, {
+		currentChannel: () => "dev",
+		currentVersion: () => "0.8.0-beta.9",
+		netFetch: async () => makeQueryResponse(releasesJson({ prereleaseVersion: "0.8.1-beta.1", stableVersion: "0.8.0" })),
+	});
+	const release = await service.queryTargetChannelLatest();
+	assert.equal(release.version, "0.8.0");
+	assert.deepEqual(
+		sent.map((snapshot) => snapshot.phase),
+		["querying", "available"],
+	);
+	assert.equal(sent[1].target.version, "0.8.0");
 });
 
 test("query：网络失败 → error 快照，含 releases 页退化入口，并向上抛出结构化错误", async (t) => {

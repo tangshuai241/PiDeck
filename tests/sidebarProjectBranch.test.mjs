@@ -28,6 +28,25 @@ test("i18n no longer ships the removed project-row branch copy", () => {
 	assert.doesNotMatch(en, /"app\.currentBranch"/);
 });
 
+// 折叠项目行的运行黄点回归守卫（用户反馈）：旧口径「Agent 进程存活（starting/idle/running）」
+// 在会话跑完/停止但 pi 进程未退出（idle）时仍亮黄点，误导为还在跑；展开后黄点不渲染，
+// 子行显示蓝色 idle 点，两处口径不一致。锁定为「会话真的在跑」（starting/running 且无待确认
+// ask，与 simple 模式活动指示及子行黄点同口径），禁止回退到 isLiveRuntimeStatus 判定。
+test("project running dot only lights when a session is actually running", () => {
+	const src = read("src/renderer/src/components/sidebar/ProjectTree.tsx");
+	assert.doesNotMatch(src, /hasLiveAgent/);
+	assert.doesNotMatch(src, /isLiveRuntimeStatus/);
+	// 折叠黄点与 simple 模式活动指示共用同一 hasRunningAgent 判定
+	assert.match(src, /collapsed\s*&&\s*hasRunningAgent\s*&&/);
+	assert.match(src, /hasRunningAgent\s*\?\s*"running"\s*:\s*undefined/);
+});
+
+test("project running hint copy no longer claims process-alive semantics", () => {
+	assert.doesNotMatch(read("src/renderer/src/i18n/rendererCopy.zh-CN.ts"), /Agent 进程未退出/);
+	assert.doesNotMatch(read("src/renderer/src/i18n/rendererCopy.en-US.ts"), /agent process is still alive/);
+	assert.doesNotMatch(read("src/renderer/src/i18n/rendererCopy.zh-TW.ts"), /Agent 程序未退出/);
+});
+
 test("useProjectSync keeps worktree branch lookup but drops per-project branch fetching", () => {
 	const src = read("src/renderer/src/hooks/useProjectSync.ts");
 	// 分支字典仍由 refreshWorktrees 写入（worktree 主工作区行显示分支）

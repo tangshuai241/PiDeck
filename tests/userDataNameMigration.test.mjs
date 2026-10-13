@@ -6,11 +6,12 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, posix } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { runUserDataNameMigration, replaceRootInText, encodeSessionDirName, consumeUserDataNameMigrationNotice, recordUserDataNameMigrationNotice } = loadTsCommonJs("src/main/projects/userDataNameMigration.ts");
+const { buildSessionOriginKey } = loadTsCommonJs("src/shared/sessionIdentity.ts");
 
 function makeFixture({ legacyData = true, newData = false } = {}) {
 	const root = mkdtempSync(join(tmpdir(), "pideck-userdata-migration-"));
@@ -113,12 +114,12 @@ test("~/.pi/agent/sessions 下旧根 encoded 聊天目录整体改名，JSONL �
 	const legacyDir = encodeSessionDirName(join(oldRoot, "chat-workspace"));
 	mkdirSync(join(sessionsRoot, legacyDir), { recursive: true });
 	writeFileSync(join(sessionsRoot, legacyDir, "2026-09-01_session.jsonl"), '{"type":"session","cwd":"x"}');
-	// 真实 catalog 引用形态：filePath 保留磁盘目录名，originKey 全小写正斜杠
+	// originKey 使用生产身份规则：POSIX 保留大小写，只有 Windows 盘符/UNC 路径折叠。
 	writeFileSync(
 		join(fx.oldRoot, "session-catalog.json"),
 		JSON.stringify({
 			version: 1,
-			sessions: [{ id: "s1", filePath: join(sessionsRoot, legacyDir, "2026-09-01_session.jsonl").replace(/\\/g, "\\\\"), originKey: `pi:native:${sessionsRoot.replace(/\\/g, "/")}/${legacyDir}/2026-09-01_session.jsonl`.toLowerCase() }],
+			sessions: [{ id: "s1", filePath: join(sessionsRoot, legacyDir, "2026-09-01_session.jsonl").replace(/\\/g, "\\\\"), originKey: buildSessionOriginKey({ source: "pi", environment: "native", filePath: join(sessionsRoot, legacyDir, "2026-09-01_session.jsonl") }) }],
 		}),
 	);
 	// 无关目录不得被触碰
@@ -133,8 +134,9 @@ test("~/.pi/agent/sessions 下旧根 encoded 聊天目录整体改名，JSONL �
 	assert.ok(!existsSync(join(sessionsRoot, legacyDir)));
 	assert.ok(existsSync(join(sessionsRoot, "--d--other-project--")));
 	const catalog = readFileSync(join(fx.newRoot, "session-catalog.json"), "utf8");
-	assert.ok(catalog.includes(targetDir), "filePath 里的 encoded 目录名同步改写");
-	assert.ok(catalog.includes(targetDir.toLowerCase()), "originKey 的小写形态同步改写");
+	const session = JSON.parse(catalog).sessions[0];
+	assert.equal(session.filePath, join(sessionsRoot, targetDir, "2026-09-01_session.jsonl").replace(/\\/g, "\\\\"));
+	assert.equal(session.originKey, buildSessionOriginKey({ source: "pi", environment: "native", filePath: join(sessionsRoot, targetDir, "2026-09-01_session.jsonl") }));
 	assert.ok(!catalog.includes(legacyDir), "旧 encoded token 不再残留");
 	rmSync(fx.root, { recursive: true, force: true });
 });
@@ -209,7 +211,7 @@ test("macOS（darwin）根改写：大小写不敏感 + 带空格 POSIX 根 + �
 	assert.equal(parsed.d, "/Users/mortal/Library/Application Support/PiDeck", "精确等于根也要替换");
 });
 
-test("darwin 平台全链路：带空格聊天目录迁移 + 大小写混杂磁盘目录命中 + header 保守跳过", () => {
+test("darwin 平台全链路：带空格聊天目录迁移 + 大小写混杂磁盘目录命中 + header.cwd 修复", () => {
 	// mac 用户升级后「会话/项目消失」取证期间发现 darwin 分支零覆盖。Windows 宿主上
 	// 可测的真实增量：①子目录名含空格（Application Support 同类风险）贯穿匹配/改名/token
 	// 改写；②磁盘 encoded 目录大小写混杂仍需命中（case-insensitive 匹配）；③darwin 平台下
@@ -240,13 +242,44 @@ test("darwin 平台全链路：带空格聊天目录迁移 + 大小写混杂磁�
 	assert.ok(targetDir.includes("chat workspace"), "encoded 目录名保留空格");
 	assert.ok(existsSync(join(sessionsRoot, targetDir, "2026-09-01_session.jsonl")), "会话文件随目录改名迁移");
 	assert.ok(!existsSync(join(sessionsRoot, legacyOnDisk)), "旧目录（大小写混杂形态）已改名");
-	// 非 POSIX cwd 在 darwin 平台保守不动：文件逐字节保留
+	// Linux/macOS 宿主的 fixture 是 POSIX cwd，应修复；Windows 宿主模拟 darwin 时
+	// cwd 是盘符路径，不属于 mac 的迁移范围，必须保守保留。两种都精确校验正文不变。
 	const migrated = readFileSync(join(sessionsRoot, targetDir, "2026-09-01_session.jsonl"), "utf8");
-	assert.equal(migrated, `${headerLine}\n{"role":"user"}\n`);
+	const expectedCwd = posix.isAbsolute(join(oldRoot, "chat workspace")) ? join(newRoot, "chat workspace") : join(oldRoot, "chat workspace");
+	assert.equal(migrated, `${JSON.stringify({ type: "session", cwd: expectedCwd })}\n{"role":"user"}\n`);
 	const catalog = readFileSync(join(fx.newRoot, "session-catalog.json"), "utf8");
 	assert.ok(catalog.includes(targetDir), "catalog 里的 encoded token（含空格）同步改写");
 	assert.ok(!catalog.toLowerCase().includes(legacyOnDisk.toLowerCase()), "旧 token（大小写混杂形态）不再残留");
 	rmSync(fx.root, { recursive: true, force: true });
+});
+
+test("本机全链路迁移同时修正设置中的路径且不改用户自定义目录", (t) => {
+	const fx = makeFixture();
+	t.after(() => rmSync(fx.root, { recursive: true, force: true }));
+	const oldCwd = join(fx.oldRoot, "chat-workspace");
+	const newCwd = join(fx.newRoot, "chat-workspace");
+	mkdirSync(oldCwd);
+	writeFileSync(join(fx.oldRoot, "settings.json"), JSON.stringify({ customPiPath: join(fx.oldRoot, "pi-runtime", "pi"), externalPath: "/opt/custom/pi" }));
+	const sessionsRoot = join(fx.home, ".pi", "agent", "sessions");
+	const oldDir = join(sessionsRoot, encodeSessionDirName(oldCwd));
+	const newFile = join(sessionsRoot, encodeSessionDirName(newCwd), "chat.jsonl");
+	mkdirSync(oldDir, { recursive: true });
+	writeFileSync(join(oldDir, "chat.jsonl"), `${JSON.stringify({ type: "session", cwd: oldCwd })}\n{"text":"历史正文"}\n`);
+	writeFileSync(join(fx.oldRoot, "session-catalog.json"), JSON.stringify({ sessions: [{ filePath: join(oldDir, "chat.jsonl"), originKey: buildSessionOriginKey({ source: "pi", environment: "native", filePath: join(oldDir, "chat.jsonl") }) }] }));
+	mkdirSync(join(fx.oldRoot, "pi-desktop"));
+	writeFileSync(join(fx.oldRoot, "pi-desktop", "feishu-session-chat.json"), JSON.stringify({ [join(oldDir, "chat.jsonl")]: "chat-old" }));
+	const result = runUserDataNameMigration({ appDataDir: fx.appData, homeDir: fx.home, platform: process.platform });
+	assert.equal(result.kind, "migrated");
+	const settings = JSON.parse(readFileSync(join(fx.newRoot, "settings.json"), "utf8"));
+	assert.equal(settings.customPiPath, join(fx.newRoot, "pi-runtime", "pi"));
+	assert.equal(settings.externalPath, "/opt/custom/pi");
+	const session = JSON.parse(readFileSync(join(fx.newRoot, "session-catalog.json"), "utf8")).sessions[0];
+	assert.equal(session.filePath, newFile);
+	assert.equal(session.originKey, buildSessionOriginKey({ source: "pi", environment: "native", filePath: newFile }));
+	const chatMap = JSON.parse(readFileSync(join(fx.newRoot, "pi-desktop", "feishu-session-chat.json"), "utf8"));
+	assert.equal(chatMap[newFile], "chat-old");
+	assert.equal(Object.keys(chatMap).length, 1);
+	assert.equal(readFileSync(newFile, "utf8"), `${JSON.stringify({ type: "session", cwd: newCwd })}\n{"text":"历史正文"}\n`);
 });
 
 test("迁移提示消费式领取：只返回一次", () => {

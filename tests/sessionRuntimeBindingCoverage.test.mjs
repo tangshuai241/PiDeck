@@ -17,7 +17,7 @@ const toolCards = readFileSync("src/renderer/src/components/session/ToolCallComp
 
 test("catalog scans attach matching existing runtimes in the main process", () => {
 	assert.match(coordinator, /attachCatalogRuntimes\(/);
-	assert.match(main, /attachCatalogRuntimes\(records\)/);
+	assert.match(sessionIpc, /attachCatalogRuntimes\(visibleRecords\)/);
 	assert.match(sessionIpc, /sessionsCatalogList[\s\S]*mergeScanned[\s\S]*attachCatalogRuntimes/);
 });
 
@@ -51,25 +51,6 @@ test("session UI requests remain generation-bound and render in the timeline foo
 	assert.doesNotMatch(timeline, /session-runtime-ui sticky bottom-0/);
 	assert.match(toolCards, /ask-question-card-result-list/);
 	assert.match(toolCards, /askCard\.questions/);
-});
-
-test("Web wiring is Session-first and exposes no Agent compatibility creation", () => {
-	assert.match(main, /createSessionDraft: async \(input\)[\s\S]*sessionCatalog\.createDraft/);
-	assert.match(main, /sendSessionPrompt: async \(input\)[\s\S]*sessionRuntimeCoordinator\.send\(input\)/);
-	// stopSessionRuntime is now a shared helper called from both IPC and the web deps.
-	assert.match(main, /async function stopSessionRuntime\(target[^)]*\)[\s\S]*sessionRuntimeCoordinator\.stopRuntime\(target\)/);
-	assert.doesNotMatch(main, /createAgent:/);
-	assert.doesNotMatch(main, /LEGACY_EXTERNAL_RUNTIME|ipcChannels\.agentsCreate/);
-});
-
-test("catalog deletion unbinds first then stops the agent in the background", () => {
-	assert.match(sessionIpc, /sessionsCatalogDelete[\s\S]*releaseRuntimeForDelete\(sessionId\)/);
-	assert.match(sessionIpc, /sessionsCatalogDelete[\s\S]*rememberDismissedDshSession\(/);
-	assert.match(main, /deleteSessionRecord: async \(sessionId\)[\s\S]*releaseRuntimeForDelete\(sessionId\)/);
-	assert.match(main, /deleteSessionRecord: async \(sessionId\)[\s\S]*rememberDismissedDshSession\(/);
-	assert.match(coordinator, /async releaseRuntimeForDelete\(sessionId: string\)/);
-	assert.match(coordinator, /void this\.agents\s*\.?\s*stop\(target\.agentId\)/);
-	assert.match(coordinator, /isActivating\(sessionId: string\): boolean/);
 });
 
 test("replacement restore is gated by full origin identity in main", () => {

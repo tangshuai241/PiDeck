@@ -3,7 +3,7 @@ import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCop
 
 type SessionCommandCopyKey = Extract<
 	MainProcessTranslationKey,
-	"sessionCommand.sessionNotFound" | "sessionCommand.messageNotFound" | "sessionCommand.runtimeUnavailable" | "sessionCommand.runtimeChanged" | "sessionCommand.runtimeBusy" | "sessionCommand.commandFailed" | "sessionCommand.modelNotFound" | "sessionCommand.fileTooLarge"
+	"sessionCommand.sessionNotFound" | "sessionCommand.messageNotFound" | "sessionCommand.runtimeUnavailable" | "sessionCommand.runtimeChanged" | "sessionCommand.runtimeBusy" | "sessionCommand.commandFailed" | "sessionCommand.backendRemoved" | "sessionCommand.modelNotFound" | "sessionCommand.fileTooLarge"
 >;
 
 type SessionCommandCopy = (key: SessionCommandCopyKey, params?: Record<string, string | number>) => string;
@@ -15,6 +15,7 @@ const SESSION_COMMAND_COPY_KEYS: Record<SessionCommandErrorCode, SessionCommandC
 	SESSION_RUNTIME_CHANGED: "sessionCommand.runtimeChanged",
 	SESSION_RUNTIME_BUSY: "sessionCommand.runtimeBusy",
 	SESSION_COMMAND_FAILED: "sessionCommand.commandFailed",
+	SESSION_BACKEND_REMOVED: "sessionCommand.backendRemoved",
 	SESSION_MODEL_NOT_FOUND: "sessionCommand.modelNotFound",
 	SESSION_FILE_TOO_LARGE: "sessionCommand.fileTooLarge",
 };

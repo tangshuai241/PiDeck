@@ -2,8 +2,13 @@
 
 > 本页表格由 `src/shared/pluginDevCatalog.ts` 生成（`.scratch` 脚本产出后人工核对），
 > 镜像契约由 `tests/guiExtensionPointsDoc.test.mjs` 兜底：目录与本文档、桥实现三方
-> 漂移会红。给 AI 的完整开发指南由应用内「设置 → 扩展 → 插件开发」生成
-> （`AI-PLUGIN-GUIDE.md`，双语），本页是其维护者视角的事实源说明。
+> 漂移会红。给 AI 的完整开发指南由 `pluginDevGuide.ts` 生成（`AI-PLUGIN-GUIDE.md`，双语）——
+> 生成器与 `pluginDev:*` IPC 都还在，但应用内入口「设置 → 扩展 → 插件开发」已隐藏（见下），
+> 本页是其维护者视角的事实源说明。
+>
+> ⚠️ **当前状态**：桥（`pi-deck-gui-bridge.ts`）与扩展点面板（`pi-deck-ext-points.ts`）已列入
+> `HIDDEN_BUILT_IN_EXTENSIONS`——不再经 `-e` 注入，扩展页也没有开启入口（源文件保留）。
+> 下面的落点清单仍然有效，但在桥重新启用前不会生效。
 
 **镜像源（改这些必须同步目录，契约测试会拦）**：
 

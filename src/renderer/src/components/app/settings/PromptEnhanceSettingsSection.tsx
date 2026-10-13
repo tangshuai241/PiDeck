@@ -119,7 +119,7 @@ export function PromptEnhanceSettingsSection() {
 	const selectedLabel = useMemo(() => (configured ? `${configured.provider}/${configured.modelId}` : ""), [configured]);
 
 	return (
-		<SettingsSection title={t("settings.enhance.section")} description={t("settings.enhance.sectionDesc")}>
+		<SettingsSection id="settings-section-common-prompt-enhance" title={t("settings.enhance.section")} description={t("settings.enhance.sectionDesc")}>
 			<SettingRow title={<span>{t("settings.enhance.modelMode")}</span>} description={t("settings.enhance.modelModeDesc")} alignEnd={false}>
 				<Select
 					value={configured ? "custom" : "session"}

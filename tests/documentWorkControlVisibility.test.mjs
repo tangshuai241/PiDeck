@@ -250,7 +250,6 @@ test("装配契约：文稿端口传内部控制，渲染层入口过白名单",
 	const indexSource = readFileSync(join(ROOT, "src/main/index.ts"), "utf8");
 	const dispatch = /\[\s*INTERNAL_CONTROL\s*\]\s*:\s*true/.test(indexSource);
 	assert.equal(dispatch, true, "文稿运行时端口的分发必须标记为内部控制投递（Symbol 键）");
-	assert.match(indexSource, /sendSessionPrompt[\s\S]{0,200}?sanitizeRendererPromptInput\s*\(\s*input\s*\)/, "Web/远程提示入口也必须过白名单");
 	const ipcSource = readFileSync(join(ROOT, "src/main/ipc/sessionIpc.ts"), "utf8");
 	assert.match(ipcSource, /send\s*\(\s*sanitizeRendererPromptInput\s*\(\s*input\s*\)\s*\)/, "渲染层提示入口必须先过白名单再入协调器");
 });

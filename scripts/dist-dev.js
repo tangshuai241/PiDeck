@@ -8,7 +8,7 @@
  * - 协议 scheme: pideck-dev:// → 注册表关联不与 stable 的 pideck:// 互相抢占
  * - 产物名固定 "PiDeck-Dev-…"（无空格，GitHub/AtomGit 资产 URL 对空格敏感）
  *
- * userData 与 stable **共用** pi-desktop（主进程 index.ts 的刻意决策），
+ * userData 与 stable **共用** PiDeck（主进程 index.ts 的刻意决策），
  * 双包切换不丢配置；并行运行依赖按版本互斥的单实例锁。
  *
  * 配置策略：只维护与 package.json build 字段的**差异项**，运行时读取主配置
@@ -39,7 +39,11 @@ const DEV_OVERRIDES = {
 	nsis: { artifactName: "PiDeck-Dev-${version}-setup.${ext}" },
 	portable: { artifactName: "PiDeck-Dev-${version}-portable.${ext}" },
 	mac: { artifactName: "PiDeck-Dev-${version}-${arch}.${ext}" },
-	linux: { artifactName: "PiDeck-Dev-${version}-${arch}.${ext}" },
+	linux: { executableName: "pideck-dev", artifactName: "PiDeck-Dev-${version}-${arch}.${ext}" },
+	// Dev 不能继承 stable 对旧 Debian 包的替代关系，否则安装 Dev 会卸载 stable。
+	deb: { packageName: "pideck-dev", artifactName: "PiDeck-Dev-${version}-${arch}.${ext}", fpm: [] },
+	appImage: { artifactName: "PiDeck-Dev-${version}-${arch}.${ext}" },
+	extraMetadata: { productName: "PiDeck Dev" },
 };
 
 function buildDevConfig() {

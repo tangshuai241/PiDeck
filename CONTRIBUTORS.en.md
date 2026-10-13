@@ -21,16 +21,20 @@ Thanks to everyone who has contributed to PiDeck!
 - **r0y1z2** ([@r0y1z2](https://github.com/r0y1z2)) — Project session pinning, secure composer voice transcription (#177, #176); compact Windows Explorer quick-task window (#243)
 - **sgafxh** ([@sgafxh](https://github.com/sgafxh)) — Recovery from request-body-size-limit rejections, Windows pi console-window fix (#188, #180)
 - **lerrorgk** ([@lerrorgk](https://github.com/lerrorgk)) — Fixed nicobailon pi-subagents async dispatch being mis-marked complete; panel entries now include the full task description (#206)
-- **juzijun233** ([@juzijun233](https://github.com/juzijun233)) — Stability and security hardening series: login-shell PATH probing moved to async warm-up (startup freeze gone), late streaming events after a stop rejected as "no runtime", event payloads carrying sessionId + runtimeGeneration, main-process direct sends restricted to the subscribed-channel allowlist, oversized diff truncation, PiRpcClient line-buffer cap, Git write validation of commit hash and reset mode, per-session subscription isolation so split panes no longer drag each other, plus webview dead attributes and redundant any assertions
+- **juzijun233** ([@juzijun233](https://github.com/juzijun233)) — Stability and security hardening series: login-shell PATH probing moved to async warm-up (startup freeze gone), late streaming events after a stop rejected as "no runtime", event payloads carrying sessionId + runtimeGeneration, main-process direct sends restricted to the subscribed-channel allowlist, oversized diff truncation, PiRpcClient line-buffer cap, Git write validation of commit hash and reset mode, per-session subscription isolation so split panes no longer drag each other, plus webview dead attributes and redundant any assertions; the channel-switch version guard so an older dev build is no longer offered (#336)
 - **xiaYuTian11** ([@xiaYuTian11](https://github.com/xiaYuTian11)) — Current Git branch in the sidebar project tree (#232), timeline scroll jitter and jump-to-top/bottom fixes (#224), session tab width cap and font size (#226), skill rename routed by skill type so markdown skills no longer move the skill root (#227)
 - **Q-xuan** ([@Q-xuan](https://github.com/Q-xuan)) — Inline-code file references are clickable again (#228); bracketed LaTeX formulas now render (#251)
 - **cmyk-xing** ([@cmyk-xing](https://github.com/cmyk-xing)) — Feature-module visibility switches in appearance settings so unused module entries can be hidden (#254); guide-page bootstrap messages no longer leak into newly created sessions (#256); Windows reopen at their last position, size, and maximized state (#259)
+
+- **EEEEEEEEdison** ([@EEEEEEEEdison](https://github.com/EEEEEEEEdison)) — Right sidebar split into an upper drawer pane and a persistent session-status pane (#334); streaming and end-to-end TPS measurement modes (#327)
 
 And everyone who filed issues, shared feedback, and helped spread the word.
 
 ## 💖 Special Support
 
 - **微时佬友** ([@weishiair](https://github.com/weishiair)) — Provides the Grok model service used for PiDeck development 🎉
+- **橙子** — Provides the subscription service used for PiDeck development 🎉
+- **罪** — Provides the model service used for PiDeck development 🎉
 
 ---
 

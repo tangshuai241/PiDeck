@@ -1,12 +1,13 @@
 /** Renderer-only form shaping; the main-process manifest parser remains the authority for network grants. */
+import { isLocalServiceId } from "../../../shared/localServices";
 import type { HostPluginScaffoldInput } from "../../../shared/types/hostPlugin";
 
-export type HostPluginScaffoldDraft = Omit<HostPluginScaffoldInput, "network"> & { httpsOrigins: string; localPorts: string };
+export type HostPluginScaffoldDraft = Omit<HostPluginScaffoldInput, "network" | "services"> & { httpsOrigins: string; localPorts: string; services: string[] };
 const SCAFFOLD_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 
 /** Network is opt-in; keep session viewing as the existing default. */
 export function initialHostPluginScaffoldDraft(): HostPluginScaffoldDraft {
-	return { id: "", name: "", permissions: ["sessions.read"], presentation: "modal", httpsOrigins: "", localPorts: "" };
+	return { id: "", name: "", permissions: ["sessions.read"], presentation: "modal", httpsOrigins: "", localPorts: "", services: [] };
 }
 
 /** One or more comma/whitespace-separated values; empty or duplicate grants should be fixed before IPC. */
@@ -43,5 +44,8 @@ export function hostPluginScaffoldInput(draft: HostPluginScaffoldDraft): HostPlu
 		if (!values || values.some((value) => !/^[1-9]\d{0,4}$/.test(value) || Number(value) > 65535)) return null;
 		network.localPorts = values.map(Number);
 	}
-	return { id: draft.id, name: draft.name.trim(), permissions: draft.permissions, presentation: draft.presentation, ...(network.httpsOrigins || network.localPorts ? { network } : {}) };
+	// 服务控制与 network 同一条规则：声明了权限就必须点名至少一个 PiDeck 已实现的服务，否则 manifest 校验会拒。
+	const services = draft.services.filter(isLocalServiceId);
+	if (draft.permissions.includes("service.local") && (services.length < 1 || services.length !== draft.services.length)) return null;
+	return { id: draft.id, name: draft.name.trim(), permissions: draft.permissions, presentation: draft.presentation, ...(services.length > 0 ? { services } : {}), ...(network.httpsOrigins || network.localPorts ? { network } : {}) };
 }

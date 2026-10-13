@@ -3,7 +3,7 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle } from "lucide-react";
+import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
@@ -32,7 +32,7 @@ const CommonTab = lazy(() => import("./settings/CommonTab").then((m) => ({ defau
 const ShortcutsTab = lazy(() => import("./settings/ShortcutsTab").then((m) => ({ default: m.ShortcutsTab })));
 const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => ({ default: m.AppearanceTab })));
 const ProxyTab = lazy(() => import("./settings/ProxyTab").then((m) => ({ default: m.ProxyTab })));
-const WebTab = lazy(() => import("./settings/WebTab").then((m) => ({ default: m.WebTab })));
+
 const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ default: m.EditorsTab })));
 const GitTab = lazy(() => import("./settings/GitTab").then((m) => ({ default: m.GitTab })));
 const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.DevTab })));
@@ -45,7 +45,8 @@ const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
 const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
-const AcpToolsTab = lazy(() => import("./settings/AcpToolsTab").then((m) => ({ default: m.AcpToolsTab })));
+const VideoGenSettingsTab = lazy(() => import("./settings/VideoGenSettingsTab").then((m) => ({ default: m.VideoGenSettingsTab })));
+
 const HostPluginsTab = lazy(() => import("../../config/HostPluginsTab").then((m) => ({ default: m.HostPluginsTab })));
 const TerminalTab = lazy(() => import("./settings/TerminalTab").then((m) => ({ default: m.TerminalTab })));
 
@@ -109,8 +110,7 @@ type SettingsModalProps = {
 	piProxyChecking: boolean;
 	piProxyNotice: string;
 	piProxyNoticeTone: "info" | "success" | "error";
-	webServiceChanging: boolean;
-	onRestartWebService: () => void;
+
 	appInfo: AppInfo;
 	/** 添加/编辑/移除用户自加的候选路径（列表内联表单驱动） */
 	onAddPiCustomPath: (path: string) => Promise<void> | void;
@@ -133,7 +133,7 @@ type SettingsModalProps = {
 	onToggleDevTools: () => void;
 	onRestartApp: () => void;
 	onClearCheckFlag?: () => void;
-	onOpenWebService: (url: string) => void;
+
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
 	/** 当前项目身份：项目资源操作只使用主进程登记的 id。 */
@@ -247,7 +247,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	appearance: { labelKey: SETTINGS_TAB_LABEL_KEYS.appearance, icon: <Brush size={16} /> },
 	terminal: { labelKey: SETTINGS_TAB_LABEL_KEYS.terminal, icon: <TerminalSquare size={16} /> },
 	proxy: { labelKey: SETTINGS_TAB_LABEL_KEYS.proxy, icon: <Network size={16} /> },
-	web: { labelKey: SETTINGS_TAB_LABEL_KEYS.web, icon: <Globe size={16} /> },
+
 	editors: { labelKey: SETTINGS_TAB_LABEL_KEYS.editors, icon: <FileCode2 size={16} /> },
 	git: { labelKey: SETTINGS_TAB_LABEL_KEYS.git, icon: <GitBranch size={16} /> },
 	dev: { labelKey: SETTINGS_TAB_LABEL_KEYS.dev, icon: <Wrench size={16} /> },
@@ -260,7 +260,8 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	process: { labelKey: SETTINGS_TAB_LABEL_KEYS.process, icon: <Activity size={16} /> },
 	vision: { labelKey: SETTINGS_TAB_LABEL_KEYS.vision, icon: <Eye size={16} /> },
 	imagegen: { labelKey: SETTINGS_TAB_LABEL_KEYS.imagegen, icon: <ImageIcon size={16} /> },
-	acp: { labelKey: SETTINGS_TAB_LABEL_KEYS.acp, icon: <Bot size={16} /> },
+	videogen: { labelKey: SETTINGS_TAB_LABEL_KEYS.videogen, icon: <Clapperboard size={16} /> },
+
 	hostplugins: { labelKey: SETTINGS_TAB_LABEL_KEYS.hostplugins, icon: <Puzzle size={16} /> },
 };
 
@@ -336,18 +337,20 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const imageGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
 	const [imageGenDirty, setImageGenDirty] = useState(false);
 	const handleImageGenDirtyChange = useCallback((dirty: boolean) => setImageGenDirty(dirty), []);
+	// ── 生视频草稿：独立文件 userData/videogen.json，保存链与生图一致（ref.save + 脏标记） ──
+	const videoGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+	const [videoGenDirty, setVideoGenDirty] = useState(false);
+	const handleVideoGenDirtyChange = useCallback((dirty: boolean) => setVideoGenDirty(dirty), []);
 	// ── ACP 工具表：独立 settings.acpTools 字段，保存链与生图一致（ref.save + 脏标记） ──
-	const acpToolsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
-	const [acpDirty, setAcpDirty] = useState(false);
-	const handleAcpDirtyChange = useCallback((dirty: boolean) => setAcpDirty(dirty), []);
+
 	// 快捷键存在冲突等非法状态时禁用保存（ShortcutsTab 上报，见 saveAll 按钮）
 	const [shortcutsInvalid, setShortcutsInvalid] = useState(false);
 	const handleShortcutsInvalidChange = useCallback((invalid: boolean) => setShortcutsInvalid(invalid), []);
 	// 左侧导航黄点来源：与关闭确认同一套字段目录，避免两处口径不一致
-	const dirtyTabIds = useMemo(() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty, imageGenDirty, acpDirty }), [dirtyFields, visionDraft.dirty, imageGenDirty, acpDirty]);
+	const dirtyTabIds = useMemo(() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty, imageGenDirty }), [dirtyFields, visionDraft.dirty, imageGenDirty]);
 	/** 各 tab 的局部编辑态（WSL 输入/Web 端口/宠物预览模式）在取消时通过递增信号重置 */
 	const [devTabResetKey, setDevTabResetKey] = useState(0);
-	const [webTabResetKey, setWebTabResetKey] = useState(0);
+
 	const [petTabResetKey, setPetTabResetKey] = useState(0);
 
 	/** 更新草稿；脏字段由 useMemo 按真实差异推导，无需手动登记（改回原值自动变干净）。 */
@@ -448,11 +451,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 			ok = ok && imageGenOk;
 			// 保存成功后脏标记由子组件通过 onDirtyChange 自动清掉
 		}
-		if (acpDirty) {
-			// 校验失败（必填/重名）时子组件返回 false，保留脏标记供用户修正后重试
-			const acpOk = (await acpToolsRef.current?.save()) ?? false;
-			ok = ok && acpOk;
+		if (videoGenDirty) {
+			// 校验失败（必填缺失）时子组件返回 false，保留脏标记供用户修正后重试
+			const videoGenOk = (await videoGenRef.current?.save()) ?? false;
+			ok = ok && videoGenOk;
 		}
+
 		return ok;
 	};
 
@@ -464,7 +468,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		setPerAreaFontSize(baseSnapshotRef.current.uiFontSize !== null || baseSnapshotRef.current.tabBarFontSize !== null || baseSnapshotRef.current.chatFontSize !== null || baseSnapshotRef.current.inputFontSize !== null);
 		// tab 局部编辑态（WSL 输入、Web 端口、宠物预览）由各自 tab 监听信号重置
 		setDevTabResetKey((k) => k + 1);
-		setWebTabResetKey((k) => k + 1);
+
 		setPetTabResetKey((k) => k + 1);
 	};
 
@@ -592,7 +596,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
-	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || acpDirty;
+	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || videoGenDirty;
 	// 关闭确认：列出全部变更项（不再只点第一条），多项按设置页 tab/字段顺序逐条展示。
 	const unsavedSummary = useMemo(
 		() =>
@@ -600,9 +604,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 				dirtyFields,
 				visionDirty: visionDraft.dirty,
 				imageGenDirty,
-				acpDirty,
 			}),
-		[dirtyFields, visionDraft.dirty, imageGenDirty, acpDirty],
+		[dirtyFields, visionDraft.dirty, imageGenDirty],
 	);
 	const unsavedCloseMessage = useMemo(() => formatSettingsUnsavedMessage(unsavedSummary, t), [unsavedSummary]);
 	// 关闭确认清单 = 系统设置 + 配置管理两区未保存项合并（配置项由 ConfigPane 上报）
@@ -785,13 +788,6 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 
 							{/* ── 局域网 Web 服务 tab（原为开发设置内区块） ── */}
-							{activeTab === "web" && (
-								<TabsContent value="web" className="settings-panel min-w-0">
-									<Suspense fallback={<SettingsTabLoading />}>
-										<WebTab draft={draftSettings} updateDraft={updateDraft} webServiceChanging={props.webServiceChanging} onOpenWebService={props.onOpenWebService} onRestartWebService={props.onRestartWebService} resetKey={webTabResetKey} />
-									</Suspense>
-								</TabsContent>
-							)}
 
 							{/* ── 外部编辑器 tab（由 Pi 管理界面迁入，原为开发设置内区块） ── */}
 							{activeTab === "editors" && (
@@ -941,12 +937,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 									<ImageGenSettingsTab ref={imageGenRef} onDirtyChange={handleImageGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
-							{/* ── ACP 工具 tab：独立 settings.acpTools 字段；草稿自持，切换 tab 保持挂载（hidden）以免丢失未保存行 ── */}
-							<TabsContent value="acp" className="settings-panel min-w-0" hidden={activeTab !== "acp"}>
+							{/* ── 生视频 tab：独立 videogen.json，草稿/脏标记/保存链与生图同构（hidden 保挂载）。 ── */}
+							<TabsContent value="videogen" className="settings-panel min-w-0" hidden={activeTab !== "videogen"}>
 								<Suspense fallback={<SettingsTabLoading />}>
-									<AcpToolsTab ref={acpToolsRef} onDirtyChange={handleAcpDirtyChange} />
+									<VideoGenSettingsTab ref={videoGenRef} onDirtyChange={handleVideoGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
+							{/* ── ACP 工具 tab：独立 settings.acpTools 字段；草稿自持，切换 tab 保持挂载（hidden）以免丢失未保存行 ── */}
+
 							{/* ── PiDeck 插件 tab：宿主插件管理（安装/授权/启停）。独立于 pi 配置弹窗，
 							    归属应用设置；无草稿语义，切 tab 即卸载（动作型 IPC 即时生效）。 ── */}
 							<TabsContent value="hostplugins" className="settings-panel min-w-0" hidden={activeTab !== "hostplugins"}>

@@ -4,6 +4,11 @@
 >
 > **写 GUI 扩展 = 用同一套 `ctx.ui` API 写扩展。** 不需要学 React，不需要构建管线。
 > 另有一套 GUI 专属扩展点（`ctx.gui`），写法与 pi 原生扩展点**同形**。
+>
+> ⚠️ **当前状态：桥未随包启用**。宿主插件系统（`src/main/plugins/`）接替了插件入口后，
+> `pi-deck-gui-bridge.ts` 与 `pi-deck-ext-points.ts` 已列入 `HIDDEN_BUILT_IN_EXTENSIONS`：
+> 不再经 `-e` 注入、扩展页也没有开启入口（源文件与本文档保留）。下面的写法仍然有效，
+> 但在桥重新启用前不会生效。
 
 > 📋 **只想查「哪个扩展点能用」** → 看 [扩展点参考](gui-extension-points.md)
 > （权威清单：pi 原生 29 条 + 39 个事件 + PiDeck 专属 14 个落点，含每条的桥接状态与宿主）。

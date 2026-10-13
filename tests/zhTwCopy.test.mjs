@@ -1,13 +1,15 @@
 /**
- * 繁体中文（zh-TW）支持：locale 解析、四份词典的接线、以及各进程的语言分支。
+ * 繁体中文（zh-TW）支持：locale 解析、三份词典的接线、以及各进程的语言分支。
  *
  * 词典是 `scripts/genZhTwCopy.mjs` 从 zh-CN 源生成的（台湾用语 + 繁体字形），所以这里既测行为，
- * 也守住「生成物没落后于 zh-CN 源」——加键忘了重新生成时，键集断言会红。
+ * 也守住「生成物没落后于 zh-CN 源」的两道门禁：键集断言（加键忘了重新生成）与
+ * source-sha256 指纹（只改值、忘了重新生成；见 scripts/zhTwCopySources.mjs）。
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { ZHTW_TARGETS, readSourceRegion } from "../scripts/zhTwCopySources.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const ROOT = process.cwd();
@@ -65,19 +67,6 @@ test("主进程词典：normalizeMainProcessLocale 认繁体，mainProcessT 取�
 	assert.equal(mainProcessT("en-US", "shellMenu.quickTask"), "Start a task with PiDeck");
 });
 
-test("Web 客户端：词典含 zh-TW，注入脚本按浏览器语言分流", () => {
-	const web = load("src/main/web/WebI18n.ts");
-	assert.ok(Object.hasOwn(web.webClientDictionaries, "zh-TW"));
-	assert.match(web.serializeWebClientDictionaries(), /"zh-TW"/);
-	assert.match(web.serializeWebClientDictionaries(), /"zh-CN"/);
-
-	// 注入给手机端页面的那段脚本在模板字符串里，只能按源码断言（大小写与下划线都要归一）
-	const manager = readSource("src/main/web/WebServiceManager.ts");
-	assert.match(manager, /replace\(\/_\/g,\s*"-[^"]*"\)/);
-	assert.match(manager, /hant/);
-	assert.match(manager, /"zh-TW"/);
-});
-
 /** 飞书的 zhCN 是模块内局部常量（未导出），从 `const zhCN = {` 到键类型声明之间提取键。 */
 function feishuSourceKeys() {
 	const source = readSource("src/main/feishu/FeishuI18n.ts");
@@ -85,11 +74,11 @@ function feishuSourceKeys() {
 	return [...block.matchAll(/^\t"([^"]+)":/gm)].map((match) => match[1]);
 }
 
-test("生成物与 zh-CN 源同键：四份 .zh-TW.ts 都不能漏键", () => {
+test("生成物与 zh-CN 源同键：三份 .zh-TW.ts 都不能漏键", () => {
 	const cases = [
 		{ name: "rendererCopy", sourceKeys: Object.keys(load("src/renderer/src/i18n/rendererCopy.zh-CN.ts").zhCN), targetKeys: Object.keys(load("src/renderer/src/i18n/rendererCopy.zh-TW.ts").zhTW) },
 		{ name: "mainProcessCopy", sourceKeys: Object.keys(load("src/shared/i18n/mainProcessCopy.ts").mainProcessZhCN), targetKeys: Object.keys(load("src/shared/i18n/mainProcessCopy.zh-TW.ts").mainProcessZhTW) },
-		{ name: "WebI18n", sourceKeys: Object.keys(load("src/main/web/WebI18n.ts").webZhCN), targetKeys: Object.keys(load("src/main/web/WebI18n.zh-TW.ts").webZhTW) },
+
 		// 飞书的 zhCN 是模块内局部常量（未导出），键集从源文件文本提取
 		{ name: "FeishuI18n", sourceKeys: feishuSourceKeys(), targetKeys: Object.keys(load("src/main/feishu/FeishuI18n.zh-TW.ts").feishuZhTW) },
 	];
@@ -102,7 +91,7 @@ test("生成物与 zh-CN 源同键：四份 .zh-TW.ts 都不能漏键", () => {
 });
 
 test("生成物带生成器标识，且繁体字形确实换过", () => {
-	const generated = ["src/renderer/src/i18n/rendererCopy.zh-TW.ts", "src/shared/i18n/mainProcessCopy.zh-TW.ts", "src/main/web/WebI18n.zh-TW.ts", "src/main/feishu/FeishuI18n.zh-TW.ts"];
+	const generated = ["src/renderer/src/i18n/rendererCopy.zh-TW.ts", "src/shared/i18n/mainProcessCopy.zh-TW.ts", "src/main/feishu/FeishuI18n.zh-TW.ts"];
 	for (const path of generated) {
 		assert.match(readSource(path), /由 `node scripts\/genZhTwCopy\.mjs` 生成，请勿手改/, `${path}: 缺少生成器标识头`);
 	}
@@ -113,6 +102,17 @@ test("生成物带生成器标识，且繁体字形确实换过", () => {
 	assert.equal(zhTW["settings.composer.security"], "權限");
 	assert.equal(zhTW["common.global"], "全域");
 	assert.notEqual(zhTW["timeline.processGroup.done.code"], zhCN["timeline.processGroup.done.code"]);
+});
+
+test("生成物新鲜度：头部 source-sha256 必须等于 zh-CN 源区块指纹（改值不重跑会被抓）", () => {
+	// 键集断言只能发现新增/删除键：只改一条文案的值而不加键时，三份产物依旧是旧译文且全绿。
+	// 指纹不需要 opencc（脚本的 --check 在无 opencc 时直接跳过，当不了门禁），能直接复算。
+	for (const target of ZHTW_TARGETS) {
+		const generated = readSource(target.out);
+		const recorded = generated.match(/source-sha256: ([0-9a-f]{64})/)?.[1];
+		assert.ok(recorded, `${target.out}: 头部缺少 source-sha256（旧产物请重跑 node scripts/genZhTwCopy.mjs）`);
+		assert.equal(recorded, readSourceRegion(ROOT, target).regionSha256, `${target.out} 与 ${target.source} 不同步：请运行 node scripts/genZhTwCopy.mjs 重新生成`);
+	}
 });
 
 test("设置页提供繁体中文选项，AppLanguageMode 已收录 zh-TW", () => {

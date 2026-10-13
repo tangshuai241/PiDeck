@@ -228,6 +228,63 @@ for (const firstCompleted of ["activation", "close"]) {
 	});
 }
 
+test("close 遇到 SESSION_RUNTIME_UNAVAILABLE 时把过期绑定收敛成本地 detach 并给出可见反馈", async () => {
+	// 回归（2026-10）：主进程对终态且进程已死的 agent 会在查询路径里惰性解绑且不推 detach，
+	// 渲染层快照因而停在 error——此时关闭 Agent 只能拿到「运行实例不可用」。
+	// 修复后必须本地收敛（红点熄灭、菜单回落「启动 Agent」）并给出明确文案。
+	const h = harness({ status: "error" });
+	h.sessions.stopRuntime = async (target) => {
+		h.calls.push(["stop", plain(target)]);
+		return { ok: false, error: { code: "SESSION_RUNTIME_UNAVAILABLE", debugDetails: "Session runtime is not available" } };
+	};
+	await h.hook.closeAgent("agent-a");
+	assert.deepEqual(plain(h.runtimeEvents), [
+		{
+			kind: "detach",
+			sessionId: "source-a",
+			agentId: "agent-a",
+			runtimeGeneration: 1,
+			sourceChannel: "sessions:runtime-detach",
+			payload: null,
+		},
+	]);
+	assert.deepEqual(h.toasts, ["app.runtimeAlreadyGone"]);
+	const hook = h.render();
+	assert.equal(hook.stoppingAgentId, null);
+	assert.equal(hook.getSessionRunCapabilities("source-a").pending, false);
+	assert.deepEqual(h.overlayKinds, {});
+});
+
+test("close 的过期绑定收敛不覆盖期间换绑的新运行实例", async () => {
+	const h = harness({ status: "error" });
+	const response = deferred();
+	h.sessions.stopRuntime = async () => response.promise;
+	const pending = h.hook.closeAgent("agent-a");
+	// 关闭在途期间会话被换绑（新 agentId/新一代）：失败回执既不得收敛新绑定，也不能报「已不存在」
+	h.runtimes.set("source-a", runtimeInfo({ agentId: "agent-b", runtimeGeneration: 2 }));
+	response.resolve({ ok: false, error: { code: "SESSION_RUNTIME_UNAVAILABLE" } });
+	await pending;
+	assert.deepEqual(h.runtimeEvents, []);
+	assert.deepEqual(h.toasts, ["sessionCommand.runtimeChanged"]);
+	assert.equal(h.render().stoppingAgentId, null);
+});
+
+test("close 遇到同轮互斥操作时给出可重试提示，不静默丢弃点击", async () => {
+	const h = harness();
+	const response = deferred();
+	h.sessions.stopRuntime = async (target) => {
+		h.calls.push(["stop", plain(target)]);
+		return response.promise;
+	};
+	const first = h.hook.closeAgent("agent-a");
+	await h.hook.closeAgent("agent-a");
+	assert.equal(h.calls.filter(([op]) => op === "stop").length, 1);
+	assert.deepEqual(h.toasts, ["sessionCommand.runtimeBusy"]);
+	response.resolve({ ok: true, value: sourceTarget });
+	await first;
+	assert.equal(h.render().stoppingAgentId, null);
+});
+
 test("late close completion does not clear a newer same-session overlay", async () => {
 	const h = harness();
 	const response = deferred();

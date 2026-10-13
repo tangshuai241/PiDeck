@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { PI_TUI_COLORS, PI_TUI_LOGO_CELLS, PI_TUI_PIECES, resolveLogoStyle, LOGO_STYLE_STORAGE_KEY } = loadTsCommonJs("src/renderer/src/components/app/piTuiLogoData.ts");
+const { BOOT_APP_NAME_STORAGE_KEY, BOOT_CUSTOM_LOGO_STORAGE_KEY } = loadTsCommonJs("src/renderer/src/components/app/bootBrandCache.ts");
 
 test("official pi TUI logo bitmap matches pi source colors and cell layout", () => {
 	// pi 源码 pi-logo.ts：coral #E48A7A / blue #4F8EB3 / yellow #EAB65D（品牌色固定）。
@@ -57,11 +58,14 @@ test("logo 风格缓存键带版本后缀（翻默认值时必须升版本，否
 test("开屏内联脚本按内容哈希进 CSP 白名单（否则被 script-src 静默拦截，开屏永远回落经典标）", () => {
 	const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 	const html = readFileSync(`${repoRoot}src/renderer/index.html`, "utf8");
-	const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-	assert.ok(script, "index.html 必须保留开屏内联脚本");
-	const hash = `sha256-${createHash("sha256").update(script, "utf8").digest("base64")}`;
+	// 逐块校验：开屏脚本拆成多段时，只查第一块会漏掉未授权的后续块
+	const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+	assert.ok(scripts.length > 0, "index.html 必须保留开屏内联脚本");
 	const csp = html.match(/Content-Security-Policy"\s*content="([^"]+)"/)?.[1] ?? "";
-	assert.ok(csp.includes(`'${hash}'`), `CSP script-src 必须含脚本内容哈希 ${hash}（改脚本文本后需同步更新 CSP）`);
+	for (const script of scripts) {
+		const hash = `sha256-${createHash("sha256").update(script, "utf8").digest("base64")}`;
+		assert.ok(csp.includes(`'${hash}'`), `CSP script-src 必须含脚本内容哈希 ${hash}（改脚本文本后需同步更新 CSP）`);
+	}
 	assert.match(csp, /script-src [^;]*'self'/, "script-src 必须保留 'self'");
 	assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/, "禁止用 'unsafe-inline' 绕过内联限制（应改用内容哈希）");
 });
@@ -72,7 +76,7 @@ test("boot splash reads the same localStorage key and embeds the same pi-tui bit
 	// 启动画面内联脚本（无法 import 共享常量）必须与 LOGO_STYLE_STORAGE_KEY 同步；空白容忍防格式化断言
 	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)`), "boot splash must read LOGO_STYLE_STORAGE_KEY");
 	// 新默认 pi-tui：仅显式选 classic 才不挂 class（与 shared/settings 默认同源）
-	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)\\s*!==\\s*["']classic["']`), "boot splash 默认 pi-tui（非 classic 即挂 class）");
+	assert.match(html, /bootStyle\s*!==\s*["']classic["']/, "boot splash 默认 pi-tui（非 classic 即挂 class）");
 	// 开屏 pi-tui SVG 与数据模块逐格一致（颜色 + 位置抽样锚定）
 	assert.match(html, /class="boot-logo-pi-tui"[\s\S]*?fill="#E48A7A"[\s\S]*?fill="#4F8EB3"[\s\S]*?fill="#EAB65D"/);
 	assert.match(html, /<rect x="3" y="3" width="1" height="1" fill="#EAB65D"\/>/);
@@ -82,6 +86,21 @@ test("boot splash reads the same localStorage key and embeds the same pi-tui bit
 	const bootRule = html.match(/\.boot-logo \.boot-logo-pi-tui\s*\{[^}]*\}/u);
 	assert.ok(bootRule, "boot splash 应有 pi-tui logo 尺寸规则");
 	assert.match(bootRule[0], /height:\s*48px/, "开屏 pi-tui 高度须与宽度一致（48px，1:1）");
+	// 自定义品牌：显示名称与自定义 logo 图都从 localStorage 缓存读（键与 bootBrandCache.ts 同步，内联脚本无法 import）
+	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${BOOT_APP_NAME_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)`), "开屏必须读显示名称缓存键");
+	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${BOOT_CUSTOM_LOGO_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)`), "开屏必须读自定义 logo 缓存键");
+	// custom 且缓存里有图才挂 logo-custom（缺图回落 pi-tui，与 shared resolveLogoStyle 同源）
+	assert.match(html, /bootStyle\s*===\s*["']custom["']\s*&&\s*bootCustomLogo[\s\S]{0,80}logo-custom/, "开屏 custom 分支必须同时要求缓存里有图");
+	// 显示名称写回 .boot-title；自定义图写回 .boot-logo-custom 的 src（图/名称不能硬编码在标记里）
+	assert.match(html, /bootTitle\.textContent\s*=\s*bootAppName/, "开屏必须用缓存的显示名称覆盖静态 PiDeck");
+	assert.match(html, /bootLogoImage\.src\s*=\s*bootCustomLogo/, "开屏必须把缓存的 data URL 写进自定义 logo 图");
+	assert.match(html, /<img class="boot-logo-custom"/, "开屏必须有自定义 logo 图元素");
+	// 自定义图不套黑底 plate（与 LogoMark 自定义分支一致），内置两套标隐藏
+	assert.match(html, /html\.logo-custom \.boot-logo \.boot-logo-custom\s*\{\s*display:\s*block/);
+	assert.match(html, /html\.logo-custom \.boot-logo \.boot-logo-pi-tui\s*\{\s*display:\s*none/);
+	// App.tsx 必须写入缓存（只加开屏读取而没有写入方，开屏永远拿不到自定义品牌）
+	const appSource = readFileSync(`${repoRoot}src/renderer/src/App.tsx`, "utf8");
+	assert.match(appSource, /writeBootBrandCache\(\s*displayName,\s*customLogo\s*\)/, "App.tsx 必须写入开屏品牌缓存");
 });
 
 test("PiTuiLogo component renders the 4x4 bitmap as a square (SVG and Canvas)", () => {
@@ -101,10 +120,27 @@ test("LogoMark sidebar and about logo branch on logoStyle (source scan, whitespa
 	const appParts = readFileSync(`${repoRoot}src/renderer/src/components/app/AppParts.tsx`, "utf8");
 	const about = readFileSync(`${repoRoot}src/renderer/src/components/app/AboutPopover.tsx`, "utf8");
 	const logoMark = readFileSync(`${repoRoot}src/renderer/src/components/app/LogoMark.tsx`, "utf8");
+	const piTuiLogo = readFileSync(`${repoRoot}src/renderer/src/components/app/PiTuiLogo.tsx`, "utf8");
 	// 空白容忍（AGENTS.md 格式化契约）：定位代码块用 \s* 而非字面空白
 	assert.match(appParts, /logoStyle === "pi-tui"\s*\?\s*<PiTuiLogoCanvas size=\{18\} playOnClick \/>\s*:\s*<PiLogoCanvas size=\{18\} playOnClick \/>/);
 	assert.match(about, /logoStyle === "pi-tui"\s*\?\s*<PiTuiLogoCanvas size=\{40\} playOnClick \/>\s*:\s*<PiLogoCanvas size=\{40\} playOnClick \/>/);
 	assert.match(logoMark, /logoStyle === "pi-tui"\s*\?\s*\(\s*\/\*[\s\S]*?PiTuiLogoMark size=\{glyph\} \/>/);
+	// custom（自备图片）：品牌位改渲染用户图；useBrandGlyph 只在「风格=custom 且已上传图」时返回非空 customLogo，
+	// 并把 style 解析成内置两档（custom 缺图 → pi-tui），因此三个落点共用「有图就用图」的同一判定。
+	for (const [name, source] of [
+		["AppParts", appParts],
+		["AboutPopover", about],
+		["LogoMark", logoMark],
+	]) {
+		assert.match(source, /const \{\s*style: logoStyle, customLogo \} = useBrandGlyph\(\)/, `${name} 必须经 useBrandGlyph 订阅自定义 logo 图`);
+		assert.match(source, /(?:if \(customLogo\) return|customLogo \?)\s*\(?\s*<img src=\{customLogo\}/, `${name} 自定义风格必须渲染用户图片`);
+	}
+	// LogoMark：自定义图不套黑底方块（自带外形的应用图标再垫黑底会双层嵌套，也与「上传什么就显示什么」不符），必须早返回裸 img
+	assert.match(logoMark, /if \(customLogo\) return <img src=\{customLogo\}/, "LogoMark 自定义风格必须早返回裸图（不套黑底容器）");
+	// 自定义回落：custom（有图无图）都必须按 pi-tui 解析（应用默认品牌位，与主进程图标回落一致），不能落回 classic
+	assert.match(piTuiLogo, /style: style === "classic" \? "classic" : "pi-tui"/, "useBrandGlyph 必须把非 classic 一律按 pi-tui 处理");
+	// 侧栏品牌位不再写死 PiDeck 字面量，改读应用显示名称
+	assert.match(appParts, /const displayName = useAppDisplayName\(\)/);
 });
 
 // SettingsStore 依赖 electron / 日志 / git 路径解析器，stub 顶掉（与 settingsStoreHiddenModules.test.mjs 同款）
@@ -143,6 +179,34 @@ test("SettingsStore: logoStyle 默认 pi-tui、旧配置缺字段回落新默认
 
 	await store.update({ logoStyle: "neon" });
 	assert.equal(store.get().logoStyle, "classic", "非法枚举被丢弃，保持原设置");
+
+	await store.update({ logoStyle: "custom" });
+	assert.equal(store.get().logoStyle, "custom", "custom（自备图片）是合法枚举");
+});
+
+test("SettingsStore: 自定义 logo 图只收内联 data URL，显示名称裁剪/超长丢弃", async () => {
+	const { SettingsStore, userData } = makeSettingsStore();
+	seedSettings(userData, {});
+	const store = new SettingsStore();
+	await store.load();
+
+	// 内联图（data URL）是唯一合法形态：本地路径与远程 URL 都必须被丢弃，否则设置文件会被当成路径代理。
+	await store.update({ logoCustomImage: "data:image/png;base64,AAAA" });
+	assert.equal(store.get().logoCustomImage, "data:image/png;base64,AAAA", "内联 data URL 图片写入设置");
+	for (const bad of ["C:/tmp/logo.png", "https://example.com/logo.png", 42]) {
+		await store.update({ logoCustomImage: bad });
+		assert.equal(store.get().logoCustomImage, "data:image/png;base64,AAAA", `非法图片值 ${String(bad)} 被丢弃，保持原设置`);
+	}
+	// 超长 data URL 直接进设置文件，必须封顶
+	await store.update({ logoCustomImage: `data:image/png;base64,${"A".repeat(1_500_001)}` });
+	assert.equal(store.get().logoCustomImage, "data:image/png;base64,AAAA", "超长内联图被丢弃");
+
+	await store.update({ appDisplayName: "  MyApp  " });
+	assert.equal(store.get().appDisplayName, "MyApp", "显示名称两端空白裁掉");
+	await store.update({ appDisplayName: "x".repeat(25) });
+	assert.equal(store.get().appDisplayName, "MyApp", "超长显示名称被丢弃，保持原设置");
+	await store.update({ appDisplayName: "" });
+	assert.equal(store.get().appDisplayName, "", "清空显示名称 = 回落默认 PiDeck（空串可持久化）");
 });
 
 test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / atom 初值）", () => {
@@ -156,5 +220,5 @@ test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / a
 	]) {
 		assert.match(source, /logoStyle\s*:\s*"pi-tui"/, `${path} 默认 pi-tui`);
 	}
-	assert.match(atoms, /logoStyleAtom\s*=\s*atom<"classic"\s*\|\s*"pi-tui">\("pi-tui"\)/, "atom 初值 pi-tui");
+	assert.match(atoms, /logoStyleAtom\s*=\s*atom<LogoStyle>\("pi-tui"\)/, "atom 初值 pi-tui（风格联合类型只在 shared 维护一份）");
 });

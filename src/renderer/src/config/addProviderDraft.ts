@@ -30,6 +30,19 @@ export type AddProviderDraft = {
 	};
 	/** 弹窗内维护的模型草稿（新增=空；编辑=现有模型；获取模型勾选后追加）。 */
 	models: ModelItem[];
+	/**
+	 * 逐模型 UA 覆盖（models.json 的 provider.modelOverrides，按 modelId 建键）。
+	 * 三态：undefined = 表单不管这项（保留原 provider 的值）；`{}` = 显式清空；有值 = 以它为准。
+	 */
+	modelOverrides?: Record<string, Record<string, unknown>>;
+	/**
+	 * 新增页缓冲的「每模型默认思考档位」（modelId → 档位）：新增时 provider 还没有名字，
+	 * 写不进 settings.json 的 `provider/modelId` 键，确认时由 ConfigModal 按最终名字落盘。
+	 * 只有新增页会填；编辑页即时写回（同一个宿主回调），不重复落盘。
+	 */
+	modelThinkingLevelDefaults?: Record<string, string>;
+	/** 新增页缓冲的「要隐藏的模型 id」（确认时并入 AppSettings.hiddenModels；编辑页即时生效）。 */
+	hiddenModelIds?: string[];
 };
 
 /**
@@ -99,6 +112,8 @@ export function resolveFetchedBaseUrl(currentBaseUrl: string, suggestedBaseUrl?:
  */
 export function buildProviderConfigFromDraft(draft: AddProviderDraft): ProviderConfig {
 	const provider: ProviderConfig = { models: draft.models ?? [] };
+	// 新增页自己维护逐模型 UA（与展开卡片写同一存储位置 provider.modelOverrides）
+	if (draft.modelOverrides && Object.keys(draft.modelOverrides).length > 0) provider.modelOverrides = draft.modelOverrides;
 	if (draft.baseUrl.trim()) provider.baseUrl = draft.baseUrl.trim();
 	if (draft.api) provider.api = draft.api;
 	if (draft.apiKey.trim()) provider.apiKey = draft.apiKey.trim();
@@ -125,21 +140,28 @@ export function buildProviderConfigFromDraft(draft: AddProviderDraft): ProviderC
 /**
  * 编辑供应商页保存：以原 provider 为基底合并草稿，保留表单不拥有的字段。
  *
- * 为什么不能用 buildProviderConfigFromDraft 重建：那会把 oauth / authHeader /
- * modelOverrides / 自定义字段以及除 User-Agent 外的自定义 headers 静默丢掉
+ * 为什么不能用 buildProviderConfigFromDraft 重建：那会把 oauth / authHeader
+ * 以及除 User-Agent、modelOverrides 外的自定义字段与自定义 headers 静默丢掉
  * （展开卡片的内联编辑是原地改同一个对象，不会丢——两条入口行为不一致）。
  * 这里统一为「加载的 models.json 是 source of truth，表单只覆盖它拥有的字段」
  * （与 JSON Merge Patch / Kubernetes patch 的保真思路一致）：
  * - models / baseUrl / api / apiKey：表单拥有，空值 = 删除字段；
  * - headers：逐键合并，只覆盖 User-Agent，保留 X-App-URL / 鉴权头等自定义头；
  * - compat：合并两个已知布尔并保留未知子键；原本没有 compat 且两项都 false 时不凭空创建；
- * - 其余字段（oauth / authHeader / modelOverrides / 未知字段）原样透传。
+ * - modelOverrides（逐模型 UA）：表单拥有，草稿带值就整体覆盖（见字段三态注释）；
+ * - 其余字段（oauth / authHeader / 未知字段）原样透传。
  * original 为空（新增模式）时等价于 buildProviderConfigFromDraft。
  */
 export function mergeProviderDraft(original: ProviderConfig | undefined, draft: AddProviderDraft): ProviderConfig {
 	if (!original) return buildProviderConfigFromDraft(draft);
 	const next: ProviderConfig = { ...original };
 	next.models = draft.models ?? [];
+	// modelOverrides：表单拥有（编辑页草稿初值就是原 provider 的值），三态语义见 AddProviderDraft。
+	// 原来靠「其余字段透传」保留它，现在由弹窗读写，必须显式处理清空（`{}`）与不管（undefined）。
+	if (draft.modelOverrides !== undefined) {
+		if (Object.keys(draft.modelOverrides).length > 0) next.modelOverrides = draft.modelOverrides;
+		else delete next.modelOverrides;
+	}
 	if (draft.baseUrl.trim()) next.baseUrl = draft.baseUrl.trim();
 	else delete next.baseUrl;
 	if (draft.api) next.api = draft.api;

@@ -12,7 +12,7 @@ const sendHook = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8"
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 
 test("goal mode is a first-class ComposerAgentMode", () => {
-	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
+	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "videogen" \| "goal"/);
 	assert.equal(existsSync("resources/extensions/pi-deck-goal-mode.ts"), true);
 	assert.match(builtIns, /"pi-deck-goal-mode.ts"/);
 });
@@ -47,15 +47,21 @@ test("pi goal extension auto-continues until complete, blocked, or max rounds", 
 	assert.match(extension, /\["clear", "reset"\]/);
 });
 
-test("goal/plan composer chrome uses an inset accent rail and an in-chip exit", () => {
-	// 身份条画在圆角盒内侧：贴外沿的 3px 实心条在默认近黑 accent 下会像一根粗棍。
-	const rail = timelineCss.match(/\.composer-box::before \{[\s\S]*?\n\}/)?.[0] ?? "";
-	assert.match(rail, /left:\s*8px/);
-	assert.match(rail, /width:\s*2px/);
-	assert.match(rail, /border-radius:\s*999px/);
-	assert.doesNotMatch(rail, /left:\s*-1px/);
-	assert.doesNotMatch(rail, /width:\s*3px/);
-	assert.match(timelineCss, /\.composer-box\.goal-mode::before \{[\s\S]*?color-mix\(in srgb, var\(--color-accent\) 55%/);
+test("goal/plan composer chrome：模式身份只用边框着色 + 单枚 chip（无左侧竖条、无独立退出药丸）", () => {
+	// 2026-10 精简：左侧 2px 竖条与 chip 表达同一件事，还额外挤 6px 左内边距（切模式正文左右跳）；
+	// 退出路径归入 chip 下拉（选「普通模式」= ComposerArea 的 onCancelPlan，同一条 setMode("normal")）。
+	assert.doesNotMatch(timelineCss, /\.composer-box::before/, "composer-box 不再有模式身份条伪元素");
+	assert.doesNotMatch(timelineCss, /\.composer-box\.(shell-mode|shell-silent-mode|plan-mode|goal-mode)::before/, "模式态不再画左侧竖条");
+	assert.doesNotMatch(timelineCss, /\.composer-box\.(shell-mode|shell-silent-mode|plan-mode|goal-mode)[\s\S]{0,80}?padding-left:\s*18px/, "输入区不再为竖条让位（切模式不跳字）");
+	// 身份仍可见：plan/goal 非聚焦态就有 1px 边框着色（focus-within 另有加强）
+	assert.match(timelineCss, /\.composer-box\.plan-mode \{[\s\S]*?border-color:\s*color-mix\(\s*in srgb,\s*var\(--color-brand-green\) 34%/);
+	assert.match(timelineCss, /\.composer-box\.goal-mode \{[\s\S]*?border-color:\s*color-mix\(\s*in srgb,\s*var\(--color-accent\) 34%/);
+	// 退出×只在模式 chip 缺席时兜底（设置里隐藏了选择器 / 只剩 normal 一项），不与 chip 同时出现；
+	// 生图/生视频后端（mediaModeIsBackend）的 mode 由 record.backend 推导、setMode 直接 return，
+	// 点×不会有任何反应，必须一并排除（用户反馈「选中视频模式后没办法退出」）。
+	assert.match(composerComponents, /showModePicker/);
+	assert.match(composerComponents, /isSpecialMode && !props\.imageGenLocked && !mediaModeIsBackend/);
+	assert.match(composerComponents, /const mediaModeIsBackend = props\.backend === "imagegen" \|\| props\.backend === "videogen"/);
 	assert.match(composerComponents, /composer-mode-cluster/);
 	assert.match(composerComponents, /composer-mode-exit/);
 	assert.match(composerComponents, /<X size=\{12\}/);

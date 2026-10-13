@@ -37,7 +37,7 @@ test("appendBuiltInExtensionArgs skips when noExtensions is true", () => {
 });
 
 test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files", () => {
-	const { listActiveBuiltInExtensionPaths, BUILT_IN_EXTENSIONS } = loadBuiltInExtensionsModule();
+	const { listActiveBuiltInExtensionPaths, BUILT_IN_EXTENSIONS, HIDDEN_BUILT_IN_EXTENSIONS, isHiddenBuiltInExtension } = loadBuiltInExtensionsModule();
 	const root = mkdtempSync(join(tmpdir(), "pideck-builtin-ext-"));
 	const extDir = join(root, "resources", "extensions");
 	mkdirSync(extDir, { recursive: true });
@@ -69,32 +69,38 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		// 顺序有语义：桥在最前（先包装 ctx.ui），扩展点面板紧随其后（要用桥挂出来的 ctx.gui）
 		assert.equal(BUILT_IN_EXTENSIONS[0], "pi-deck-gui-bridge.ts");
 		assert.equal(BUILT_IN_EXTENSIONS[1], "pi-deck-ext-points.ts");
+		// 已隐藏集合：仍留在 BUILT_IN_EXTENSIONS（白名单校验 + 启动迁移清理历史部署副本要用），
+		// 但 listActiveBuiltInExtensionPaths 会无条件跳过，见下一个用例。
+		assert.equal(JSON.stringify([...HIDDEN_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
+		assert.equal(isHiddenBuiltInExtension("pi-deck-gui-bridge.ts"), true);
+		assert.equal(isHiddenBuiltInExtension("pi-deck-ext-points.ts"), true);
+		assert.equal(isHiddenBuiltInExtension("pi-deck-ask-question.ts"), false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
 
-test("default-disabled built-ins (gui-bridge/ext-points) require explicit opt-in", () => {
-	const { listActiveBuiltInExtensionPaths, DEFAULT_DISABLED_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension } = loadBuiltInExtensionsModule();
-	const root = mkdtempSync(join(tmpdir(), "pideck-optin-ext-"));
+test("hidden built-ins (gui-bridge/ext-points) are never injected, not even when opted in", () => {
+	const { listActiveBuiltInExtensionPaths, HIDDEN_BUILT_IN_EXTENSIONS, isHiddenBuiltInExtension, DEFAULT_DISABLED_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension } = loadBuiltInExtensionsModule();
+	const root = mkdtempSync(join(tmpdir(), "pideck-hidden-ext-"));
 	const extDir = join(root, "resources", "extensions");
 	mkdirSync(extDir, { recursive: true });
 	writeFileSync(join(extDir, "pi-deck-gui-bridge.ts"), "// bridge\n", "utf8");
 	writeFileSync(join(extDir, "pi-deck-ext-points.ts"), "// panel\n", "utf8");
 	writeFileSync(join(extDir, "pi-deck-ask-question.ts"), "// ask\n", "utf8");
 	try {
-		// 默认：仅 ask 注入，桥/面板不注入（opt-in 机制，见 DEFAULT_DISABLED_BUILT_IN_EXTENSIONS）
+		// 默认：仅 ask 注入，桥/面板不注入
 		let paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, []);
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
-		// opt-in 面板：面板注入；桥仍默认关
-		paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, [], ["pi-deck-ext-points.ts"]);
-		assert.equal(paths.length, 2);
-		// opt-in 两个 + removed 无干扰（removed 是另一套机制，不冲突）
-		paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, ["pi-deck-ask-question.ts"], ["pi-deck-ext-points.ts", "pi-deck-gui-bridge.ts"]);
-		assert.equal(paths.length, 2);
-		assert.ok(String(paths[0]).endsWith("pi-deck-gui-bridge.ts"));
-		// 默认关集合固定为桥+面板
+		// 回归：历史 enabledBuiltInExtensions 残留（两个都在 opt-in 里）也不能让它们复活
+		paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, [], ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]);
+		assert.equal(paths.length, 1);
+		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
+		// 隐藏组与「默认关（可 opt-in）」组当前同名，但语义不同：隐藏组连 opt-in 都不认
+		assert.equal(JSON.stringify([...HIDDEN_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
+		assert.equal(isHiddenBuiltInExtension("pi-deck-ext-points.ts"), true);
+		assert.equal(isHiddenBuiltInExtension("pi-deck-ask-question.ts"), false);
 		assert.equal(JSON.stringify([...DEFAULT_DISABLED_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
 		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-gui-bridge.ts"), true);
 		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-ask-question.ts"), false);
@@ -136,4 +142,28 @@ test("AgentManager no longer deploys built-ins via ensurePiDeckExtension", () =>
 	assert.match(index, /migrateLegacyBuiltInExtensions/);
 	assert.match(processSource, /appendBuiltInExtensionArgs/);
 	assert.match(processSource, /--extension/);
+});
+
+test("TPA entries always use bundled files while upstream extensions can use a verified overlay", async () => {
+	const { createHash } = await import("node:crypto");
+	const { resolveBuiltInExtensionPath, invalidateBuiltInExtensionsOverlayCache } = loadBuiltInExtensionsModule();
+	const root = mkdtempSync(join(tmpdir(), "tpa-overlay-protection-"));
+	const overlayDir = join(root, "overlay");
+	mkdirSync(overlayDir);
+	const names = ["pi-deck-alignment-mode.ts", "pi-deck-document-work.ts", "pi-deck-document-materials.ts", "pi-deck-ask-question.ts"];
+	const files = names.map((name) => {
+		const content = "// upstream stale content\n";
+		writeFileSync(join(overlayDir, name), content);
+		return { name, bytes: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex") };
+	});
+	writeFileSync(join(overlayDir, "extensions-manifest.json"), JSON.stringify({ schemaVersion: 1, version: "9.9.9", files }));
+	const roots = { appPath: root, resourcesPath: root, isDev: true, overlayDir };
+	try {
+		invalidateBuiltInExtensionsOverlayCache();
+		for (const name of names.slice(0, 3)) assert.equal(resolveBuiltInExtensionPath(name, roots), join(root, "resources", "extensions", name));
+		assert.equal(resolveBuiltInExtensionPath(names[3], roots), join(overlayDir, names[3]));
+	} finally {
+		invalidateBuiltInExtensionsOverlayCache();
+		rmSync(root, { recursive: true, force: true });
+	}
 });

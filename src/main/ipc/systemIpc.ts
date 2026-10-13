@@ -48,7 +48,7 @@ import { createNetDownloader, fetchDshRunnerNodeIndex } from "../dsh/runtime/dsh
 import { refreshShortcutBindings } from "../appShortcuts";
 import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
@@ -65,7 +65,7 @@ import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMo
 import type { AgentProcessMetric, ArchStatus, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
 import type { DiagnosticsMonitor } from "../diagnostics/DiagnosticsMonitor";
 import { getWslExe, decodeWslOutput, parseWslDistroList } from "../wsl/wslExe";
-import { listWebNetworkAddresses } from "../web/WebNetwork";
+
 import { toggleMainWindowDevTools } from "../devTools";
 import { applyProviderMigration, previewProviderMigration, type ProviderMigrationDeps } from "../config/providerMigrationService";
 import { USAGE_PROBE_CANDIDATES } from "../config/providerUsageProbe";
@@ -243,9 +243,9 @@ export type SystemIpcDeps = {
 	/** Test Pi proxy */
 	testPiProxy?: (settings: AppSettings, proxyUrl?: string, translate?: (key: string, params?: Record<string, string | number>) => string) => Promise<import("../../shared/types").PiProxyTestResult>;
 	/** Web service manager apply settings */
-	applyWebServiceSettings?: (settings: AppSettings) => Promise<void>;
+
 	/** Restart the running Web service without changing persisted settings. */
-	restartWebService?: (settings: AppSettings) => Promise<void>;
+
 	/** Session catalog set identity context */
 	setSessionCatalogIdentityContext?: (ctx: { wslDistro?: string; wslUser?: string }) => void;
 	/** DSH host 重启（改 runner node 路径后写入 fork env）。 */
@@ -275,7 +275,7 @@ export type SystemIpcDeps = {
 		updatePi: () => Promise<import("../../shared/types").PiCliUpdateResult>;
 	};
 	/** Web service manager for restart / 运行状态查询 / 令牌轮换与手动设置 */
-	webServiceManager?: { stop: () => Promise<void>; getStatus: () => WebServiceStatusInfo; rotateToken: () => void; setTokenPolicy: (input: { token?: string; expiresIn?: number }) => void };
+
 	/** Terminal manager for restart */
 	terminalManager?: { closeAll: () => void };
 	/** Is quitting flag (for restart) */
@@ -403,8 +403,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		applyNativeThemeSource,
 		applyDesktopProxy,
 		testPiProxy,
-		applyWebServiceSettings,
-		restartWebService,
+
 		setSessionCatalogIdentityContext,
 		restartDshHost,
 		dshHostIsStarted,
@@ -418,7 +417,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		sessionCommandIpcError,
 		readSkillContent,
 		extensionManager,
-		webServiceManager,
+
 		terminalManager,
 		isQuitting,
 		RELEASES_URL,
@@ -700,7 +699,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 	});
 
-	// ── 模型规格（官方目录 + 当前 Pi 完整目录；第三方 provider 按模型本体匹配）──
+	// ── 模型规格（官方 pi-ai 目录；第三方 provider 按模型本体匹配）──
 
 	ipcMain.handle(ipcChannels.projectsGetModelSpec, async (_event, providerName: unknown, modelId: unknown, modelName: unknown) => {
 		// 边界校验：渲染层输入不可信，拒绝非字符串/超长输入。
@@ -708,11 +707,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return null;
 		}
 		try {
-			// 配置阶段模板优先读运行中 pi 的模型列表（pi --list-models 已含内置目录 +
-			// auth.json/models.json 覆盖后的解析容量），bundled pi-ai catalog 兜底。
-			// 只读缓存不触发新 fork：启动预取（index.ts refreshModelList）已填充，
-			// 保存 models.json/auth.json 后也由 invalidateModelListCache 置空并重取。
-			const runtimeModels = getCachedModelList() ?? undefined;
+			// 模板只读官方 pi-ai 目录（端点 /models 实报字段由渲染层优先合并）。
+			// 不读运行中 pi 的模型列表：那是它对 models.json 的解析后视图，会把
+			// `?? 128000 / ?? 16384 / ?? false / ?? ["text"]` 兜底值回显成事实
+			// （见 modelCapabilityResolver 顶部注释）。
 			return resolveModelSpecFromCatalogs(
 				{
 					providerName,
@@ -720,7 +718,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 					...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
 				},
 				getPiAiCatalogIndex(),
-				runtimeModels,
 			);
 		} catch (error) {
 			void appLogger.warn("models", "Model spec lookup failed", {
@@ -1171,8 +1168,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.appInfo, resolveAppInfo);
 
-	ipcMain.handle(ipcChannels.appNetworkAddresses, () => listWebNetworkAddresses());
-
 	ipcMain.handle(ipcChannels.appPreferredSystemLanguages, () => {
 		try {
 			return app.getPreferredSystemLanguages();
@@ -1504,7 +1499,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.appRestart, async () => {
 		if (isQuitting) isQuitting.value = true;
-		await webServiceManager?.stop();
+
 		terminalManager?.closeAll();
 		agentManager?.stopAll();
 		app.relaunch();
@@ -1684,11 +1679,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
 		}
-		// Logo 风格：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
-		// 运行时改不了，见 appWindowLogo.ts）。
-		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
-			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
-			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray);
+		// Logo 风格/自定义 logo 图：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
+		// 运行时改不了，见 appWindowLogo.ts）。两项要一起判：切图不动风格、或风格已是 custom 只换图，都得刷新。
+		if (("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) || ("logoCustomImage" in patch && prevSettings.logoCustomImage !== settings.logoCustomImage)) {
+			applyWindowLogoStyle(settings.logoStyle, getMainWindow, settings.logoCustomImage);
+			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray, settings.logoCustomImage);
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {
@@ -1727,18 +1722,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("zoomFactor" in patch) {
 			getMainWindow()?.webContents.setZoomFactor(settings.zoomFactor);
 		}
-		if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
-			try {
-				if (applyWebServiceSettings) await applyWebServiceSettings(settings);
-			} catch (error) {
-				const debugDetails = error instanceof Error ? error.message : String(error);
-				void appLogger.warn("web", "Failed to apply web service settings", { error: debugDetails });
-				if (settings.webServiceEnabled) {
-					await settingsStore.update({ webServiceEnabled: false });
-				}
-				throw new Error(mainCopy(debugDetails === "WEB_SERVICE_INVALID_PORT" ? "webService.invalidPort" : "webService.startFailed"));
-			}
-		}
+
 		// WSL 设置变更时同步更新会话扫描器和配置管理器
 		if ("wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
 			if (setSessionCatalogIdentityContext) {
@@ -1777,53 +1761,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return settings;
 	});
 
-	ipcMain.handle(ipcChannels.settingsRestartWebService, async () => {
-		if (!restartWebService) throw new Error("restartWebService not available");
-		await restartWebService(settingsStore.get());
-	});
-
-	ipcMain.handle(ipcChannels.webServiceStatus, () => {
-		if (!webServiceManager) {
-			return {
-				running: false,
-				host: "",
-				port: 0,
-				token: "",
-				requiresAuth: false,
-				tokenExpiresAt: null,
-			} satisfies WebServiceStatusInfo;
-		}
-		return webServiceManager.getStatus();
-	});
-
-	ipcMain.handle(ipcChannels.webServiceRotateToken, () => {
-		if (!webServiceManager) throw new Error("web service not available");
-		webServiceManager.rotateToken();
-		return webServiceManager.getStatus();
-	});
-
 	// 手动设置令牌/过期策略：热生效不重启服务。输入校验在边界完成——
 	// token 需满足形状约束（8-128 可打印非空白），expiresIn 必须是枚举值，
 	// 非法输入直接拒绝不落盘（与 SettingsStore 清洗同一口径）。
-	ipcMain.handle(ipcChannels.webServiceSetToken, (_event, input: unknown) => {
-		if (!webServiceManager) throw new Error("web service not available");
-		if (typeof input !== "object" || input === null) throw new Error("invalid payload");
-		const payload = input as { token?: unknown; expiresIn?: unknown };
-		const patch: { token?: string; expiresIn?: number } = {};
-		if (payload.token !== undefined) {
-			if (typeof payload.token !== "string") throw new Error("invalid token");
-			const token = payload.token.trim();
-			if (!isValidWebTokenShape(token)) throw new Error("invalid token shape");
-			patch.token = token;
-		}
-		if (payload.expiresIn !== undefined) {
-			if (typeof payload.expiresIn !== "number" || !WEB_TOKEN_EXPIRES_IN_CHOICES.includes(payload.expiresIn as (typeof WEB_TOKEN_EXPIRES_IN_CHOICES)[number])) throw new Error("invalid expiresIn");
-			patch.expiresIn = payload.expiresIn;
-		}
-		if (patch.token === undefined && patch.expiresIn === undefined) throw new Error("empty payload");
-		webServiceManager.setTokenPolicy(patch);
-		return webServiceManager.getStatus();
-	});
 
 	ipcMain.handle(ipcChannels.settingsTestPiProxy, async () => {
 		if (!testPiProxy) throw new Error("testPiProxy not available");

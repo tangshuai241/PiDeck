@@ -40,12 +40,14 @@ export type UserDataNameMigrationInput = {
 	platform?: NodeJS.Platform;
 	/** 便携版（PORTABLE_EXECUTABLE_DIR）或显式 --user-data-dir 时跳过改名 */
 	portableOrExplicit?: boolean;
-	/** 覆盖新目录解析结果，测试注入用 */
+	/** 旧目录名：开发态/Dev 独立环境复用同一迁移闭环，默认历史正式版。 */
+	legacyUserDataName?: string;
+	/** 新目录解析结果：开发数据迁移与测试注入用。 */
 	userDataPathOverride?: string;
 };
 
 /** 需要改写的持久化 JSON：内部以绝对路径记账，根改名后必须同步换前缀。 */
-const REWRITTEN_FILES = ["chat-path.json", "projects.json", "dismissed-project-paths.json", "session-catalog.json", "session-catalog.json.bak", "session-summary-cache.json"];
+const REWRITTEN_FILES = ["settings.json", "automation.json", "chat-path.json", "projects.json", "dismissed-project-paths.json", "session-catalog.json", "session-catalog.json.bak", "session-summary-cache.json"];
 /** drafts/<sessionId>/ 下可能内联粘贴文件绝对路径的草稿文件。 */
 const REWRITTEN_DRAFT_FILE_NAMES = ["drafts.json", "drafts.md"];
 
@@ -259,7 +261,7 @@ function mergeSessionDirs(source: string, target: string): void {
 /** 打包版启动装配入口：便携 / 显式 --user-data-dir 由调用方以 portableOrExplicit 传入。 */
 export function runUserDataNameMigration(input: UserDataNameMigrationInput): UserDataNameMigration {
 	const platform = input.platform ?? process.platform;
-	const oldRoot = resolve(join(input.appDataDir, LEGACY_PACKAGED_USER_DATA_NAME));
+	const oldRoot = resolve(join(input.appDataDir, input.legacyUserDataName ?? LEGACY_PACKAGED_USER_DATA_NAME));
 	const newRoot = resolve(input.userDataPathOverride ?? join(input.appDataDir, PACKAGED_USER_DATA_NAME_NEW));
 
 	if (input.portableOrExplicit) {
@@ -301,6 +303,19 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 			rewriteFileInPlace(join(newRoot, fileName), oldRoot, newRoot, encodedPairs, caseInsensitive);
 		} catch {
 			// 单文件失败：判据幂等，下次启动重跑
+		}
+	}
+	// 飞书的配置/群绑定也持久化绝对会话路径，根迁移后必须同步换掉 encoded token。
+	for (const directory of ["feishu", "pi-desktop"]) {
+		try {
+			for (const entry of readdirSync(join(newRoot, directory))) {
+				const path = join(newRoot, directory, entry);
+				if (entry.startsWith("feishu") && entry.endsWith(".json") && safeIsFile(path)) {
+					rewriteFileInPlace(path, oldRoot, newRoot, encodedPairs, caseInsensitive);
+				}
+			}
+		} catch {
+			// 旧/新子目录可能不存在；失败下次启动补修，不能因此丢配置。
 		}
 	}
 	try {

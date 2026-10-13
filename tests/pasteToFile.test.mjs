@@ -77,6 +77,16 @@ test("主进程：粘贴文件只写/删受管根（userData/paste-files，另�
 	assert.match(pasteFilesIpc, /ipcChannels\.pasteFilesClearAll/, "设置页一键清空");
 });
 
+test("主进程：单次粘贴写入有字节上界（防病态剪贴板撑爆 userData）", () => {
+	assert.match(pasteFilesIpc, /PASTE_FILE_MAX_BYTES = 25 \* 1024 \* 1024/, "上界常量应与剪贴板图像写入上限同族（25MiB）");
+	// 拒绝必须发生在 writeFile 之前，且用同一份 bytes 计算返回值（不重复读全文）
+	assert.match(pasteFilesIpc, /const bytes = Buffer\.byteLength\(input\.content, "utf8"\)/);
+	assert.match(pasteFilesIpc, /if \(bytes > PASTE_FILE_MAX_BYTES\)\s*\{[\s\S]*?Paste content too large/);
+	assert.ok(pasteFilesIpc.indexOf("PASTE_FILE_MAX_BYTES") < pasteFilesIpc.indexOf("await writeFile("), "超限拒绝必须在落盘之前（否则拦截无效）");
+	// 发送侧内联上限仍为 2MiB：写入上界应大于消费上界，留有存量文件余量
+	assert.match(controller, /PASTE_FILE_CONTENT_MAX_BYTES = 2 \* 1024 \* 1024/);
+});
+
 test("preload 暴露 pasteFiles 域（write/delete/cleanup/getSize/clearAll）", () => {
 	assert.match(preload, /pasteFiles: \{/);
 	assert.match(preload, /pasteFilesWrite/);

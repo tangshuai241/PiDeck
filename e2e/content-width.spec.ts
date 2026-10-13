@@ -1,5 +1,5 @@
 import { test, expect } from "./mock-pi-fixture";
-import { openFirstSession, makeSeedProject } from "./open-session";
+import { openFirstSession, makeSeedProject, openSettings } from "./open-session";
 
 /**
  * 聊天内容宽度（百分比体系）E2E：
@@ -18,7 +18,7 @@ test("content width: 85% shared margin, composer aligns with message list", asyn
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
 	// ── 打开设置，切到外观设置 tab，滑块设为 85% ──
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 	await modal.getByText("外观设置").click();

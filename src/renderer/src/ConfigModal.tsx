@@ -40,10 +40,13 @@ import type { AuthFile, ConfigTab, ModelItem, ModelsFile, SettingsFile } from ".
 import type { ConfigFileDiagnostic, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
 import { isGlobalSkillSourceId } from "../../shared/resourceIdentity";
 import { emptyDiscoveryData, emptyProjectResourceData, GLOBAL_SKILL_SOURCES, isGlobalSkill, isProjectExtension, isProjectPrompt, isProjectSkill, PROJECT_SKILL_SOURCES, type ResourceScope } from "./config/resourceScopeModel";
-import { getModelUserAgentOverride, getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS, setModelUserAgentOverride } from "./config/providerHeaders";
+import { getModelUserAgentOverride, getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS, pruneModelOverrides, readModelOverrides, setModelUserAgentOverride } from "./config/providerHeaders";
 import { TOKENDANCE_PROVIDER } from "../../shared/tokendance";
 import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload, orderDirtyKeysForSave, reconcileConfigDirty } from "./config/configDirtyMarks";
-import { modelThinkingLevelOf, withModelThinkingLevelDefault } from "../../shared/modelThinkingLevels";
+import { modelThinkingLevelOf, pruneModelThinkingLevelOrphans, replaceModelThinkingLevels, withModelThinkingLevelDefault, withModelThinkingLevelEnabled } from "../../shared/modelThinkingLevels";
+import type { ModelThinkingLevel } from "../../shared/modelThinkingLevels";
+import { pruneHiddenModelOrphans, replaceProviderHiddenIds, sameHiddenModelEntries, toggleHiddenModelKey } from "./config/hiddenModels";
+import type { ProviderModelIdIndex } from "../../shared/types/modelSpecs";
 import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges, type ConfigUnsavedItem } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
@@ -142,6 +145,15 @@ function normalizeModelsFile(value: unknown): ModelsFile {
 		};
 	}
 	return { providers };
+}
+
+/**
+ * provider → 该供应商当前模型 id 集合（配置写盘前清理孤儿键用）。
+ * 只包含 models.json 里的供应商：不在表里的 provider 一律不动——pi 内置 provider
+ * （没写进用户 models.json 的 anthropic 等）的档位与隐藏设置是合法的。
+ */
+function modelIdIndex(providers: ModelsFile["providers"]): ProviderModelIdIndex {
+	return new Map(Object.entries(providers).map(([name, provider]) => [name, new Set(provider.models.map((model) => model.id).filter(Boolean))] as const));
 }
 
 function ConfigDiagnosticCard(props: { diagnostic: ConfigFileDiagnostic; onOpenDocs: () => void; onOpenRaw: () => void }) {
@@ -663,14 +675,14 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		});
 	}, []);
 	/** 切换模型隐藏状态：本地立即生效 + 持久化到 AppSettings。 */
-	const handleToggleHiddenModel = useCallback((provider: string, modelId: string) => {
-		const key = `${provider}/${modelId}`;
+	const handleToggleHiddenModel = (provider: string, modelId: string) => {
 		setHiddenModels((prev) => {
-			const next = prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key];
+			// 写盘前顺手清孤儿（模型已不在列表里的旧 ID），与保存时同一套规则
+			const next = pruneHiddenModelOrphans(toggleHiddenModelKey(prev, provider, modelId), modelIdIndex(modelsData.providers));
 			void api.settings.update({ hiddenModels: next }).catch(() => undefined);
 			return next;
 		});
-	}, []);
+	};
 	/** 切换认证供应商隐藏状态：本地立即生效 + 持久化到 AppSettings（auth.json 保留不变供运行时读取）。 */
 	const handleToggleHiddenAuthProvider = useCallback((name: string) => {
 		setHiddenAuthProviders((prev) => {
@@ -1105,6 +1117,31 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * 新增供应商（一步弹窗）：携带完整草稿（名字 + 服务商字段 + 模型列表），
 	 * 直接写入 modelsData 并展开卡片；不再先输名字再展开。
 	 */
+	/**
+	 * 供应商页确认后落盘两项「按 provider/modelId 建键」的设置（新增与编辑共用）。
+	 *
+	 * 页面把这两份设置整页读进草稿，确认时交回**绝对快照**，所以这里是替换而不是增删：
+	 * 页内删掉的模型不会留下设置（设置跟着模型走），页内改名也不会把键留在旧名字下。
+	 * 草稿里没带某项 = 页面没有这个入口（settings 未加载 / 未提供隐藏列表）→ 该项一个都不动。
+	 */
+	const applyProviderPageModelSettings = (draft: AddProviderDraft, savedName: string, finalName: string) => {
+		if (draft.modelThinkingLevelDefaults) {
+			const nextSettings = replaceModelThinkingLevels(settingsData, savedName, finalName, draft.modelThinkingLevelDefaults);
+			if (nextSettings !== settingsData) {
+				setSettingsData(nextSettings);
+				markDirty("config:settings");
+			}
+		}
+		if (draft.hiddenModelIds) {
+			// hiddenModels 是 AppSettings（没有配置草稿），与卡片眼睛按钮同一语义：立即持久化
+			const nextHidden = replaceProviderHiddenIds(hiddenModels, savedName, finalName, draft.hiddenModelIds);
+			if (!sameHiddenModelEntries(hiddenModels, nextHidden)) {
+				setHiddenModels(nextHidden);
+				void api.settings.update({ hiddenModels: nextHidden }).catch(() => undefined);
+			}
+		}
+	};
+
 	const handleAddProvider = (draft: AddProviderDraft) => {
 		const providerName = draft.name.trim();
 		// 非法字符：提示规则，避免 DSH credentialRefFor 把含特殊字符的名字转成
@@ -1123,6 +1160,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		};
 		setModelsData(updated);
 		markDirty("config:models");
+		// 页内草稿里的两项设置按最终名字落盘（新增时没有旧名字，savedName 传空）
+		applyProviderPageModelSettings(draft, "", providerName);
 		setExpandedProvider(providerName);
 		setAddingProvider(false);
 	};
@@ -1163,6 +1202,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 		setModelsData({ ...modelsData, providers });
 		markDirty("config:models");
+		// 页内草稿的两项设置按最终名字替换式落盘：改名时旧名字下的键一并清掉（无需单独的改名迁移）
+		applyProviderPageModelSettings(draft, oldName, newName);
 		setEditingProvider(null);
 	};
 
@@ -1396,47 +1437,44 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * 逐模型 User-Agent：写 provider.modelOverrides[modelId].headers["User-Agent"]。
 	 * 该结构由 pi 在发请求前最后合并（优先级高于 provider.headers），用于
 	 * 「同一供应商里只有个别模型需要特殊 UA」的场景（如某个模型走 Response 协议）。
+	 * 按 modelId 建键：卡片与编辑页共用同一回调，编辑页的模型草稿可能增删/重排，
+	 * 不能用下标（草稿下标与已保存数组会错位，写错模型）。
 	 */
-	const handleUpdateModelUserAgent = (providerName: string, index: number, value: string) => {
+	const handleUpdateModelUserAgent = (providerName: string, modelId: string, value: string) => {
 		const provider = modelsData.providers[providerName];
-		const model = provider?.models[index];
-		if (!provider || !model) return;
+		if (!provider || !modelId) return;
 		setModelsData({
 			...modelsData,
 			providers: {
 				...modelsData.providers,
 				[providerName]: {
 					...provider,
-					modelOverrides: setModelUserAgentOverride(provider.modelOverrides, model.id, value),
+					modelOverrides: setModelUserAgentOverride(provider.modelOverrides, modelId, value),
 				},
 			},
 		});
 		markDirty("config:models");
 	};
 
-	const handleUpdateModelThinkingLevel = (providerName: string, index: number, key: "xhigh" | "max", value: "" | "xhigh" | "max") => {
+	const handleUpdateModelThinkingLevel = (providerName: string, index: number, level: ModelThinkingLevel, enabled: boolean) => {
 		const provider = modelsData.providers[providerName];
 		const currentModel = provider?.models[index];
 		if (!provider || !currentModel) return;
 		const models = [...provider.models];
-		const nextThinkingLevelMap = {
-			...(currentModel.thinkingLevelMap ?? {}),
-		};
-		if (value) nextThinkingLevelMap[key] = value;
-		else delete nextThinkingLevelMap[key];
+		const nextThinkingLevelMap = withModelThinkingLevelEnabled(currentModel.thinkingLevelMap, level, enabled);
 		const nextModel = {
 			...currentModel,
-			// xhigh/max 只有 reasoning 模型才有意义；打开映射时同步开启。
-			reasoning: value ? true : currentModel.reasoning,
+			// xhigh/max 只有 reasoning 模型才有意义；打开任意档位时同步开启。
+			reasoning: enabled ? true : currentModel.reasoning,
 		};
-		if (Object.keys(nextThinkingLevelMap).length > 0) {
+		if (nextThinkingLevelMap) {
 			nextModel.thinkingLevelMap = nextThinkingLevelMap;
 		} else {
 			delete nextModel.thinkingLevelMap;
 		}
 		models[index] = nextModel;
 
-		const nextProvider = value
+		const nextProvider = enabled
 			? {
 					...provider,
 					compat: {
@@ -1461,11 +1499,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * 与 Settings 页的全局默认档位共用同一条草稿保存链路（脏标记记在 config:settings 上）。
 	 * 值不做白名单裁剪——档位最终由 pi 按该模型可用档位收敛；空值 = 删键（跟随全局默认）。
 	 */
-	const handleUpdateModelThinkingLevelDefault = (providerName: string, index: number, level: string) => {
-		const model = modelsData.providers[providerName]?.models[index];
-		// 键由模型 id 拼成，空 id（未填完的新行）无法定位。
-		if (!model?.id) return;
-		setSettingsData((previous) => withModelThinkingLevelDefault(previous, providerName, model.id, level));
+	const handleUpdateModelThinkingLevelDefault = (providerName: string, modelId: string, level: string) => {
+		// 键由 provider/modelId 拼成；空 id（未填完的新行）无法定位。
+		if (!modelId) return;
+		setSettingsData((previous) => withModelThinkingLevelDefault(previous, providerName, modelId, level));
 		markDirty("config:settings");
 	};
 
@@ -1533,22 +1570,45 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		// 保存前规范化所有供应商的 compat 字段，确保布尔值显式写入而不依赖后端默认值；
 		// supportsReasoningEffort 联动档位映射、requiresReasoningContentOnAssistantMessages
 		// 按 DeepSeek 特征判定（均见 deriveProviderCompat，传名字以便按 provider 名识别）。
-		const normalizedData = {
-			...base,
-			providers: Object.fromEntries(
-				Object.entries(base.providers).map(([name, provider]) => [
-					name,
-					{
-						...provider,
-						compat: deriveProviderCompat(provider, name),
-					},
-				]),
-			),
-		};
+		// 显式标注 providers：铺开的字面量会丢掉 ProviderConfig 的索引签名，后面读 modelOverrides 等
+		// 高级字段就拿不到了（不靠 as 强转，靠变量标注把类型钉死）。
+		const normalizedProviders: ModelsFile["providers"] = Object.fromEntries(
+			Object.entries(base.providers).map(([name, provider]) => [
+				name,
+				{
+					...provider,
+					compat: deriveProviderCompat(provider, name),
+				},
+			]),
+		);
+		const normalizedData: ModelsFile = { ...base, providers: normalizedProviders };
+		// 设置跟着模型走：保存前清掉「模型已不在列表里」的孤儿（改过模型 ID / 删过模型之后）。
+		// 只清 models.json 里存在的供应商；pi 内置 provider 的高级覆盖一律不碰。
+		const prunedProviders = Object.fromEntries(
+			Object.entries(normalizedData.providers).map(([name, provider]) => {
+				const current = readModelOverrides(provider.modelOverrides);
+				if (!current) return [name, provider];
+				const pruned = pruneModelOverrides(
+					current,
+					provider.models.map((model) => model.id),
+				);
+				if (pruned === current) return [name, provider];
+				const nextProvider = { ...provider };
+				if (pruned) nextProvider.modelOverrides = pruned;
+				else delete nextProvider.modelOverrides;
+				return [name, nextProvider];
+			}),
+		);
+		const prunedData = { ...normalizedData, providers: prunedProviders };
+		const prunedHidden = pruneHiddenModelOrphans(hiddenModels, modelIdIndex(prunedProviders));
+		if (!sameHiddenModelEntries(hiddenModels, prunedHidden)) {
+			setHiddenModels(prunedHidden);
+			void api.settings.update({ hiddenModels: prunedHidden }).catch(() => undefined);
+		}
 		setSaving(true);
 		setError(null);
 		try {
-			const result = await api.config.saveModels(normalizedData);
+			const result = await api.config.saveModels(prunedData);
 			if (!result.valid) {
 				setError(result.error ?? t("config.saveFailed"));
 				return false;
@@ -1685,8 +1745,19 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	// ── Settings 操作 ────────────────────────────────────
 
+	/**
+	 * 落 settings.json 前清掉「模型已不在列表里」的孤儿档位键（设置跟着模型走），
+	 * 清理结果同步回 UI 草稿（否则界面还挂着已经写掉的旧值）。
+	 */
+	const pruneProviderThinkingLevelOrphans = (): Record<string, unknown> => {
+		const pruned = pruneModelThinkingLevelOrphans(settingsData, modelIdIndex(modelsData.providers));
+		if (pruned !== settingsData) setSettingsData(pruned);
+		return pruned;
+	};
+
 	const handleSaveSettings = async (): Promise<boolean> => {
-		const ok = await saveAndReload(() => api.config.saveSettings(settingsData), undefined, "config:settings");
+		const pruned = pruneProviderThinkingLevelOrphans();
+		const ok = await saveAndReload(() => api.config.saveSettings(pruned), undefined, "config:settings");
 		await loadConfig("settings", { force: true });
 		return ok;
 	};
@@ -1697,9 +1768,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * models/auth/raw，把它们的未保存草稿静默冲掉。
 	 */
 	const saveSettingsDraftOnly = async (): Promise<boolean> => {
-		const ok = await saveAndReload(() => api.config.saveSettings(settingsData), undefined, "config:settings");
+		const pruned = pruneProviderThinkingLevelOrphans();
+		const ok = await saveAndReload(() => api.config.saveSettings(pruned), undefined, "config:settings");
 		// 基准同步到刚写下的内容，否则脏检测（数据 vs 基准）会把刚清掉的黄点又标回来。
-		if (ok) baselineSettingsRef.current = deepClone(settingsData);
+		if (ok) baselineSettingsRef.current = deepClone(pruned);
 		return ok;
 	};
 
@@ -2770,13 +2842,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 											onUpdateModel={handleUpdateModel}
 											onUpdateModelThinkingLevel={handleUpdateModelThinkingLevel}
 											onUpdateModelUserAgent={handleUpdateModelUserAgent}
-											getModelUserAgentOverride={(providerName, index) => {
-												const provider = modelsData.providers[providerName];
-												const model = provider?.models[index];
-												return model ? getModelUserAgentOverride(provider.modelOverrides, model.id) : "";
-											}}
+											getModelUserAgentOverride={(providerName, modelId) => getModelUserAgentOverride(modelsData.providers[providerName]?.modelOverrides, modelId)}
 											onUpdateModelThinkingLevelDefault={settingsLoaded ? handleUpdateModelThinkingLevelDefault : undefined}
-											getModelThinkingLevelDefault={settingsLoaded ? (providerName, index) => modelThinkingLevelOf(settingsData, providerName, modelsData.providers[providerName]?.models[index]?.id) ?? "" : undefined}
+											getModelThinkingLevelDefault={settingsLoaded ? (providerName, modelId) => modelThinkingLevelOf(settingsData, providerName, modelId) ?? "" : undefined}
 											onDeleteModel={handleDeleteModel}
 											onDeleteModels={handleDeleteModels}
 											onResetModel={handleResetModelToAdaptive}

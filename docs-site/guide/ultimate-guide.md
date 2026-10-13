@@ -181,7 +181,7 @@ PiDeck 的输入框基于 TipTap 深度定制，不仅支持纯文本输入，�
 
 ### 2.3 任务执行模式切换：普通、规划（Plan）、目标（Goal）与生图
 
-在输入框左下角，有一个模式切换小药丸（默认显示为一个小扳手）：
+在输入框左下角，有一个模式切换小药丸（默认显示为一个小闪电）：
 
 1. **普通模式（Normal Mode）**：
    - 默认模式。模型拥有完整的 `read`、`edit`、`write`、`bash` 权限，收到指令后直接边思考边写代码。
@@ -465,7 +465,7 @@ src/
 ```bash
 # 克隆仓库
 git clone https://github.com/ayuayue/PiDeck.git
-cd pi-desktop
+cd PiDeck
 
 # 安装依赖
 npm install

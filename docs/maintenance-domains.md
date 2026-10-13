@@ -3,6 +3,15 @@
 > 本文档承接 AGENTS.md 移出的领域运维细节。AGENTS.md 只保留每域一行硬约束速查；
 > 动手改对应模块前，先读本文对应小节。
 
+## 应用命名与历史数据目录迁移
+
+- 三平台显示名统一 `PiDeck`，Dev 通道为 `PiDeck Dev`；npm 包名为 `pideck`，Linux 可执行文件为 `pideck` / `pideck-dev`。Linux 必须显式配置 `linux` / `deb` / `appImage` 的产物名，不能让 `.deb` 回退到 npm 历史名称；Dev 单独覆盖三者，避免空格或继承 stable 的 Debian 替代关系。
+- 正式安装版根为 Windows `%APPDATA%\PiDeck`、macOS `~/Library/Application Support/PiDeck`、Linux `~/.config/PiDeck`（遵循 Electron/XDG 路径）；调试态为 `PiDeck-dev[-<branch>]`，Dev 独立环境为 `PiDeck-channel-dev`。便携版仍为 exe 同级 `data/` / `data-channel-dev/`，显式目录不更名。
+- `userDataNameMigration.ts` 负责正式根与开发根的整目录更名、设置/自动化/目录记录/草稿/飞书配置里的绝对路径和会话 token 改写、pi 会话目录迁移与 `header.cwd` 修复；历史消息正文不改。`devUserDataMigration.ts` 必须在读取 Dev 决策指针之前调用，防止升级后独立环境被误判为未选择。
+- 飞书子目录由 `pi-desktop/` 整体迁到 `feishu/`，保留密文和绑定；路径在实际读写时解析，不在模块导入时缓存，避免早于 `app.setPath`。环境导入兼容两种子目录。改名失败继续旧目录并重试；两代目录并存时使用新目录，但不覆盖、删除或自动合并旧数据。
+- `appBrand.initializeAppBrand` 在 ready 前保留历史运行时名供 Electron 初始化 Linux/macOS 密钥环，ready 时恢复品牌；不能提前改加密身份，否则既有 safeStorage 密文/Cookie 无法使用原密钥。Windows AUMID、macOS bundle ID 和旧 localStorage key 保持兼容身份；旧名只用于兼容，不作为新的安装包或数据目录名。
+- 更新缓存新写入使用 `pideck-updater`，旧缓存可重建，保留不删除。验证入口：`tests/appBrand*.test.mjs`、`tests/*UserData*.test.mjs`、`tests/userData*.test.mjs`、`tests/feishuConfigDirectory.test.mjs`、`tests/feishuSecretStorage.test.mjs`、`tests/channelDataImport.test.mjs`；真实安装与系统密钥环仍需按平台 smoke。
+
 ## README 与官网共用图片（docs/images 单一数据源）
 
 - 微信群二维码这类 README 与 docs-site 都要展示、且会**周期性换图**的资源，唯一数据源固定为 `docs/images/<名>`；**不要在 `docs-site/public/images/` 再存一份**（历史上 `wechat_pay.png` 就是两份拷贝，换图要手工同步两处）。
@@ -76,7 +85,7 @@
 - 单一事实源是 `src/shared/customThemes.ts`：token 白名单（`CUSTOM_THEME_TOKEN_GROUPS`，来自 foundation.css 语义 token 人工梳理）、id/颜色值校验、`DEMO_CUSTOM_THEME`、`CUSTOM_THEME_TEMPLATE` 全在这；主进程保存/目录扫描、渲染层编辑器提示、AI 指南（`customThemeGuide.ts` 生成的表格与示例）都从这里取数。**改 foundation token 命名或新增 token 时三处同步：foundation.css、白名单、指南测试断言**（`tests/customThemes.test.mjs` 会校验白名单全量 token 都出现在指南里）。
 - 用户 JSON 是不可信输入，两道闸都不可放宽：键必须在白名单内；值必须匹配静态颜色正则（`#hex` 或纯数值参数的 `rgb()/hsl()/oklch()`），天然排除 `var()/url()/渐变`（值最终只进 inline style，双保险）。坏文件不致命：目录扫描降级为 `parseError` 条目呈现。
 - 设置快照 `settings.customTheme`（无前缀键，亮暗双档）在 `SettingsStore.update` 里过 `sanitizeCustomThemeSnapshot`；**快照仅 `themeSkin === "custom"` 时生效**（`applyCustomThemeTokens` 守卫），切回内置皮肤的路径（AppearanceThemePicker onPick）必须同步 `customTheme: undefined`，否则残留快照压过内置皮肤。注入函数是 App 持久化应用（useAppAppearance）与设置弹窗预览/回滚（SettingsModal）共用入口，别复制第二份注入逻辑。
-- 内置示例 `DEMO_CUSTOM_THEME` 是常量不上磁盘：列表由它推导（校验不过就不上架，防常量与校验器漂移）、不可删除不可覆盖；「复制为新主题」靠字符串改写 id 生成副本。删除用户主题走 `trashPath` 回收站；主题文件被删后已应用主题不失效（快照内嵌设置文件）。
+- 内置示例 `DEMO_CUSTOM_THEME` 是常量不上磁盘：列表由它推导（校验不过就不上架，防常量与校验器漂移）；其 id 保留（`saveCustomTheme` 拒绝同名保存，否则列表里会出现两张同名卡片），「复制为新主题」靠字符串改写 id 生成副本。读写删一律以 **fileId（文件名去 `.json`）** 定位文件，不用包内 id：用户文件可以改名、可以与内置示例同 id（历史 bug：按内置 id 早退 → 界面提示「已删除」而文件仍在）。删除走 `trashPath` 回收站，文件不存在时报错不谎报成功；主题文件被删后已应用主题不失效（快照内嵌设置文件）。
 
 ## 插件开发支持（pluginDev 目录 + demo + AI 指南）
 
@@ -84,19 +93,22 @@
 - 指南 `AI-PLUGIN-GUIDE.md` 由 `pluginDevGuide.ts` 双语生成、写入用户扩展目录并覆盖旧版（生成物不备份）；demo 插件 `resources/plugin-dev/pi-deck-demo-plugin.ts` 复制到同目录，**已存在不覆盖**（用户改过的模板）。落盘路径固定 `~/.pi/agent/extensions/`，home 与 `ExtensionManager.userHomeDir` 同源（WSL 跟随扩展列表解析），保证复制进去的文件一定被扩展页本地扫描发现。
 - `resources/plugin-dev` 必须在 `extraResources`（filter `*.ts`）里，漏了打包版「复制 demo」直接报错（源缺失显式抛错，不静默）；demo **不在** `BUILT_IN_EXTENSIONS` 白名单（不是 `-e` 注入的内置扩展，是拷给用户的起步文件）。
 - 架构/文件地图/更新步骤详见 `docs/plugin-dev-guide.md`；无热重载（改插件重启会话），这是文档化的有意取舍。
+- **应用内入口已隐藏**（宿主插件系统接替）：`ExtensionsTab` 不再渲染「插件开发」页签（`PluginDevSection.tsx`、`pluginDev:*` IPC、`PluginDevService` 与 i18n 文案全部保留，只是没有入口）。
+- 同时下线的还有桥与扩展点面板两个内置扩展：`HIDDEN_BUILT_IN_EXTENSIONS`（`pi-deck-gui-bridge.ts`、`pi-deck-ext-points.ts`）——它们仍在 `BUILT_IN_EXTENSIONS` 表内（白名单校验与启动时清理历史部署副本要用），但 `listActiveBuiltInExtensionPaths` 无条件跳过、`ExtensionManager.list` 也不补行，因此**不注入 `-e`、不上扩展页**。刻意**不**走 `removedBuiltInExtensions` 禁用机制：那条路会写用户设置并参与命令行白名单计算，属于本需求不需要的副作用；隐藏是硬开关，历史 `enabledBuiltInExtensions` 残留（opt-in）也复活不了它们。
 
 ## 宿主插件（userData/host-plugins：独立于 pi 进程的 PiDeck 原生插件）
 
 - **与 pi 扩展是两套系统**：pi 扩展（`resources/extensions/`，`-e` 注入）活在 pi 进程里管 Agent 行为；宿主插件是 PiDeck 自己的插件——面板是渲染层创建的页面内 `<webview>`（partition `host-plugin:<instanceId>`，与内置浏览器同层叠模型，可被弹层正常覆盖），由主进程 `HostPluginViewHost` 签发实例、经窗口 attach 策略（`hostPluginWebviewPolicy`）校验后加载 `userData/host-plugins/<id>/` 资产，不经 pi、不走 pi 的扩展点。代码全部在 `src/main/plugins/`（Broker/Manager/Service/Sessions/Storage/ViewHost + policy/manifest/files/archive/webviewPolicy）。IPC 通道集中在 `shared/ipc.ts` 的 `host-plugins:*` 一组。
 - **授权看内容指纹不看版本**：manifest 权限白名单是注册表式的，插件目录内容 sha256 指纹变化 → 旧授权立即失效需重新授权——这是安全特性，**禁止放宽为版本号比较或沿用旧授权**。storage rename 等敏感操作在 `beforeAttempt` 每次尝试前复查授权。
-- **网络不解除页面沙箱**：`network.https` + `network.httpsOrigins` / `network.local` + `network.localPorts` 经 `HostPluginNetwork` 代发；CSP `connect-src 'none'` 与页面 webRequest 包内资产门禁保持不变。HTTPS 每跳检查精确 origin、DNS 全结果公网且 socket 固定已验证 IP；本地只收 `http://127.0.0.1:<已授权端口>`。授权 UI 必须显示具体目的地并提示「会话读取 + 联网」的数据外发风险。本阶段不执行 BAT/启动服务；Broker 的 binding 撤销必须同步 abort，在 guest 已销毁时 ViewHost 也要 unbind，不能只丢弃迟到结果。守卫：`tests/hostPluginNetwork{,Transport,Ui,Demo}.test.mjs`；可导入示例：`docs/examples/host-plugins/example.network/`。
+- **网络不解除页面沙箱**：`network.https` + `network.httpsOrigins` / `network.local` + `network.localPorts` 经 `HostPluginNetwork` 代发；CSP `connect-src 'none'` 与页面 webRequest 包内资产门禁保持不变。HTTPS 每跳检查精确 origin、DNS 全结果公网且 socket 固定已验证 IP；本地只收 `http://127.0.0.1:<已授权端口>`。授权 UI 必须显示具体目的地并提示「会话读取 + 联网」的数据外发风险。**`network.local` 仍然不启动任何进程**（只访问已运行的服务）；启停进程是另一个权限 `service.local`（见下条）。Broker 的 binding 撤销必须同步 abort，在 guest 已销毁时 ViewHost 也要 unbind，不能只丢弃迟到结果。守卫：`tests/hostPluginNetwork{,Transport,Ui,Demo}.test.mjs`；可导入示例：`docs/examples/host-plugins/example.network/`。
+- **服务控制只给「点名权」（`service.local` + `manifest.services`）**：插件能提供的只有 service id，命令名/参数/端口全部是 `src/main/localServices/` 适配器里的常量（`localServiceCli.ts` 对命令与每个参数做字符白名单，Windows `.cmd` 垫片走 `cmd.exe /d /s /c` + `windowsVerbatimArguments`，**不拼字符串 shell**），id 必须在 `src/shared/localServices.ts` 白名单里，否则 manifest 校验直接拒（`invalid-services`）。当前唯一适配器是 billion-context（`bili doctor --json` 读状态/端口，`bili start` 起进程，停止按报告 pid 终止——它没有 stop 子命令，而且 pi lane 的代理由 pi 自己的扩展 respawn，杀掉后约 2 秒就换新 pid 回来：这种情况适配器返回 `stop-restarted` 而不是假装停成功）。两条硬约束：**pid 只能来自 CLI 报告**（不按名字杀、不猜）；**UI 地址只接受 `http://127.0.0.1|localhost:<port>`**（防报告被改写成公网地址把内置浏览器带走）。「打开面板」不经插件：Broker 转 `onOpenBrowser` sink → `hostPluginOpenBrowser` IPC → 渲染层内置浏览器抽屉（插件页 `frame-src 'none'`，本来就内嵌不了这类 SPA）。内置示例 `resources/host-plugins/billion-context/` 由 `HostPluginManager.seedBuiltin()` 在 `load()` 前落位到 `userData/host-plugins/`：目录不存在 → 复制；内容仍等于上次落位指纹（用户没动过）→ 用新版替换；其余 → **永不覆盖**（`seeded` 记录存在 `host-plugin-state.json`；旧状态文件没这个字段，那种情形只能用一次 `manifest.version` 当第二线索：版本不同 ⇒ 来自另一个 PiDeck 版本的内置载荷，替换并顺延授权，写过一次 `seeded` 后该分支永久失效）。只有「上一版内置内容」升级时授权顺延，避免每次应用更新都要重新批准自己的内置示例；落位不等于授权。`remove(id)` 先撤权再删目录，`seeded` 里的 id 拒绝卸载（`plugin-builtin`，下次启动会被重新落位，删了只会让人以为卸载没生效），要停用请用禁用。守卫：`tests/hostPluginLocalService.test.mjs`。
 - **历史读取有硬预算**：`HostPluginSessions` 单次请求 64MiB/10 万条上限，超限抛 `history-too-large`，不退化为全量扫描；目录索引用 changeSince 签名对比做粒度推送（活跃会话追加报 `{ sessionId }`，目录级变化报 `{ catalogChanged: true }`），面板侧定向失效、epoch 不打断其他在途读取。
 - **`.pideck-plugin` 归档是 NDJSON**（header 行 + 每文件一行 base64+sha256+size）：上限归档 24MiB / 单文件 4MiB / 100 文件 / 展开 16MiB，逐文件 sha256 校验，超限抛稳定错误码。选 NDJSON 而非 zip 是因为 Node 运行时无内置 zip 解压。
 - **主题跟随是全局驱动 + 每实例补充**：`prefers-color-scheme` 由应用既有的 `nativeTheme.themeSource` 驱动（改 PiDeck 主题即生效）；ViewHost 按当前主题对每实例 `insertCSS` 注入 `color-scheme`（适配原生控件/滚动条）。Electron 43 没有 per-contents `setEmulatedMedia`，不要再尝试。
 - **参考实现 pi-context 是双向契约**：适配器 `resources/host-plugin-adapters/pi-context/`（bridge/data），转换器对 viewer 的 seam（DOM/字段名）有 fail-closed 契约测试——上游改字段名时测试必须红，红后同步适配器，不许放宽断言。
-- 面向插件作者的文档单一数据源是 `docs/host-plugin-dev-guide.md`（官网指南页从它同步）；`tests/docsSharedGuide.test.mjs` 守卫两处不漂移。改 API 面（新增权限/方法/事件）必须同步四处：`shared/types/hostPlugin.ts` 契约 + `src/preload/hostPlugin.ts` 注入面 + dev-guide 的 API/错误码表 + `tests/hostPlugins.test.mjs`。
+- 面向插件作者的文档单一数据源是 `docs/host-plugin-dev-guide.md`（官网指南页从它同步）；`tests/docsSharedGuide.test.mjs` 守卫两处不漂移。改 API 面（新增权限/方法/事件）必须同步五处：`shared/types/hostPlugin.ts` 契约 + `src/preload/hostPlugin.ts` 注入面 + dev-guide 的 API/错误码表 + `tests/hostPlugins.test.mjs` + 脚手架（`hostPluginScaffold.ts` + `config/hostPluginScaffoldDraft.ts` + `HostPluginPermissionDetails.tsx` 的权限清单）。
 - **脚手架是权限真相的第一个消费者**：设置页「新建插件…」经 `host-plugins:scaffold` → `src/main/plugins/hostPluginScaffold.ts` 生成 `<id>/`（已存在则 `already-exists`，不覆盖作者代码）。生成物必须过与安装路径**同一套** `isHostPluginId`/`parseHostPluginManifest` 自检，且模板只生成已勾选权限对应的代码（manifest 的 `permissions` 与生成代码同一份真相）；改 API/权限面时漏同步它，作者拿到的示例一运行就 `permission-denied`。守卫：`tests/hostPluginScaffold.test.mjs`（含每种权限组合的 `new Function` 语法解析）、`tests/hostPluginDirectoryInstall.test.mjs`（「从文件夹安装…」）。
-- **面板呈现双模式**（manifest `panels[].presentation`，缺省 `modal`）：`modal` 走 `HostPluginPanelHost` 大弹框；`page` 走 `HostPluginPageOverlay`——在 App 会话列外包一层 relative 容器，以 `absolute inset-0` 非模态覆盖层呈现，会话树不卸载（滚动/草稿/终端内存态保留），侧栏 `HostPluginDockButtons` 对 page 面板做开关切换（再点即关）。两者共用 `hostPluginPanelAtom` 同一入口，命令面板/设置页自动兼容。共享的加载/错误面在 `HostPluginSurface.tsx`。侧栏入口/图标/呈现方式的源码契约由 `tests/hostPluginSidebarEntry.test.mjs` 守卫。
+- **面板呈现三模式**（manifest `panels[].presentation`，缺省 `modal`）：`modal` 走 `HostPluginPanelHost` 大弹框；`popover` 在侧栏那一行旁边就地展开（`HostPluginDockButtons` 的 `Popover`，给 `HostPluginSurface` 一个定高 flex 列——它内部是 `flex-1`，非 flex 父级下 webview 高度会塌成 0），从无锚点入口（设置页/命令面板）进来时退化成小对话框；`page` 走 `HostPluginPageOverlay`——在 App 会话列外包一层 relative 容器，以 `absolute inset-0` 非模态覆盖层呈现，会话树不卸载（滚动/草稿/终端内存态保留），侧栏对 page 面板做开关切换（再点即关）。三者共用 `hostPluginPanelAtom` 同一入口，命令面板/设置页自动兼容。**抽屉 rail 的可见性过滤含 `|| action.active`**：不变式是「rail 永远显示当前活动面板」，否则只切内容不钉面板的外部入口（`service.openUi` 开内置浏览器、消息里的「在浏览器打开」）会出现「有页面没有归属 tab」。共享的加载/错误面在 `HostPluginSurface.tsx`。侧栏入口/图标/呈现方式的源码契约由 `tests/hostPluginSidebarEntry.test.mjs` 守卫，rail 由 `tests/workspaceDrawer.test.mjs` 守卫。
 - **主题令牌**：`context.tokens` 把 PiDeck 语义色注入为页面 CSS 变量，`context.changed` 实时更新；converter 适配层把 pi-context 自己的 `:root` 中性色（`--bg/--card/--fg/--muted/--blue` 等）重映射到这些 token（后写覆盖，不改上游文件），图表系列色保留上游色板。新插件页面样式应消费 token 变量带缺省值，硬编码暗色在亮色主题下会露馅。
 
 ## dev 态渲染层缓存（Vite 预构建 chunk 的 immutable 陷阱）
@@ -104,7 +116,7 @@
 - 现象：`npm run dev` 启动或打开资源弹层/编辑器时报 `Failed to fetch dynamically imported module: http://127.0.0.1:<port>/@fs/.../node_modules/.vite/deps/<chunk>.js?v=<hash>`。不是代码 bug，是渲染进程命中了上一轮预构建的旧模块。
 - 机理：Vite 给 `.vite/deps` 打 `Cache-Control: max-age=31536000, immutable`，缓存键只有「URL + `?v=browserHash`」，而 browserHash 由 lockfile 与配置推导——重新预构建改变 chunk 切分时它可以不变。于是同一 URL 磁盘内容已换、Chromium 仍返回旧副本，旧副本 import 的 chunk 已被删除，Vite 回 504；又因为请求没出网络，Vite「504 → full-reload」的自愈路径也不会触发。
 - 收口：`src/main/devRendererCache.ts` + `src/main/index.ts` 的 `createWindow`，仅在 dev（`shouldUseDevRendererUrl()`）加载 renderer 前 `await` 清一次默认 session 的 HTTP 缓存与 JS 编译缓存；清理失败只记日志，不挡窗口创建。打包态零影响。
-- 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/pi-desktop-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
+- 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/PiDeck-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
 - 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。
 
 ## Tab 激活态语言（两种声明约定，2027-10 统一）
@@ -117,7 +129,7 @@
 
 ## 繁体中文（zh-TW 四份词典 + locale 分支点）
 
-- 繁体词典**不手写**：`scripts/genZhTwCopy.mjs` 用 opencc-js 的 s2twp 链路（整串分词，不是逐段换字）从 zh-CN 源生成四份产物——`src/renderer/src/i18n/rendererCopy.zh-TW.ts`、`src/shared/i18n/mainProcessCopy.zh-TW.ts`、`src/main/web/WebI18n.zh-TW.ts`、`src/main/feishu/FeishuI18n.zh-TW.ts`。每份带生成器标识头，**改 zh-CN 源后必须重跑**（漏跑由 `tests/zhTwCopy.test.mjs` 的键集断言报红）。
-- opencc-js 按项目惯例**不是**项目依赖（与 `scripts/generate-t2s-table.cjs` 同：运行时只带生成出来的常量表）：首次生成 `npm i --no-save opencc-js@1.4.2 && node scripts/genZhTwCopy.mjs`。脚本头部的 `OVERRIDES` 是分词误伤修正表（opencc 把「内置→內建」拆成「内置→內置」、「播放按钮」附近消出「撥」字这类），**只增改有实际误伤的条目**，别拿它当通用术语表。
+- 繁体词典**不手写**：`scripts/genZhTwCopy.mjs` 用 opencc-js 的 s2twp 链路（整串分词，不是逐段换字）从 zh-CN 源生成四份产物——`src/renderer/src/i18n/rendererCopy.zh-TW.ts`、`src/shared/i18n/mainProcessCopy.zh-TW.ts`、`src/main/web/WebI18n.zh-TW.ts`、`src/main/feishu/FeishuI18n.zh-TW.ts`。每份带生成器标识头 + `source-sha256` 源指纹，**改 zh-CN 源后必须重跑**（漏跑先在 `npm run typecheck` 报 TS2739「缺少属性」——报错本身不提生成器，容易被当成自己写错了类型；随后 `tests/zhTwCopy.test.mjs` 的键集断言也会红并直接给出重跑命令。#336 / #338 两次实战都是先被 typecheck 拦下）。
+- opencc-js 按项目惯例**不是**项目依赖（与 `scripts/generate-t2s-table.cjs` 同：运行时只带生成出来的常量表）：首次生成 `npm i --no-save opencc-js@1.4.2 && node scripts/genZhTwCopy.mjs`。**新鲜度有两道不需要 opencc 的门禁**（都在 `tests/zhTwCopy.test.mjs`）：键集断言（加/删键）与产物头部的 `source-sha256` 指纹——它是 zh-CN 词典区块（`startMarker`…`endMarker` 之间原文）的 sha256，由生成器写入、测试复算，因此「只改值不加键」也会报红。脚本自身的 `--check` 在无 opencc 时直接跳过，**不能当门禁**；产物清单与指纹算法在 `scripts/zhTwCopySources.mjs`（生成器与测试共用，新增第五份产物只改这一处）。脚本头部的 `OVERRIDES` 是分词误伤修正表（opencc 把「内置→內建」拆成「内置→內置」、「播放按钮」附近消出「撥」字这类），**只增改有实际误伤的条目**，别拿它当通用术语表。
 - 语言分支点清单（新增语言/调整判定时一起改，否则某个进程会掉回简体）：`src/shared/types/settings.ts` 的 `AppLanguageMode` + `isTraditionalChineseLanguageTag`（简繁标签判定的唯一实现，其它进程都 import 它）→ `src/renderer/src/i18n.ts` 的 `resolveLocale` → `src/shared/i18n/mainProcessCopy.ts` 的 `normalizeMainProcessLocale` → `src/main/web/WebI18n.ts` 词典 + `src/main/web/WebServiceManager.ts` 注入脚本按浏览器语言分流（`zh-Hant` 也要认，客户端标签全是 `zh-TW`/`zh_CN` 形态）→ `src/main/feishu/FeishuI18n.ts` 的 `normalizeFeishuLocale`/`feishuLanguage`（飞书富文本 API 只认 zh/en，繁体沿用 `zh`）→ `src/main/floating/MiniOverlayWindow.ts` 的浮窗语言分支 → `CommonTab.tsx` 语言下拉。
 - 加载 i18n 模块的测试**别手写 vm 沙箱**：`FeishuI18n.ts` 现在有运行时依赖（繁体词典 + 简繁判定），旧式 `vm.runInNewContext` 沙箱一加 import 就整片失败——用 `tests/helpers/createTsSandbox.mjs`（按源文件目录解析），桩注入见 `tests/feishuI18n.test.mjs`。

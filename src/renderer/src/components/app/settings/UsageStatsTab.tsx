@@ -104,7 +104,7 @@ function UsageRows(props: { data: UsageAggregated }) {
 			{/* 按天明细（默认今日）：当日卡片 + provider 条 + 当日模型/项目表；可切其他天 */}
 			<UsageDayDetail rows={data.daily} costKnown={data.costKnown} />
 			{/* 累计概览：独立分块（divided 横线分隔），与上方当日区块明确区分 */}
-			<SettingsSection divided boxed={false} title={t("usageStats.cards.title")}>
+			<SettingsSection divided boxed={false} id="settings-section-usage-overview" title={t("usageStats.cards.title")}>
 				<div className="usage-stats-cards">
 					<SummaryCard label={t("usageStats.cards.totalTokens")} value={formatTokens(data.totals.tokens)} sub={t("usageStats.cards.today") + " " + formatTokens(data.today.tokens)} />
 					<SummaryCard label={t("usageStats.cards.totalCost")} value={<CostValue cost={data.totals.cost} costKnown={data.costKnown} />} sub={t("usageStats.cards.month") + " " + formatCost(data.thisMonth.cost)} />
@@ -114,19 +114,19 @@ function UsageRows(props: { data: UsageAggregated }) {
 			</SettingsSection>
 			{/* 卡片总览与首个图表区块之间仅保留一条横线（由 heatmap 分区的 divided 提供），
          图表区块均不套框，靠横线 + 标题分层 */}
-			<SettingsSection divided boxed={false} title={t("usageStats.heatmap.title")}>
+			<SettingsSection divided boxed={false} id="settings-section-usage-heatmap" title={t("usageStats.heatmap.title")}>
 				<UsageHeatmap data={data} />
 			</SettingsSection>
-			<SettingsSection divided boxed={false} title={t("usageStats.daily.title")}>
+			<SettingsSection divided boxed={false} id="settings-section-usage-daily" title={t("usageStats.daily.title")}>
 				<UsageDailyChart data={data} />
 			</SettingsSection>
-			<SettingsSection divided boxed={false} title={t("usageStats.models.title")}>
+			<SettingsSection divided boxed={false} id="settings-section-usage-models" title={t("usageStats.models.title")}>
 				<UsageTable
 					headers={[t("usageStats.models.col.model"), t("usageStats.models.col.tokens"), t("usageStats.models.col.cost"), t("usageStats.models.col.turns"), t("usageStats.models.col.sessions")]}
 					rows={data.byModel.map((m) => [m.model, formatTokens(m.tokens), formatCost(m.cost), String(m.turns), String(m.sessions)])}
 				/>
 			</SettingsSection>
-			<SettingsSection divided boxed={false} title={t("usageStats.projects.title")}>
+			<SettingsSection divided boxed={false} id="settings-section-usage-projects" title={t("usageStats.projects.title")}>
 				<UsageTable headers={[t("usageStats.projects.col.project"), t("usageStats.models.col.tokens"), t("usageStats.models.col.cost"), t("usageStats.models.col.turns")]} rows={data.byProject.map((p) => [p.project, formatTokens(p.tokens), formatCost(p.cost), String(p.turns)])} />
 			</SettingsSection>
 		</>

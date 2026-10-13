@@ -1,5 +1,5 @@
 import { readdir, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
-import { join, relative, dirname, resolve, sep } from "node:path";
+import { join, relative, dirname, resolve, sep, basename } from "node:path";
 import { trashPath } from "./trash";
 import { parseWslUncPath } from "../wsl/WslPaths";
 import type { FileSearchResult, FileTreeNode } from "../../shared/types";
@@ -184,8 +184,18 @@ export class FileSystemService {
 
 	/** 重命名文件或目录 */
 	async rename(targetPath: string, newName: string): Promise<string> {
+		// P0 security：newName 必须是纯文件名——含分隔符或「..」组件会把 rename 变成
+		// 跨目录 move 原语（join 不解析 ..，fsRename 由操作系统解析后可越出父目录）。
+		// 与 create 的防护同源（AGENTS 路径安全：拼接前逃逸检查，渲染层输入一律不可信）。
+		if (typeof newName !== "string" || newName.length === 0 || newName.length > 255 || newName !== basename(newName) || newName === "." || newName === ".." || /[\\/]/.test(newName) || /[\u0000-\u001f]/.test(newName)) {
+			throw new Error(`Invalid file name: "${newName}"`);
+		}
 		const parent = dirname(targetPath);
 		const newPath = join(parent, newName);
+		// 结构断言：重命名不得越出原父目录（与 isPathInsideProject 防逃逸同源，双保险）
+		if (!isPathInsideProject(parent, newPath)) {
+			throw new Error(`Invalid file name: rename escapes parent directory`);
+		}
 		await fsRename(targetPath, newPath);
 		return newPath;
 	}

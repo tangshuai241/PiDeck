@@ -50,22 +50,51 @@ export async function npmPackToDir(runNpm: DshPluginNpmRunner, spec: string, des
 	return { tarPath: join(destDir, filename), filename };
 }
 
+/** 解包防护预算：超过即中止（防 tar-bomb 磁盘耗尽 DoS）。npm 包含闭包依赖远小于此。 */
+const MAX_TARBALL_ENTRIES = 512;
+const MAX_TARBALL_TOTAL_BYTES = 256 * 1024 * 1024;
+
 /**
  * 解包 tgz 到 destDir（strip 1 去掉 npm tgz 固有的 package/ 前缀层）。
  * filter 拒绝绝对路径与含 .. 段的成员（zip-slip 防御，tar 默认有但显式再闸一道）。
+ * 安全预算：条目数/总字节超限时 filter 返回 false 跳过成员（不落盘），tar.x 结束后
+ * 统一抛结构化错（2026-12 加固：解包流式写盘不会 OOM，但无界 tgz 会耗尽 userData 磁盘；
+ * 不在 filter 内 throw——isaacs tar 会把 filter 异常重抛为未捕获异步错误，绕过 promise）。
+ * 符号链接成员直接跳过：npm 发布管道拒绝符号链接，正常 registry/用户 npm pack
+ * 产物不含 symlink，拦住的是 tar-slip 变体攻击面（先解 symlink 成员、再经它写目录外）。
  */
 export async function extractTgz(tarPath: string, destDir: string): Promise<void> {
 	mkdirSync(destDir, { recursive: true });
+	let entryCount = 0;
+	let totalBytes = 0;
+	let overEntryBudget = false;
+	let overByteBudget = false;
 	await tar.x({
 		file: tarPath,
 		cwd: destDir,
 		strip: 1,
-		filter: (path) => {
+		filter: (path, stat) => {
 			if (path.startsWith("/") || path.startsWith("\\")) return false;
 			const segments = path.split(/[\\/]/);
-			return !segments.some((segment) => segment === "..");
+			if (segments.some((segment) => segment === "..")) return false;
+			// 符号链接成员：跳过（见函数注释；npm pack 产物不含 symlink）。
+			// tar 的 filter stat 是 Stats|ReadEntry 联合：type 只在 ReadEntry 上，用 in 收窄
+			if (typeof stat === "object" && stat !== null && "type" in stat && (stat.type === "SymbolicLink" || stat.type === "Link")) return false;
+			// 预算闸：超限即拒收后续所有成员（不落盘），结束后的统一检查负责抛错
+			const size = typeof stat.size === "number" ? stat.size : 0;
+			if (entryCount >= MAX_TARBALL_ENTRIES || totalBytes + size > MAX_TARBALL_TOTAL_BYTES) {
+				if (entryCount >= MAX_TARBALL_ENTRIES) overEntryBudget = true;
+				if (totalBytes + size > MAX_TARBALL_TOTAL_BYTES) overByteBudget = true;
+				return false;
+			}
+			entryCount += 1;
+			totalBytes += size;
+			return true;
 		},
 	});
+	// 两个闸独立判定：恶意包可同时触碰两条预算，错误信息取先触发者
+	if (overEntryBudget) throw new Error(`TARBALL_TOO_MANY_ENTRIES:${entryCount + 1}`);
+	if (overByteBudget) throw new Error(`TARBALL_TOO_LARGE:${totalBytes}`);
 }
 
 /** 递归列出目录下全部 .js 文件（依赖扫描的输入面；其余扩展名不 import）。 */

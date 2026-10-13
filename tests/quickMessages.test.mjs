@@ -288,11 +288,15 @@ test("IPC 行为：get 回快照、save 只收数组、open-file 先建文件再
 
 const readSource = (file) => readFileSync(file, "utf8");
 
-test("底栏接线：安全控制位右侧渲染 props.quickMessagesControl，且生图模式一并屏蔽", () => {
+test("底栏接线：安全控制位右侧渲染 props.quickMessagesControl，且生图/生视频一并屏蔽", () => {
 	const source = readSource("src/renderer/src/components/session/ComposerComponents.tsx");
 	assert.match(source, /quickMessagesControl\?: ReactNode/);
-	// 生图模式没有对话 runtime，两个控制位都不该出现；分开判断是为了防止将来只屏蔽一个。
-	assert.match(source, /isImageGenMode \? null : \(\s*<>\s*\{props\.securityControl\}\s*\{props\.quickMessagesControl\}/);
+	// isMediaComposer 必须同时按「模式 or 后端」判定：引导页选了生图/生视频后端时 mode 仍是 normal，
+	// 只按 mode 判会漏屏蔽。
+	assert.match(source, /const isMediaComposer = [^;]*isImageGenMode[^;]*isVideoGenMode[^;]*props\.backend === "imagegen"[^;]*props\.backend === "videogen"/, "isMediaComposer 必须同时覆盖模式与后端");
+	// 生图/生视频后端没有对话 runtime，飞书镜像/安全等级/DSH 权限/快捷消息四个控制位都不该出现；
+	// 一起判断是为了防止将来只屏蔽其中几个。
+	assert.match(source, /isMediaComposer \? null : \(\s*<>\s*\{props\.feishuIndicator\}\s*\{props\.securityControl\}\s*\{props\.quickMessagesControl\}/);
 });
 
 test("ComposerArea：把 controller 的 pickers/delivery 接进快捷消息入口", () => {

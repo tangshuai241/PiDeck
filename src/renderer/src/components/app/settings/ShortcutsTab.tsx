@@ -25,6 +25,17 @@ const GROUP_LABEL_KEYS: Record<ShortcutGroupId, TranslationKey> = {
 };
 
 /**
+ * 分组的 DOM 锚点 id，写全量字面量而非模板拼接：命令面板的锚点索引
+ * （utils/settingsFieldAnchors.ts）与 `tests/settingsFieldAnchors.test.mjs` 都按
+ * 「源码里出现完整 id 字符串」核对，模板拼出来的 id 在源码里查不到，
+ * 会让「搜到却跳不动」这类静默失效失去守卫。
+ */
+const GROUP_SECTION_IDS: Record<ShortcutGroupId, string> = {
+	general: "settings-section-shortcuts-general",
+	dev: "settings-section-shortcuts-dev",
+};
+
+/**
  * 注册表（shared 层）里的文案 key 声明为 string，避免共享层反向依赖渲染层 i18n 类型；
  * 合法性由 tests/shortcutRegistry.test.mjs 的「labelKey 前缀」断言兜底。
  */
@@ -142,7 +153,7 @@ export function ShortcutsTab(props: ShortcutsTabProps) {
 				const defs = SHORTCUT_DEFS.filter((def) => def.group === group);
 				if (defs.length === 0) return null;
 				return (
-					<SettingsSection key={group} title={t(GROUP_LABEL_KEYS[group])}>
+					<SettingsSection key={group} id={GROUP_SECTION_IDS[group]} title={t(GROUP_LABEL_KEYS[group])}>
 						{defs.map((def) => {
 							const recording = recordingId === def.id;
 							const overridden = overridesRef.current[def.id] !== undefined;

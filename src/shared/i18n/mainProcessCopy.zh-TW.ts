@@ -2,6 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
+ * source-sha256: 5a3ca6d9bf22cb20c9330120cdff1f9faab03605ec9c45d6c1d0311ec4eb1bff（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -41,11 +42,14 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"sessionCommand.runtimeChanged": "會話執行例項已發生變化，請重試剛才的操作。",
 	"sessionCommand.runtimeBusy": "會話正在處理其他操作，請稍後重試。",
 	"sessionCommand.commandFailed": "會話操作失敗，請重試。",
+	"sessionCommand.backendRemoved": "當前版本已移除這個會話後端。原會話資料仍保留。",
 	"sessionCommand.modelNotFound": "模型未找到：{model}。該模型可能尚未在本地 models.json 中配置。",
 	"sessionCommand.fileTooLarge": "會話檔案過大（{sizeMb}MB，上限 {limitMb}MB），無法編輯訊息。請改用其他會話，或先匯出後歸檔該會話。",
 	"git.commitMessageModelRequired": "未配置提交摘要生成模型，請前往 設定 > Git 配置供應商與模型後重試。",
 	"git.commitMessageBusy": "上一份提交摘要仍在生成中，請稍候再試。",
 	"git.commitMessageTimeout": "提交摘要生成超時，請重試。",
+	"git.commitMessageEmptyDiff": "沒有暫存的更改，請先暫存更改後再生成提交摘要。",
+	"git.commitMessageNoRepo": "未找到可用的 Git 倉庫目錄，請先開啟或初始化倉庫後重試。",
 	"tray.showWindow": "顯示視窗",
 	"tray.version": "PiDeck v{version}",
 	"tray.checkUpdate": "檢查更新…",
@@ -69,6 +73,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"floater.quit": "退出",
 	"dialog.chooseChatHistoryFolder": "選擇聊天記錄目錄",
 	"dialog.chooseProjectFolder": "選擇專案目錄",
+	"update.devInactive": "開發模式不執行整應用更新。請執行發行包後檢查更新，或開啟自己的釋出頁下載。",
 	"update.checkFailed": "檢查更新失敗，請稍後重試。",
 	"update.invalidDownloadUrl": "更新下載地址無效。",
 	"update.downloadFailed": "更新包下載失敗，請稍後重試。",
@@ -91,6 +96,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"session.notFound": "會話不存在，請重新整理會話列表後重試。",
 	"session.invalidModel": "模型選擇無效，請重新選擇。",
 	"session.backendLocked": "會話已建立，後端（Pi / DSH）不可切換。",
+	"session.backendRemoved": "當前版本已移除這個會話後端。原會話資料仍保留。",
 	"session.agentPresetLocked": "會話已建立，Agent 模式（預設）不可更改。",
 	"session.fileNotFound": "會話檔案不存在，請重新整理會話列表後重試。",
 	"session.copyDshUnsupported": "DSH 歷史會話暫不支援直接複製，請開啟會話後使用執行中 Agent 的「複製會話」。",

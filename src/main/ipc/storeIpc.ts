@@ -5,7 +5,7 @@
 
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { CreatePiPromptTemplateInput, PiPromptTemplateSummary, PromptStoreItem, PromptStoreRawItem, PromptStoreSearchResponse, PromptStoreSearchResult } from "../../shared/types";
+import type { CreatePiPromptTemplateInput } from "../../shared/types";
 import type { AppLogger } from "../logging/AppLogger";
 import type { PromptManager } from "../prompts/PromptManager";
 import type { SkillManager } from "../skills/SkillManager";
@@ -13,7 +13,6 @@ import type { XuePromptManager } from "../prompts/XuePromptManager";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
-import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -54,13 +53,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	 * content 无上界则可被超大字符串压垮写盘路径。字段上限与 promptsEdit 的
 	 * requireString(content, 4MB) 同构，错误信息带字段名方便排查。
 	 */
-	const requireStoreItem = (value: unknown): { title: string; description: string; content: string } => {
-		if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid store item.");
-		const title = requireString((value as { title?: unknown }).title, "store item title", 512);
-		const description = requireString((value as { description?: unknown }).description, "store item description", 4096);
-		const content = requireString((value as { content?: unknown }).content, "store item content", 4 * 1024 * 1024);
-		return { title, description, content };
-	};
+
 	const projectRoot = (projectId: unknown): string => {
 		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
 			throw new Error("Invalid project id.");
@@ -167,342 +160,14 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	});
 
 	// ── Prompt Store (prompts.chat) ──────────────────────────────────────
-	const PROMPT_STORE_BASE = "https://prompts.chat/api";
 
 	/** 将 prompts.chat 原始 prompt 条目扁平化为 UI 消费的格式 */
-	function flattenPromptItem(raw: PromptStoreRawItem): PromptStoreItem {
-		return {
-			id: raw.id,
-			title: raw.title,
-			description: raw.description,
-			content: raw.content,
-			type: raw.type,
-			author: raw.author?.name ?? "",
-			category: raw.category?.name ?? "",
-			tags: raw.tags?.map((t) => t.tag?.name).filter(Boolean) ?? [],
-			votes: raw.voteCount ?? 0,
-			createdAt: raw.createdAt,
-		};
-	}
 
 	/** 将 prompts.chat 的命名变量转换为 pi 的位置参数 */
-	function convertStoreVarsToPiVars(content: string): { converted: string; argumentHint: string; varCount: number } {
-		const varMap = new Map<string, { index: number; hasDefault: boolean; defaultVal?: string }>();
-		let nextIndex = 1;
-		const scanRegex = /\$\{([a-zA-Z_]\w*)(?::(.*?))?\}/g;
-		let scanMatch: RegExpExecArray | null;
-		while ((scanMatch = scanRegex.exec(content)) !== null) {
-			const varName = scanMatch[1];
-			if (!varMap.has(varName)) {
-				varMap.set(varName, {
-					index: nextIndex++,
-					hasDefault: scanMatch[2] !== undefined,
-					defaultVal: scanMatch[2],
-				});
-			}
-		}
-		if (varMap.size === 0) {
-			return { converted: content, argumentHint: "", varCount: 0 };
-		}
-		let converted = content.replace(/\$\{([a-zA-Z_]\w*)(?::(.*?))?\}/g, (_match, varName: string, defaultVal?: string) => {
-			const info = varMap.get(varName)!;
-			if (defaultVal !== undefined) {
-				return `\${${info.index}:-${defaultVal}}`;
-			}
-			return `$${info.index}`;
-		});
-		const hints: string[] = [];
-		for (let i = 1; i < nextIndex; i++) {
-			const entry = Array.from(varMap.entries()).find(([, v]) => v.index === i);
-			if (!entry) continue;
-			const [varName, info] = entry;
-			if (info.hasDefault) {
-				hints.push(`[${varName}:${info.defaultVal}]`);
-			} else {
-				hints.push(`<${varName}>`);
-			}
-		}
-		const argumentHint = hints.length > 0 ? hints.join(" ") : "";
-		return { converted, argumentHint, varCount: varMap.size };
-	}
-
-	ipcMain.handle(
-		ipcChannels.promptStoreSearch,
-		async (
-			_event,
-			query: string,
-			options?: {
-				limit?: number;
-				type?: string;
-				category?: string;
-				tag?: string;
-			},
-		) => {
-			try {
-				const params = new URLSearchParams({ q: query });
-				if (options?.limit) params.set("perPage", String(options.limit));
-				if (options?.type) params.set("type", options.type);
-				if (options?.category) params.set("category", options.category);
-				if (options?.tag) params.set("tag", options.tag);
-
-				const url = `${PROMPT_STORE_BASE}/prompts?${params.toString()}`;
-				const response = await fetch(url, {
-					signal: AbortSignal.timeout(10_000),
-				});
-				if (!response.ok) {
-					throw new Error(`prompts.chat API 返回 ${response.status}`);
-				}
-				const raw = (await response.json()) as PromptStoreSearchResponse;
-				const result: PromptStoreSearchResult = {
-					query,
-					count: raw.total,
-					prompts: raw.prompts.map(flattenPromptItem),
-				};
-				return result;
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				void appLogger.warn("prompt-store", "Search failed", { query, error: message });
-				throw new Error(mainCopy("store.promptSearchFailed"));
-			}
-		},
-	);
-
-	ipcMain.handle(ipcChannels.promptStoreGet, async (_event, id: string) => {
-		try {
-			const url = `${PROMPT_STORE_BASE}/prompts/${encodeURIComponent(id)}`;
-			const response = await fetch(url, {
-				signal: AbortSignal.timeout(10_000),
-			});
-			if (!response.ok) {
-				throw new Error(`prompts.chat API 返回 ${response.status}`);
-			}
-			const raw = (await response.json()) as PromptStoreRawItem;
-			return flattenPromptItem(raw);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("prompt-store", "Get prompt failed", { id, error: message });
-			throw new Error(mainCopy("store.promptDetailFailed"));
-		}
-	});
-
-	ipcMain.handle(
-		ipcChannels.promptStoreImport,
-		async (
-			_event,
-			payload: {
-				title: string;
-				description: string;
-				content: string;
-				projectId?: unknown;
-			},
-		) => {
-			// 渲染层不可信：先校验载荷再解析安装目标，null/超大 content 在此拦截。
-			const { title, description, content } = requireStoreItem(payload);
-			const target = await projectInstallTarget(payload.projectId);
-			try {
-				const name = title
-					.trim()
-					.toLowerCase()
-					.replace(/[^\p{L}\p{N}-]+/gu, "-")
-					.replace(/-+/g, "-")
-					.replace(/^-|-$/g, "");
-				if (!name) throw new Error(mainCopy("store.invalidItemTitle"));
-
-				const { converted, argumentHint, varCount } = convertStoreVarsToPiVars(content);
-
-				const tryCreate = async (tryName: string): Promise<PiPromptTemplateSummary> => {
-					try {
-						return target ? await promptManager.createInProject(target.root, { name: tryName, description }) : await promptManager.create({ name: tryName, description });
-					} catch {
-						const match = tryName.match(/-(\d+)$/);
-						const nextNum = match ? parseInt(match[1], 10) + 1 : 2;
-						const suffixName = tryName.replace(/-\d+$/, "") + "-" + nextNum;
-						return tryCreate(suffixName);
-					}
-				};
-
-				const hintLine = argumentHint ? `\nargument-hint: ${argumentHint}` : "";
-				const frontmatter = `---\ndescription: ${description.replace(/\n/g, " ")}\nsource: prompts.chat${hintLine}\n---\n\n`;
-				const summary = await tryCreate(name);
-				if (target) {
-					await promptManager.writeContentInProject(target.root, summary.path, frontmatter + converted);
-				} else {
-					await promptManager.writeContent(summary.path, frontmatter + converted);
-				}
-
-				void appLogger.info("prompt-store", "Imported prompt from store", {
-					title,
-					localName: summary.name,
-					scope: target ? "project" : "global",
-					variables: varCount,
-				});
-				return summary;
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				void appLogger.warn("prompt-store", "Import failed", { title, error: message });
-				throw new Error(mainCopy("store.promptImportFailed"));
-			}
-		},
-	);
 
 	// ── Skill Store ─────────────────────────────
-	ipcMain.handle(ipcChannels.skillStoreSearch, async (_event, query: string) => {
-		try {
-			const params = new URLSearchParams({ q: query, perPage: "20" });
-			const url = `https://prompts.chat/api/prompts?${params.toString()}`;
-			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-			if (!response.ok) throw new Error(`prompts.chat API 返回 ${response.status}`);
-			const raw = (await response.json()) as PromptStoreSearchResponse;
-			const result = {
-				query,
-				count: raw.total,
-				prompts: raw.prompts.map(flattenPromptItem),
-			};
-			return result;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-store", "Search failed", { query, error: message });
-			throw new Error(mainCopy("store.skillSearchFailed"));
-		}
-	});
-
-	ipcMain.handle(ipcChannels.skillStoreImport, async (_event, item: PromptStoreItem, locationId: "pi-global" | "agents-global" = "pi-global", projectId?: unknown) => {
-		// 渲染层不可信：先校验载荷再解析安装目标，null/超大 content 在此拦截。
-		const { title, description, content } = requireStoreItem(item);
-		const target = await projectInstallTarget(projectId);
-		try {
-			const name = title
-				.trim()
-				.toLowerCase()
-				.replace(/[^\p{L}\p{N}-]+/gu, "-")
-				.replace(/-+/g, "-")
-				.replace(/^-|-$/g, "");
-			if (!name) throw new Error(mainCopy("store.invalidItemTitle"));
-
-			const summary = target
-				? await projectResourceManager.importSkillFromStore(target.id, {
-						name,
-						description: description || title,
-						content: `# ${title}\n\n${content}`,
-					})
-				: await skillManager.create({
-						name,
-						description: description || title,
-						locationId: locationId ?? "pi-global",
-					});
-
-			if (!target) {
-				const { writeFile } = await import("node:fs/promises");
-				const skillContent = `---\nname: ${name}\ndescription: ${(description || title).replace(/[\\r\\n]+/g, " ")}\nsource: prompts.chat\n---\n\n# ${title}\n\n${content}`;
-				await writeFile(summary.path, skillContent, "utf8");
-			}
-
-			void appLogger.info("skill-store", "Imported skill from store", {
-				title,
-				localName: name,
-				scope: target ? "project" : "global",
-			});
-			return summary;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-store", "Import failed", { title: item.title, error: message });
-			throw new Error(mainCopy("store.skillImportFailed"));
-		}
-	});
 
 	// ── Skills.sh ─────────────────────────
-	ipcMain.handle(ipcChannels.skillHubSearch, async (_event, opts: { query: string; limit?: number }) => {
-		const { query, limit = 50 } = opts;
-		try {
-			const response = await fetch(`https://www.skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
-			if (!response.ok) throw new Error(`API returned ${response.status}`);
-			const json = (await response.json()) as {
-				skills?: Array<{ id: string; skillId: string; name: string; installs: number; source: string }>;
-			};
-			const skills = json.skills ?? [];
-			const items = skills.map((item) => ({
-				slug: item.id,
-				name: item.name,
-				description: "",
-				description_zh: "",
-				iconUrl: undefined,
-				stars: 0,
-				downloads: item.installs,
-				installs: item.installs,
-				category: "",
-				version: "",
-				ownerName: item.source,
-				source: "skills.sh",
-			}));
-			items.sort((a, b) => b.installs - a.installs);
-			return { query, total: items.length, items };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-hub", "Search failed", { query, error: message });
-			throw new Error(mainCopy("store.skillsShSearchFailed"));
-		}
-	});
-
-	ipcMain.handle(ipcChannels.skillHubDetail, async () => null);
-
-	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: unknown, projectId?: unknown) => {
-		const validSlug = typeof slug === "string" ? slug.trim() : "";
-		const lastSlash = validSlug.lastIndexOf("/");
-		const pkg = lastSlash > 0 ? validSlug.slice(0, lastSlash) : validSlug;
-		const skillName = lastSlash > 0 ? validSlug.slice(lastSlash + 1) : "";
-		// P0 security: validate each argument before passing it to execFile (shell is disabled).
-		const SAFE_SLUG_RE = /^[a-zA-Z0-9@/\-_.]+$/;
-		if (!validSlug || !SAFE_SLUG_RE.test(pkg) || (skillName && !SAFE_SLUG_RE.test(skillName))) {
-			return { success: false, slug: validSlug, installDir: "", error: mainCopy("store.skillsShInvalidSlug") };
-		}
-		const target = await projectInstallTarget(projectId);
-		try {
-			const { execFile } = await import("node:child_process");
-			const { buildSkillHubInstallCommand } = await import("../skills/skillHubInstallCommand");
-			// win32 经 cmd.exe /d /s /c 包装（Node 24 Windows 直 spawn .cmd 报 EINVAL），
-			// 非 win 平台数组直调；命令构造见 skillHubInstallCommand.ts 头注释。
-			const { command, args } = buildSkillHubInstallCommand({
-				pkg,
-				skillName,
-				global: !target,
-			});
-			await new Promise<void>((resolve, reject) => {
-				execFile(
-					command,
-					args,
-					{
-						cwd: target?.root,
-						encoding: "utf8",
-						timeout: 120_000,
-						maxBuffer: 10 * 1024 * 1024,
-						shell: false,
-						windowsHide: true,
-					},
-					(error, _stdout, stderr) => {
-						if (error) {
-							const detail = typeof stderr === "string" && stderr.trim() ? `${error.message}: ${stderr.trim()}` : error.message;
-							reject(new Error(detail));
-							return;
-						}
-						resolve();
-					},
-				);
-			});
-			const installDir = target ? await projectResourceManager.ensureResourceDirectory(target.id, "project-pi") : "";
-			void appLogger.info("skill-hub", "Installed skill", {
-				slug: validSlug,
-				pkg,
-				skillName,
-				scope: target ? "project" : "global",
-			});
-			return { success: true, slug: validSlug, installDir };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-hub", "Install failed", { slug: validSlug, error: message });
-			const brief = message.length > 300 ? `${message.slice(0, 300)}…` : message;
-			return { success: false, slug: validSlug, installDir: "", error: brief };
-		}
-	});
 
 	// ── Xue Prompts ─────────────────────────────
 	ipcMain.handle(
@@ -624,16 +289,4 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	});
 	// 扩展商店：pi.dev 目录页无公开 JSON API，主进程抓 SSR HTML 解析 + 缓存后返回。
 	// 渲染层只消费结构化结果，不感知 HTML 解析细节；失败时保留旧缓存或报用户可读错误。
-	ipcMain.handle(ipcChannels.extensionsCatalog, async (_event, query: import("../../shared/types").PiPackageCatalogQuery) => {
-		try {
-			return await getPiPackageCatalog(query ?? {});
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("extension-store", "Catalog fetch failed", {
-				query: { page: query?.page, query: query?.query, type: query?.type, sort: query?.sort },
-				error: message,
-			});
-			throw new Error(mainCopy("store.packageCatalogFailed"));
-		}
-	});
 }

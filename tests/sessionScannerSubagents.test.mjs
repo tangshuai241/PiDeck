@@ -243,6 +243,14 @@ test("aborts a hung WSL scan before the renderer watchdog and allows a clean ret
 			attempts += 1;
 			if (attempts > 1) return [];
 			return new Promise((_resolve, reject) => {
+				// 已经 abort 过的 signal 不会再派发 abort 事件：只挂监听不查 aborted 时，这个 promise
+				// 永远不会 settle，await 它的 list() 会挂死。10ms watchdog 很容易在前面的
+				// ensureLoaded / resolveScanRoots 之后才触发（CI 上更慢），此时文件会整篇无输出
+				// 地挂到 step 超时（2026-10-12 CI 实测 25 分钟无输出、45 分钟被 kill）。
+				if (signal.aborted) {
+					reject(signal.reason);
+					return;
+				}
 				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 			});
 		};

@@ -8,7 +8,7 @@ const { ipcChannels } = loadTsCommonJs("src/shared/ipc.ts");
 const AGENT_ID = "state-owner";
 
 /** 暂停真实运行态查询的 RPC/文件统计；不启动 pi，不读取用户会话。 */
-function harness({ waitAt, rpcFails = false } = {}) {
+function harness({ waitAt, rpcFails = false, cacheStats } = {}) {
 	const entered = deferred();
 	const release = deferred();
 	const requests = [];
@@ -43,7 +43,7 @@ function harness({ waitAt, rpcFails = false } = {}) {
 		{},
 	);
 	manager.agents.set(AGENT_ID, runtime);
-	manager.getSessionCacheHitStats = () => pause("cache", { latest: 80, average: 60, sampleCount: 2, conversationTokens: 200 });
+	manager.getSessionCacheHitStats = () => pause("cache", cacheStats ?? { latest: 80, average: 60, sampleCount: 2, conversationTokens: 200 });
 	manager.onOutput((channel, payload) => {
 		if (channel === ipcChannels.agentsRuntimeState) events.push(plain(payload));
 	});
@@ -97,6 +97,26 @@ test("runtime state still returns the source model, usage and file statistics wi
 	assert.equal(state.contextMessageTokens, 200);
 	assert.equal(state.cacheHitPercent, 80);
 	assert.deepEqual(h.requests, ["get_state", "get_session_stats"]);
+});
+
+test("runtime state splits the context into measured system/tools and a conversation residual", async () => {
+	// 从会话文件重放出的提示词装载（sections/工具声明）直接给出系统+工具两段；
+	// 对话段取「总占用 − 系统 − 工具」差值（250 − 40 − 60 = 150），
+	// 而不是把两段当反推值——那正是「系统 + 工具 ~0」的旧病根。
+	const h = harness({ cacheStats: { latest: 80, average: 60, sampleCount: 2, conversationTokens: 9000, systemTokens: 40, toolsTokens: 60 } });
+	const state = await h.manager.getRuntimeState(AGENT_ID);
+	assert.equal(state.contextSystemTokens, 40);
+	assert.equal(state.contextToolsTokens, 60);
+	assert.equal(state.contextMessageTokens, 150);
+});
+
+test("runtime state falls back to the message estimate when the residual is unusable", async () => {
+	// 差值不可用（装载两段之和已经超出上报占用）时不能显示 0：退回消息文本估算。
+	const h = harness({ cacheStats: { latest: undefined, average: undefined, sampleCount: 0, conversationTokens: 200, systemTokens: 200, toolsTokens: 100 } });
+	const state = await h.manager.getRuntimeState(AGENT_ID);
+	assert.equal(state.contextSystemTokens, 200);
+	assert.equal(state.contextToolsTokens, 100);
+	assert.equal(state.contextMessageTokens, 200);
 });
 
 test("RPC failure keeps the local runtime-state fallback when the binding is unchanged", async () => {

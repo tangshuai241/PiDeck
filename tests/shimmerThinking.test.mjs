@@ -10,7 +10,7 @@ import test from "node:test";
 
 const shimmerSource = readFileSync("src/renderer/src/components/session/ShimmerText.tsx", "utf8");
 const cardsSource = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
-const webTimeline = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
+
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 const zhCN = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enUS = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
@@ -109,15 +109,6 @@ test("ThinkingBlock 折叠态把耗时和预览放在同一行，流式默认单
 	assert.match(block, /showSweep=\{false\}/);
 	assert.match(block, /<ChevronRight/);
 	assert.doesNotMatch(block, /border-dashed/);
-});
-
-test("WebThinkingBlock stays collapsed by default and does not auto-expand while streaming", () => {
-	const block = webTimeline.match(/function WebThinkingBlock[\s\S]*?^\}\);/m)?.[0] ?? "";
-	assert.ok(block, "WebThinkingBlock must exist");
-	assert.match(block, /useState\(false\)/);
-	assert.doesNotMatch(block, /Boolean\(props\.running\)/);
-	assert.doesNotMatch(block, /if \(props\.running\) setExpanded\(true\)/);
-	assert.match(block, /<SingleLinePreview/);
 });
 
 test("thinking Brain logo uses thinking-row-icon instead of gray text utilities", () => {

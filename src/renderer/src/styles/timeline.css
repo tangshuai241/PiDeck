@@ -1254,22 +1254,10 @@
   background: var(--color-card);
   box-shadow: var(--shadow-composer-lifted);
 }
-/* 特殊模式身份条：画在圆角盒内侧，2px 胶囊，避免贴外沿的 3px 实心条
-   在 20px 圆角 + 默认近黑 accent 下看起来像一根粗棍。 */
-.composer-box::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 12px;
-  bottom: 48px;
-  width: 2px;
-  border-radius: 999px;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.14s ease,
-    background 0.14s ease;
-}
+/* 特殊模式身份（2026-10 精简）：只用下方 .shell/.plan/.goal 的 1px 边框淡着色 + 淡辉光表达，
+   不再画左侧 2px 竖条。模式 chip 已经写明当前模式；竖条还顺带把输入区左内边距
+   从 12px 撑到 18px，切模式时正文会左右跳 6px；同类工具（Claude Code / Cursor / Cline）
+   也都只用 chip 或状态行表达模式，不画色条。 */
 
 .composer textarea {
   display: block;
@@ -1560,59 +1548,6 @@
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px
     color-mix(in srgb, var(--color-accent) 14%, transparent);
-}
-.composer-box.shell-mode::before,
-.composer-box.shell-silent-mode::before,
-.composer-box.plan-mode::before,
-.composer-box.goal-mode::before {
-  opacity: 1;
-}
-.composer-box.shell-mode::before {
-  background: color-mix(in srgb, var(--color-warning) 72%, transparent);
-}
-.composer-box.shell-silent-mode::before {
-  background: color-mix(in srgb, var(--color-danger) 72%, transparent);
-}
-.composer-box.plan-mode::before {
-  background: color-mix(in srgb, var(--color-brand-green) 72%, transparent);
-}
-.composer-box.goal-mode::before {
-  /* 默认 zinc 主题 accent 近黑：实心会变成粗黑条，混一点透明才像细强调线。 */
-  background: color-mix(in srgb, var(--color-accent) 55%, transparent);
-}
-.composer-box.shell-mode textarea,
-.composer-box.shell-silent-mode textarea,
-.composer-box.plan-mode textarea,
-.composer-box.goal-mode textarea {
-  padding-left: 18px;
-}
-.composer-box.shell-mode .rich-input,
-.composer-box.shell-silent-mode .rich-input,
-.composer-box.plan-mode .rich-input,
-.composer-box.goal-mode .rich-input,
-.composer-box.shell-mode .ProseMirror,
-.composer-box.shell-silent-mode .ProseMirror,
-.composer-box.plan-mode .ProseMirror,
-.composer-box.goal-mode .ProseMirror {
-  padding-left: 18px;
-}
-.composer-box.shell-mode .rich-input.is-editor-empty::before,
-.composer-box.shell-silent-mode .rich-input.is-editor-empty::before,
-.composer-box.plan-mode .rich-input.is-editor-empty::before,
-.composer-box.goal-mode .rich-input.is-editor-empty::before {
-  left: 18px;
-}
-.composer-box.shell-mode .composer-bottom-bar {
-  border-top-color: color-mix(in srgb, var(--color-warning) 20%, transparent);
-}
-.composer-box.shell-silent-mode .composer-bottom-bar {
-  border-top-color: color-mix(in srgb, var(--color-danger) 20%, transparent);
-}
-.composer-box.plan-mode .composer-bottom-bar {
-  border-top-color: color-mix(in srgb, var(--color-brand-green) 20%, transparent);
-}
-.composer-box.goal-mode .composer-bottom-bar {
-  border-top-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 .extension-widgets-container {
   display: flex;

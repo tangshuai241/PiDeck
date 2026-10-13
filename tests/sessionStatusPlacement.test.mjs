@@ -14,15 +14,15 @@ describe("parseSessionStatusPlacement", () => {
 		assert.equal(parseSessionStatusPlacement("composer"), "composer");
 	});
 
-	test("缺省/坏值回落默认 sidebar（旧 settings.json 无此字段）", () => {
-		assert.equal(DEFAULT_SESSION_STATUS_PLACEMENT, "sidebar");
+	test("缺省/坏值回落默认 composer（旧 settings.json 无此字段）", () => {
+		assert.equal(DEFAULT_SESSION_STATUS_PLACEMENT, "composer");
 		for (const raw of [undefined, null, "", "top", "right", "Sidebar", 1, {}, []]) {
-			assert.equal(parseSessionStatusPlacement(raw), "sidebar", `raw=${JSON.stringify(raw)}`);
+			assert.equal(parseSessionStatusPlacement(raw), "composer", `raw=${JSON.stringify(raw)}`);
 		}
 	});
 
-	test("已移除的 both（开发期存过）按默认 sidebar 处理", () => {
-		assert.equal(parseSessionStatusPlacement("both"), "sidebar");
+	test("已移除的 both（开发期存过）按默认 composer 处理", () => {
+		assert.equal(parseSessionStatusPlacement("both"), "composer");
 	});
 });
 
@@ -40,8 +40,8 @@ describe("装配判定", () => {
 describe("设置链路契约", () => {
 	const store = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
 
-	test("SettingsStore：默认 sidebar，读盘归一化，写入时非法值丢弃而非重置", () => {
-		assert.match(store, /sessionStatusPlacement: "sidebar",/);
+	test("SettingsStore：默认 composer，读盘归一化，写入时非法值丢弃而非重置", () => {
+		assert.match(store, /sessionStatusPlacement: "composer",/);
 		assert.match(store, /this\.settings\.sessionStatusPlacement = parseSessionStatusPlacement\(this\.settings\.sessionStatusPlacement\);/);
 		assert.match(store, /if \("sessionStatusPlacement" in safePatch && parseSessionStatusPlacement\(safePatch\.sessionStatusPlacement\) !== safePatch\.sessionStatusPlacement\) \{\s*delete safePatch\.sessionStatusPlacement;/);
 		// 丢弃必须发生在「空 patch 直接返回」之前，否则只含坏值的 patch 仍会触发一次写盘
@@ -49,8 +49,8 @@ describe("设置链路契约", () => {
 	});
 
 	test("渲染层默认值与主进程一致", () => {
-		assert.match(readFileSync("src/shared/types/settings.ts", "utf8"), /sessionStatusPlacement: "sidebar",/);
-		assert.match(readFileSync("src/renderer/src/previewApi.ts", "utf8"), /sessionStatusPlacement: "sidebar",/);
+		assert.match(readFileSync("src/shared/types/settings.ts", "utf8"), /sessionStatusPlacement: "composer",/);
+		assert.match(readFileSync("src/renderer/src/previewApi.ts", "utf8"), /sessionStatusPlacement: "composer",/);
 	});
 
 	test("设置页：外观页二选一（无 both），可搜索，纳入未保存提示", () => {

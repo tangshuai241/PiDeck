@@ -50,7 +50,7 @@ test("tab bar font size change applies immediately after save", async ({ window 
 	await expect(await window.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--font-size-tab").trim())).toBe("12px");
 	await expectTabFontSize(window, "12px", "18px");
 
-	await window.getByRole("button", { name: "设置", exact: true }).click();
+	await window.getByRole("button", { name: /^设置/ }).click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 
@@ -89,7 +89,7 @@ test("tab bar font size change applies immediately after save", async ({ window 
 
 	// 重新打开：改为「大」并保存，验证保存链（onSettingsApplied → useAppAppearance 接管）。
 	// 快照里各区域字号均为 null，重开弹窗时「自定义各区域字号」开关回到关，需重新打开
-	await window.getByRole("button", { name: "设置", exact: true }).click();
+	await window.getByRole("button", { name: /^设置/ }).click();
 	await expect(modal).toBeVisible();
 	await modal.getByText("外观设置").click();
 	if (!(await perAreaSwitch.isChecked())) {

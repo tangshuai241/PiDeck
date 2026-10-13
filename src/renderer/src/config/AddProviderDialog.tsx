@@ -15,7 +15,10 @@ import { ModelsTable } from "./ModelsTable";
 import { ProviderConnectionForm, type ProviderTestResult } from "./ProviderConnectionForm";
 import { buildProviderConfigFromDraft, providerDialogResetKey, resolveFetchedBaseUrl, resolveInitialReasoningContentReplay, type AddProviderDraft } from "./addProviderDraft";
 import { applyModelPatches, applyAdaptiveTemplateReset, computeModelSpecPatches, mergeAdaptiveModelTemplate } from "../utils/modelSpecAutoFill";
-import { countSelectedModelIndexes, removeSelectedModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
+import { countSelectedModelIndexes, invertModelIndexes, removeSelectedModelIndexes, selectAllModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
+import { withModelThinkingLevelEnabled } from "../../../shared/modelThinkingLevels";
+import { getModelUserAgentOverride, readModelOverrides, setModelUserAgentOverride } from "./providerHeaders";
+import { pickProviderHiddenIds } from "./hiddenModels";
 
 /**
  * 新增/编辑供应商页（Pi 模型页的「下一页」）：
@@ -38,7 +41,24 @@ export type ProviderDialogInitial = {
 	userAgent?: string;
 	compat?: ProviderCompat;
 	models?: ModelItem[];
+	/** 逐模型 UA 覆盖（provider.modelOverrides；页内可编辑，确认时随 provider 一起落盘）。 */
+	modelOverrides?: Record<string, Record<string, unknown>>;
 };
+
+/**
+ * 页内「每模型默认档位」副本：按该供应商**当前模型列表**逐个问宿主。
+ * 列表外的键（历史遗留的孤儿）不回填，保存时的替换写入自然把它们清掉（设置跟着模型走）。
+ */
+function readProviderThinkingDefaults(initial: ProviderDialogInitial | undefined, read: ((providerName: string, modelId: string) => string) | undefined): Record<string, string> {
+	if (!initial?.name || !read) return {};
+	const defaults: Record<string, string> = {};
+	for (const model of initial.models ?? []) {
+		if (!model.id) continue;
+		const level = read(initial.name, model.id);
+		if (level) defaults[model.id] = level;
+	}
+	return defaults;
+}
 
 export function AddProviderDialog(props: {
 	mode: ProviderDialogMode;
@@ -52,6 +72,17 @@ export function AddProviderDialog(props: {
 	onConfirm: (draft: AddProviderDraft) => void;
 	/** 设置窗口标题栏保存时触发当前页提交；由父级注入稳定的外部保存入口。 */
 	onRequestSave?: (save: (() => void) | undefined) => void;
+	/**
+	 * 供应商页的模型设置约定：**页内改，点保存才生效**（与 baseUrl / API Key 同一层），取消就全丢。
+	 * 下面这组是「读当前状态」的入口（宿主侧已保存 provider / 已加载 settings）；写回走 onConfirm
+	 * 的草稿，由宿主按最终名字替换式落盘（见 ConfigModal 的 handleAddProvider / handleEditProvider）。
+	 */
+	/** AppSettings.hiddenModels 全量条目：过滤出本供应商的隐藏集合；宿主不给则不渲染眼睛按钮。 */
+	hiddenModels?: string[];
+	/** 读取某模型当前的默认思考档位（settings.json）；宿主不给则不渲染默认档位入口。 */
+	getModelThinkingLevelDefault?: (providerName: string, modelId: string) => string;
+	/** Pi 已确认的可用思考档位（只读参考）。 */
+	getModelAvailableThinkingLevels?: (providerName: string, modelId: string) => readonly string[] | undefined;
 }) {
 	const [name, setName] = useState("");
 	const [baseUrl, setBaseUrl] = useState("");
@@ -64,6 +95,16 @@ export function AddProviderDialog(props: {
 	});
 	/** 页内维护的模型草稿：新增=空，编辑=现有模型；获取模型勾选后追加。 */
 	const [models, setModels] = useState<ModelItem[]>([]);
+	/**
+	 * 逐模型 UA 覆盖草稿（与 baseUrl / apiKey 同一层：页内编辑，确认时随 provider 一起落盘）。
+	 * 始终持有对象：清掉最后一个覆盖时写入方返回 undefined，必须归一成 `{}` 才能表达
+	 * 「清空」——undefined 在 mergeProviderDraft 里是「表单没管这项」，会让清掉的覆盖复活。
+	 */
+	const [modelOverrides, setModelOverrides] = useState<Record<string, Record<string, unknown>>>({});
+	/** 该供应商已隐藏的模型 id（AppSettings.hiddenModels 的页内副本，确认时才落盘）。 */
+	const [hiddenModelIds, setHiddenModelIds] = useState<string[]>([]);
+	/** 该供应商的每模型默认思考档位（settings.json 的页内副本，绝对快照：删模型即删档位）。 */
+	const [thinkingDefaults, setThinkingDefaults] = useState<Record<string, string>>({});
 	/** 正在重置为自适应的行 key（String(index)；与 ModelsTable 的默认 getRowKey 对齐）。 */
 	const [resettingModelKey, setResettingModelKey] = useState<string | null>(null);
 	/** 手动添加模型后待聚焦的新行 key，ModelsTable 聚焦完成后回调清空。 */
@@ -106,6 +147,10 @@ export function AddProviderDialog(props: {
 			supportsStrictMode: initial?.compat?.supportsStrictMode,
 		});
 		setModels(initial?.models ? initial.models.map((model) => ({ ...model })) : []);
+		// 三份页内副本按宿主当前状态预填：UA 读 provider，隐藏读 AppSettings，默认档位读 settings.json
+		setModelOverrides(readModelOverrides(initial?.modelOverrides) ?? {});
+		setHiddenModelIds(pickProviderHiddenIds(props.hiddenModels, initial?.name ?? ""));
+		setThinkingDefaults(readProviderThinkingDefaults(initial, props.getModelThinkingLevelDefault));
 		setFetchedModels(null);
 		setSelectedFetchedIds([]);
 		setFetchError(null);
@@ -222,7 +267,8 @@ export function AddProviderDialog(props: {
 		const updates = computeModelSpecPatches(model, spec);
 		if (updates.length === 0) return;
 		setModels((prev) => prev.map((m, j) => (j === index ? applyModelPatches(m, updates) : m)));
-		showNotice(t("config.modelSpecAutoFilled", { model: spec?.matchedId ?? trimmed }), 3000);
+		// 命中目录才报「已按目录填充」；未命中时只补了默认思考档位（见 ConfigModal 同名路径）。
+		showNotice(spec?.matchedId ? t("config.modelSpecAutoFilled", { model: spec.matchedId }) : t("config.modelSpecUnmatched", { model: trimmed }), 3000);
 	};
 
 	/** 手加一行空模型（能力字段留空，由失焦补全/重置为自适应补齐，不写猜测值）。 */
@@ -274,6 +320,8 @@ export function AddProviderDialog(props: {
 				userAgent,
 				compat,
 				models: models.length > 0 ? models : [{ id: modelId, name: modelId }],
+				// 逐模型 UA 必须带上：配它的场景正是「这个模型要走特殊 UA」，漏了会测出假失败
+				modelOverrides,
 			});
 			const result = await desktopApi.config.testProvider(providerName, modelId, probeProvider, apiKey.trim(), testProxyMode);
 			setTestResult(result);
@@ -282,6 +330,77 @@ export function AddProviderDialog(props: {
 		} finally {
 			setTesting(false);
 		}
+	};
+
+	/**
+	 * 已保存 provider 的作用域名（edit 模式 = 预填数据里的原名；add 模式 = ""）。
+	 * 只用于「读当前状态」（Pi 探测结果）与判断有没有已保存的 provider 上下文；
+	 * 页面里改的三份模型设置都先记在页内，确认时由 ConfigModal 按最终名字替换式落盘。
+	 */
+	const scopedProviderName = props.mode === "edit" ? (props.initial?.name ?? "") : "";
+	/** 按行取当前草稿的 modelId（空串 = 还没填 id，依赖它的操作直接不生效）。 */
+	const modelIdAt = (index: number) => models[index]?.id ?? "";
+
+	/** 逐模型 UA：页内草稿（与 baseUrl / apiKey 同一层），确认时随 provider 一起落盘。 */
+	const updateModelUserAgent = (index: number, value: string) => {
+		const modelId = modelIdAt(index);
+		if (!modelId) return;
+		setModelOverrides((previous) => setModelUserAgentOverride(previous, modelId, value) ?? {});
+	};
+	const readModelUserAgent = (index: number) => getModelUserAgentOverride(modelOverrides, modelIdAt(index));
+
+	/**
+	 * 页内改模型 ID = 重命名同一行：把三份页内副本（UA / 默认档位 / 隐藏）一起搬到新 ID。
+	 * 不搬的话确认后这些设置会挂在旧 ID 上，而配置里已经没有那个模型了。
+	 */
+	const renameRowSettings = (index: number, value: unknown) => {
+		const previousId = modelIdAt(index);
+		const nextId = typeof value === "string" ? value : "";
+		if (!previousId || !nextId || previousId === nextId) return;
+		setModelOverrides((previous) => {
+			if (!(previousId in previous)) return previous;
+			const next = { ...previous };
+			next[nextId] = previous[previousId];
+			delete next[previousId];
+			return next;
+		});
+		setThinkingDefaults((previous) => {
+			if (!(previousId in previous)) return previous;
+			const next = { ...previous, [nextId]: previous[previousId] };
+			delete next[previousId];
+			return next;
+		});
+		setHiddenModelIds((previous) => previous.map((modelId) => (modelId === previousId ? nextId : modelId)));
+	};
+
+	/** 隐藏态回显：读页内副本（确认前不落盘）。 */
+	const readModelHidden = (index: number) => {
+		const modelId = modelIdAt(index);
+		return Boolean(modelId) && hiddenModelIds.includes(modelId);
+	};
+
+	/** 隐藏模型：只改页内副本，点保存才写 AppSettings.hiddenModels（与卡片眼睛按钮的差别：卡片是即时）。 */
+	const toggleModelHidden = (index: number) => {
+		const modelId = modelIdAt(index);
+		if (!modelId) return;
+		setHiddenModelIds((previous) => (previous.includes(modelId) ? previous.filter((id) => id !== modelId) : [...previous, modelId]));
+	};
+
+	/** 每模型默认档位：只改页内副本，点保存才写 settings.json 的 modelThinkingLevels。 */
+	const updateModelThinkingDefault = (index: number, level: string) => {
+		const modelId = modelIdAt(index);
+		if (!modelId) return;
+		setThinkingDefaults((previous) => {
+			const next = { ...previous };
+			const trimmed = level.trim();
+			if (trimmed) next[modelId] = trimmed;
+			else delete next[modelId];
+			return next;
+		});
+	};
+	const readModelThinkingDefault = (index: number) => {
+		const modelId = modelIdAt(index);
+		return modelId ? (thinkingDefaults[modelId] ?? "") : "";
 	};
 
 	/** 统一组装当前页草稿，供页内按钮与宿主标题栏保存共用，避免两条保存路径状态不一致。 */
@@ -295,8 +414,13 @@ export function AddProviderDialog(props: {
 			userAgent: userAgent.trim(),
 			compat,
 			models,
+			modelOverrides,
+			// 页内草稿的绝对快照，宿主按最终名字替换式落盘（模型被删掉的设置随之消失）。
+			// 宿主没给读取入口（settings 未加载 / 不提供隐藏列表）时不带这两项——不带 = 别动。
+			...(props.getModelThinkingLevelDefault ? { modelThinkingLevelDefaults: thinkingDefaults } : {}),
+			...(props.hiddenModels ? { hiddenModelIds } : {}),
 		});
-	}, [api, apiKey, baseUrl, canConfirm, compat, models, props.onConfirm, trimmedName, userAgent]);
+	}, [api, apiKey, baseUrl, canConfirm, compat, hiddenModelIds, modelOverrides, models, props.getModelThinkingLevelDefault, props.hiddenModels, props.onConfirm, thinkingDefaults, trimmedName, userAgent]);
 
 	// 保存按钮在 SettingsModal 标题栏，表单页自身不可直接接收点击；
 	// 通过父级注入的入口复用同一份草稿，确保标题栏保存不会绕过页内 state。
@@ -375,7 +499,7 @@ export function AddProviderDialog(props: {
 								</span>
 							)}
 						</div>
-						{/* 与展开卡片同款工具组：手动添加 + 获取模型 + 批量删除/取消 + 删除选中 */}
+						{/* 与展开卡片同款工具组：手动添加 + 获取模型 + 批量删除/取消 + 删除选中 + 全选/反选/清除 */}
 						<div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
 							<Button type="button" variant="outline" size="sm" className="h-7" onClick={handleAddModel}>
 								{t("config.addModelManual")}
@@ -388,6 +512,20 @@ export function AddProviderDialog(props: {
 								{modelBatchMode ? <X className="size-3.5" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
 								{modelBatchMode ? t("common.cancel") : t("common.deleteBatch")}
 							</Button>
+							{/* 与卡片同款批量工具：全选 / 反选 / 清除选择（只看勾选，不退出批量模式） */}
+							{modelBatchMode && (
+								<>
+									<Button type="button" variant="ghost" size="sm" className="h-7" disabled={models.length === 0} onClick={() => setSelectedModelIndexes(selectAllModelIndexes(models.length))}>
+										{t("common.selectAll")}
+									</Button>
+									<Button type="button" variant="ghost" size="sm" className="h-7" disabled={models.length === 0} onClick={() => setSelectedModelIndexes(invertModelIndexes(selectedModelIndexes, models.length))}>
+										{t("common.invertSelection")}
+									</Button>
+									<Button type="button" variant="ghost" size="sm" className="h-7" disabled={models.length === 0} onClick={() => setSelectedModelIndexes(new Set())}>
+										{t("common.clearSelection")}
+									</Button>
+								</>
+							)}
 							{modelBatchMode && (
 								<Button
 									type="button"
@@ -422,23 +560,25 @@ export function AddProviderDialog(props: {
 					{/* 已配置模型列表：与展开卡片同款模型表格（页内草稿管理，确认时随 provider 一起提交） */}
 					<ModelsTable
 						models={models}
-						onUpdateModel={(index, field, value) => setModels((prev) => prev.map((m, j) => (j === index ? { ...m, [field]: value } : m)))}
-						onUpdateModelThinkingLevel={(index, key, value) => {
-							// 思考级别写入模型草稿 thinkingLevelMap/reasoning，并同步 compat.supportsReasoningEffort
+						onUpdateModel={(index, field, value) => {
+							// 页内改模型 ID = 重命名同一行：先把三份页内副本搬到新 ID（见 renameRowSettings）
+							if (field === "id") renameRowSettings(index, value);
+							setModels((prev) => prev.map((m, j) => (j === index ? { ...m, [field]: value } : m)));
+						}}
+						onUpdateModelThinkingLevel={(index, level, enabled) => {
+							// 思考档位勾选写入模型草稿 thinkingLevelMap/reasoning，并同步 compat.supportsReasoningEffort
 							// （与 ConfigModal 的 handleUpdateModelThinkingLevel 语义一致）
 							setModels((prev) =>
 								prev.map((m, j) => {
 									if (j !== index) return m;
-									const nextMap = { ...(m.thinkingLevelMap ?? {}) };
-									if (value) nextMap[key] = value;
-									else delete nextMap[key];
-									const next = { ...m, reasoning: value ? true : m.reasoning };
-									if (Object.keys(nextMap).length > 0) next.thinkingLevelMap = nextMap;
+									const nextMap = withModelThinkingLevelEnabled(m.thinkingLevelMap, level, enabled);
+									const next = { ...m, reasoning: enabled ? true : m.reasoning };
+									if (nextMap) next.thinkingLevelMap = nextMap;
 									else delete next.thinkingLevelMap;
 									return next;
 								}),
 							);
-							if (value) {
+							if (enabled) {
 								setCompat((prev) => ({ ...prev, supportsReasoningEffort: true }));
 							}
 						}}
@@ -446,6 +586,28 @@ export function AddProviderDialog(props: {
 							clearModelBatch();
 							setModels((prev) => prev.filter((_, j) => j !== index));
 						}}
+						// 与卡片对齐：上移/下移直接改页内草稿顺序（草稿顺序就是保存后的模型顺序）
+						onMoveModel={(index, direction) => {
+							setModels((prev) => {
+								const targetIndex = direction === "up" ? index - 1 : index + 1;
+								if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+								const next = [...prev];
+								const [moved] = next.splice(index, 1);
+								next.splice(targetIndex, 0, moved);
+								return next;
+							});
+						}}
+						// 逐模型设置一律按 modelId（不是行下标）定位——页内模型草稿可增删/重排，
+						// 下标与已保存数组不再对应，按下标会配错模型。
+						onHideModel={props.hiddenModels ? toggleModelHidden : undefined}
+						getModelHidden={props.hiddenModels ? readModelHidden : undefined}
+						onUpdateModelUserAgent={updateModelUserAgent}
+						getModelUserAgentOverride={readModelUserAgent}
+						onUpdateModelThinkingLevelDefault={props.getModelThinkingLevelDefault ? updateModelThinkingDefault : undefined}
+						getModelThinkingLevelDefault={props.getModelThinkingLevelDefault ? readModelThinkingDefault : undefined}
+						// Pi 探测只有已保存的 provider 才问得到；新增页显示「保存后由 Pi 探测」
+						getModelAvailableThinkingLevels={props.getModelAvailableThinkingLevels && scopedProviderName ? (index) => props.getModelAvailableThinkingLevels!(scopedProviderName, modelIdAt(index)) : undefined}
+						thinkingLevelsProbePending={scopedProviderName === ""}
 						onResetModel={handleResetModelToAdaptive}
 						resettingModelKey={resettingModelKey}
 						onBlurAutoFill={applyModelSpecAutoFill}

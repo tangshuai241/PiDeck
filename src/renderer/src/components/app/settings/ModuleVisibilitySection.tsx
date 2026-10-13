@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
 import { HIDEABLE_MODULE_IDS, isModuleHidden, toggleHiddenModule, type HideableModuleId } from "../../../../../shared/hiddenModules";
 import { t, type TranslationKey } from "../../../i18n";
-import { imageGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom } from "../../../atoms";
+import { imageGenConfigAtom, videoGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom } from "../../../atoms";
 import { useFeishuBridge } from "../../../hooks/useFeishuBridge";
 import { Badge } from "../../ui-shadcn/badge";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -25,9 +25,10 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	pet: SETTINGS_TAB_LABEL_KEYS.pet,
 	vision: SETTINGS_TAB_LABEL_KEYS.vision,
 	imagegen: SETTINGS_TAB_LABEL_KEYS.imagegen,
-	acp: SETTINGS_TAB_LABEL_KEYS.acp,
+	videogen: SETTINGS_TAB_LABEL_KEYS.videogen,
+
 	hostplugins: SETTINGS_TAB_LABEL_KEYS.hostplugins,
-	web: SETTINGS_TAB_LABEL_KEYS.web,
+
 	git: SETTINGS_TAB_LABEL_KEYS.git,
 	usage: SETTINGS_TAB_LABEL_KEYS.usage,
 	process: SETTINGS_TAB_LABEL_KEYS.process,
@@ -41,9 +42,10 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	pet: "settings.modules.petDesc",
 	vision: "settings.modules.visionDesc",
 	imagegen: "settings.modules.imagegenDesc",
-	acp: "settings.modules.acpDesc",
+	videogen: "settings.modules.videogenDesc",
+
 	hostplugins: "settings.modules.hostpluginsDesc",
-	web: "settings.modules.webDesc",
+
 	git: "settings.modules.gitDesc",
 	usage: "settings.modules.usageDesc",
 	process: "settings.modules.processDesc",
@@ -69,6 +71,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 	const hiddenModules = draft.hiddenModules ?? [];
 	const feishu = useFeishuBridge();
 	const imageGenConfig = useAtomValue(imageGenConfigAtom);
+	const videoGenConfig = useAtomValue(videoGenConfigAtom);
 	const sessionRecords = useAtomValue(sessionRecordsAtom);
 	const runtimeById = useAtomValue(sessionRuntimeByIdAtom);
 	// 会话目录里带 DSH 后端且进程未关闭的会话数：closed/detached 的不算「还在跑」
@@ -82,17 +85,19 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 				return dshActive ? "settings.modules.statusRunning" : null;
 			case "pet":
 				return draft.petEnabled ? "settings.modules.statusEnabled" : null;
-			case "web":
-				return draft.webServiceEnabled ? "settings.modules.statusEnabled" : null;
+
 			case "git":
 				return draft.enableGitManagement ? "settings.modules.statusEnabled" : null;
 			case "vision":
 				return visionEnabled ? "settings.modules.statusEnabled" : null;
 			case "imagegen":
 				return imageGenConfig.providers.length > 0 ? "settings.modules.statusConfigured" : null;
+			case "videogen":
+				// 与生图同口径：有配置过的供应商就标「已配置」（按需请求，无运行态）
+				return videoGenConfig.providers.length > 0 ? "settings.modules.statusConfigured" : null;
 			case "usage":
 			case "process":
-			case "acp":
+
 			case "hostplugins":
 			case "composerModes":
 				return null;

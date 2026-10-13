@@ -292,8 +292,6 @@ test("管道断裂但尚未 close 的窗口期写入不产生未捕获异常", a
 	}
 	const source = readFileSync("src/main/pi/PiRpcClient.ts", "utf8");
 	assert.match(source, /this\.stdin\.on\("error"/);
-	const acpSource = readFileSync("src/main/acp/AcpConnection.ts", "utf8");
-	assert.match(acpSource, /this\.stdin\.on\("error"/);
 });
 
 test("PiProcess 诊断里带上 Windows 启动通道与 cmd.exe 回退原因", async () => {

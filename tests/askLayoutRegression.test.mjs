@@ -12,7 +12,7 @@ const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8"
 const tailwind = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 const timelineStyles = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 const toolCards = readFileSync("src/renderer/src/components/session/ToolCallComponents.tsx", "utf8");
-const webTimeline = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
+
 const approvalCard = readFileSync("src/renderer/src/components/ui-shadcn/approval-card.tsx", "utf8");
 const securityCard = readFileSync("src/renderer/src/components/overlays/SecurityConfirmCard.tsx", "utf8");
 const planModeExt = readFileSync("resources/extensions/pi-deck-plan-mode.ts", "utf8");
@@ -27,8 +27,7 @@ test("Ask cards keep long content readable in every render path", () => {
 	assert.match(approvalCard, /<PromptTooltip\s+text=\{props\.title\}>/);
 	assert.match(toolCards, /whitespace-normal break-words font-mono text-chat-detail/);
 	assert.match(toolCards, /formatAskTitle\(item\.question/);
-	assert.match(webTimeline, /formatAskTitle\(props\.request\.title/);
-	assert.match(webTimeline, /flex-col items-start justify-center whitespace-normal/);
+
 	// Ask 的展开内容必须交给会话时间线滚动，卡片本身不能因固定高度裁掉步骤或说明。
 	assert.match(timelineStyles, /\.tool-card \{[\s\S]*?overflow: visible;/);
 });

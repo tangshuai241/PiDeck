@@ -252,6 +252,8 @@ export function deriveComposerAgentMode(input: { backend?: AgentBackend; localMo
 	const localMode = input.localMode;
 	// imagegen 是独立后端：会话为生图后端时恒为生图模式（无 LLM mode 概念）
 	if (input.backend === "imagegen") return "imagegen";
+	// videogen 同理：生视频后端恒为生视频模式（异步任务协议，无 LLM mode 概念）。
+	if (input.backend === "videogen") return "videogen";
 	// 遗留兼容：legacy 生图消息在 pi 会话上，localMode 仍可能是 imagegen，保留
 	if (localMode === "imagegen") return "imagegen";
 	// ACP 无隐藏 agentMessage 通道（plan/goal 的实现载体），恒普通模式；

@@ -120,7 +120,7 @@ export function VisionBridgeSettingsTab(props: {
 
 	return (
 		<div className="min-w-0">
-			<SettingsSection title={t("settings.vision.section")} description={t("settings.vision.sectionDesc")}>
+			<SettingsSection id="settings-section-vision-general" title={t("settings.vision.section")} description={t("settings.vision.sectionDesc")}>
 				{/* 总开关 */}
 				<SettingSwitchRow title={t("settings.vision.enabled")} description={t("settings.vision.enabledDesc")} checked={draft?.enabled ?? true} onChange={(checked) => updateDraft({ enabled: checked })} />
 
@@ -253,10 +253,10 @@ export function VisionBridgeSettingsTab(props: {
 			</SettingsSection>
 
 			{/* 配置文件位置说明：扩展与 PiDeck 共享 */}
-			<SettingsSection title={t("settings.vision.configFile")} description={<code className="break-all text-caption text-muted-foreground">{configDir ? configFilePath(configDir) : ""}</code>} />
+			<SettingsSection id="settings-section-vision-config-file" title={t("settings.vision.configFile")} description={<code className="break-all text-caption text-muted-foreground">{configDir ? configFilePath(configDir) : ""}</code>} />
 
 			{/* 运行记录诊断区：发一张图 → 回来刷新，即可确认视觉桥是否真的生效 */}
-			<SettingsSection title={t("settings.vision.logSection")} description={t("settings.vision.logSectionDesc")}>
+			<SettingsSection id="settings-section-vision-logs" title={t("settings.vision.logSection")} description={t("settings.vision.logSectionDesc")}>
 				<div className="flex items-center gap-2 px-0.5 pb-2">
 					<Button variant="outline" size="sm" onClick={loadLog}>
 						<RefreshCw size={12} aria-hidden />

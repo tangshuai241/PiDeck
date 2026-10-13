@@ -215,7 +215,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			{/* 环境 */}
 			{/* 开发设置 tab 不自动检测 pi：检测结果缓存在 settings.piInstall（打开时直接显示），
           只有用户手动点「检测环境」才重新 spawn 探测（曾因自动检测在打开设置时触发双弹窗）。 */}
-			<SettingsSection title={t("settings.environment")}>
+			<SettingsSection id="settings-section-dev-environment" title={t("settings.environment")}>
 				{/* Pi CLI 状态：安装检测 + 路径信息 + 重新检测 */}
 				<div className="setting-pi-status">
 					<div className="setting-pi-status-indicator">
@@ -411,7 +411,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			</SettingsSection>
 
 			{/* 版本与更新（electron-updater 快照驱动：检测/下载/安装状态一览，语义对齐 Netcatty 设置卡片） */}
-			<SettingsSection title={t("settings.sectionUpdates")}>
+			<SettingsSection id="settings-section-dev-updates" title={t("settings.sectionUpdates")}>
 				<AppUpdateCard
 					appVersion={props.appInfo.version}
 					platform={props.appInfo.platform}
@@ -434,7 +434,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 
 			{/* 数据环境（仅 dev 包）：当前数据模式 + 切换入口（改模式提示需重启） */}
 			{isDevChannel && dataEnvInfo && (
-				<SettingsSection title={t("settings.dataEnvSectionTitle")}>
+				<SettingsSection id="settings-section-dev-data-env" title={t("settings.dataEnvSectionTitle")}>
 					<SettingRow
 						anchor="dev-data-env-mode"
 						title={<span>{t("settings.dataEnvCurrentMode")}</span>}
@@ -454,7 +454,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			<CatalogSection updateSource={draft.updateSource} customUpdateSourceUrl={draft.customUpdateSourceUrl} />
 
 			{/* 运行 */}
-			<SettingsSection title={t("settings.sectionRuntime")}>
+			<SettingsSection id="settings-section-dev-runtime" title={t("settings.sectionRuntime")}>
 				<SettingRow
 					anchor="dev-rpc-timeout"
 					title={
@@ -510,7 +510,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			</SettingsSection>
 
 			{/* 调试 */}
-			<SettingsSection title={t("settings.debug")}>
+			<SettingsSection id="settings-section-dev-debug" title={t("settings.debug")}>
 				<SettingRow anchor="dev-restart-app" title={<span>{t("settings.restartApp")}</span>} description={t("settings.restartAppDesc")}>
 					<Button variant="secondary" onClick={props.onRestartApp}>
 						{t("settings.restartAppButton")}
@@ -550,9 +550,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			</SettingsSection>
 
 			{/* 隐私 */}
-			<SettingsSection title={t("settings.privacy")}>
-				<SettingSwitchRow anchor="dev-telemetry" title={t("settings.telemetry")} description={t("settings.telemetryDesc")} checked={draft.telemetryEnabled} onChange={(checked) => updateDraft({ telemetryEnabled: checked })} />
-			</SettingsSection>
+			<SettingsSection id="settings-section-dev-privacy" title={t("settings.privacy")}></SettingsSection>
 		</>
 	);
 });

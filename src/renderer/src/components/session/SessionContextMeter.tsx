@@ -20,10 +20,11 @@ import { formatPercent } from "./TimelineFormat";
  * 形态：14px 圆环（2px 描边，strokeDasharray 按占用比例填充，从 12 点方向起笔），
  * 28px 圆形点击区；点击弹出占用面板：
  * - 标题「上下文已用 45%」+ ~used/window 数字 + 4px 占用条；
- * - 两段占比图例「对话 / 系统 + 工具」：pi 不返回 prompt 构成，对话按会话文件
- *   消息字符 ÷ 4 估算（contextMessageTokens，主进程算好），系统+工具为反推值
- *   （contextTokens − 对话），缺估算数据时退化单段条（dsh 自身 breakdown 也是
- *   heuristic，缺失时回退成单段 total）；
+ * - 占用构成：三段（系统 / 工具 / 对话）。系统与工具是会话文件重放出的提示词装载
+ *   （pi）或 host 构成投影（DSH）的实测估算；对话优先取「总占用 − 系统 − 工具」
+ *   差值（同源上报的 prompt 就是三段之和，差值自动包含 thinking/图片等），无数据时
+ *   退回消息文本估算（contextMessageTokens，主进程算好）。两段都没有时退化成单段
+ *   总占用条（旧会话/无装载测量值）。
  * - 完整会话详情：复用会话头部 SessionStatus 的明细构建器（buildSessionStatusDetail），
  *   包含上下文/输入输出/缓存读写/命中率/费用，以及「最近一次回复」的性能组
  *   （TTFT 首字、总耗时、tps）——圆环面板与会话头部共用同一份明细，语义一致；

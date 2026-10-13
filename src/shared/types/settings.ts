@@ -22,13 +22,33 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
-/** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π（显式选择） */
-export type LogoStyle = "classic" | "pi-tui";
+/** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π；custom = 用户自备图片（logoCustomImage）。 */
+export type LogoStyle = "classic" | "pi-tui" | "custom";
 
-/** 解析 logo 风格：仅 "classic" 视为显式选择经典；其余（null/undefined/未知旧值）一律回落默认 pi-tui。主进程窗口图标与渲染层 UI 共用。 */
+/** 解析 logo 风格：仅已知枚举视为显式选择；其余（null/undefined/未知旧值）一律回落默认 pi-tui。主进程窗口图标与渲染层 UI 共用。 */
 export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
-	return value === "classic" ? "classic" : "pi-tui";
+	if (value === "classic" || value === "custom") return value;
+	return "pi-tui";
 }
+
+/** 应用显示名称的出厂值（品牌区、关于弹层同源）。 */
+export const APP_DISPLAY_NAME_DEFAULT = "PiDeck";
+/** 显示名称长度上限：品牌区是 18px 单行字标，再长会把项目分支名挤掉。 */
+export const APP_DISPLAY_NAME_MAX_LENGTH = 24;
+
+/**
+ * 解析应用显示名称：留空/纯空白/超长一律回落默认 PiDeck。
+ *
+ * 越界值回落而不是截断：名称是纯展示项，截断会产生「用户没写过的半截名字」这种更难理解的状态。
+ */
+export function resolveAppDisplayName(value: string | null | undefined): string {
+	const trimmed = typeof value === "string" ? value.trim() : "";
+	if (trimmed === "" || trimmed.length > APP_DISPLAY_NAME_MAX_LENGTH) return APP_DISPLAY_NAME_DEFAULT;
+	return trimmed;
+}
+
+/** 自定义 logo 图片（data URL）长度上限：设置文件要能随手备份/同步，base64 图片必须封顶（≈1.5MB）。 */
+export const CUSTOM_LOGO_DATA_URL_MAX_LENGTH = 1_500_000;
 export type AppLanguageMode = "system" | "zh-CN" | "zh-TW" | "en-US" | "pseudo";
 
 /**
@@ -135,8 +155,16 @@ export type AppSettings = {
 	accent: AppAccentMode;
 	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
 	themeSkin: AppSkinId;
-	/** Logo 风格：可选以兼容旧 settings.json，缺省按 classic 处理；启动画面经 localStorage 提前生效 */
+	/** Logo 风格：可选以兼容旧 settings.json，缺省按默认 pi-tui 处理；启动画面经 localStorage 提前生效 */
 	logoStyle?: LogoStyle;
+	/**
+	 * 自定义 logo 图片（data URL，仅 data:image/*）：logoStyle="custom" 时窗口/托盘图标与界面落点都用它。
+	 * 可选以兼容旧 settings.json；空串 = 未设置（各落点回落默认标）。内嵌进设置文件是刻意的——
+	 * 跨机器/备份/重置都不会丢引用，也无需为读图新增 IPC 通道。
+	 */
+	logoCustomImage?: string;
+	/** 应用显示名称（品牌区与「关于」弹层）：留空 = 默认 PiDeck，见 resolveAppDisplayName */
+	appDisplayName?: string;
 	/** 自定义主题：CSS 变量名 → 值（键不含 -- 前缀），叠加在内置皮肤之上 */
 	customThemeOverrides: Record<string, string>;
 	/**
@@ -220,6 +248,13 @@ export type AppSettings = {
 	 * 默认关闭：与通用 enableNotifications 解耦，用户可单独控制提问提醒，避免打扰。
 	 */
 	askNotificationEnabled: boolean;
+	/**
+	 * 仅失焦提醒：PiDeck 窗口有焦点（用户正在看）时不弹系统通知、不播提示音，只有窗口失焦时才提醒。
+	 * 默认关闭 = 只要会话有结果就提醒，与窗口是否在前台无关。
+	 * 门控范围：主进程系统通知（会话完成/Ask 提问，见 AgentManager 与 index.ts 定时任务通知）
+	 * + 提示音（主进程 SoundAlertService 判定后推 `sounds:play`）；应用内 toast 不受影响，它本来就只在窗口里可见。
+	 */
+	alertOnlyWhenUnfocused: boolean;
 	/** 激活 Agent 数量提醒（人文关怀）：激活数达到阈值时，启动时提示关闭空闲会话释放内存。默认开启。 */
 	agentCountReminderEnabled: boolean;
 	/**
@@ -357,7 +392,7 @@ export type AppSettings = {
 	chatContentWidthPct: number;
 	/**
 	 * 会话状态（待办 / 修改文件 / 子代理）显示位置：右侧边栏下半区或输入框上方，二选一。
-	 * 缺省 sidebar；解析见 shared/sessionStatusPlacement.ts。
+	 * 缺省 composer；解析见 shared/sessionStatusPlacement.ts。
 	 */
 	sessionStatusPlacement: SessionStatusPlacement;
 	/**
@@ -924,6 +959,8 @@ export function createDefaultAppSettings(): AppSettings {
 		accent: "default",
 		themeSkin: "classic-green",
 		logoStyle: "pi-tui",
+		logoCustomImage: "",
+		appDisplayName: "",
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,
@@ -957,10 +994,12 @@ export function createDefaultAppSettings(): AppSettings {
 		enableNotifications: true,
 		// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致（默认不打扰）
 		askNotificationEnabled: false,
+		// 仅失焦提醒默认关闭：与主进程 SettingsStore 默认一致（默认照常提醒，不看窗口焦点）
+		alertOnlyWhenUnfocused: false,
 		// 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
 		agentCountReminderEnabled: true,
 		// 公告通知默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不误关提醒
-		announcementNotificationEnabled: true,
+		announcementNotificationEnabled: false,
 		// toast 展示时长：与主进程 defaultSettings 同源（全局统一口径）
 		toastDurationMs: DEFAULT_TOAST_DURATION_MS,
 		// showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
@@ -986,7 +1025,7 @@ export function createDefaultAppSettings(): AppSettings {
 		wslEnabled: false,
 		wslDistro: "Ubuntu",
 		wslUser: "root",
-		telemetryEnabled: true,
+		telemetryEnabled: false,
 		webServiceEnabled: false,
 		webServiceHost: "0.0.0.0",
 		webServicePort: 8765,
@@ -996,7 +1035,7 @@ export function createDefaultAppSettings(): AppSettings {
 		workspaceContentOpenMode: "split",
 		contentMaxWidth: 1800,
 		chatContentWidthPct: 80,
-		sessionStatusPlacement: "sidebar",
+		sessionStatusPlacement: "composer",
 		navigationMode: "tabs",
 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 		maxEditorFileSizeMB: 5,

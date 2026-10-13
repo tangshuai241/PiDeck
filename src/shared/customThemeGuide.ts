@@ -71,6 +71,7 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 			`- Keys are full CSS variable names from the whitelist below; unknown keys are rejected.`,
 			`- Values must be static colors: \`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` or \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\` with numeric arguments only. No \`var()\`, no gradients, no \`url()\`.`,
 			`- At least one of light/dark must be non-empty; providing both is strongly recommended (missing tokens fall back to the built-in default look).`,
+			`- \`id\` must not be \`${DEMO_CUSTOM_THEME.id}\`: that id is reserved for the built-in demo theme (saving it is rejected).`,
 		].join("\n");
 	}
 	return [
@@ -95,7 +96,8 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 		`规则：`,
 		`- 键必须是下方白名单里的完整 CSS 变量名，未知键一律拒绝；`,
 		`- 值只能是静态颜色：\`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` 或 \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\`（纯数值参数）。不支持 \`var()\`、渐变、\`url()\`；`,
-		`- light/dark 至少一档非空；强烈建议两档都写全（缺失的 token 会回落到内置默认观感）。`,
+		`- light/dark 至少一档非空；强烈建议两档都写全（缺失的 token 会回落到内置默认观感）；`,
+		`- \`id\` 不能是 \`${DEMO_CUSTOM_THEME.id}\`：该 id 保留给内置示例（保存时会被拒绝）。`,
 	].join("\n");
 }
 

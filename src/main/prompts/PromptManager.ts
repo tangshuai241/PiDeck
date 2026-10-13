@@ -1,8 +1,11 @@
 import { shell } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, resolveProjectFileWritePath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
+
+/** 模板扫描只读文件头部该字节数：frontmatter 与首行描述都在头部，扫描不得全量读入超大 .md。 */
+const TEMPLATE_META_MAX_BYTES = 64 * 1024;
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import type { AppSettings, CreatePiPromptTemplateInput, PiPromptTemplateListResult, PiPromptTemplateSummary } from "../../shared/types";
@@ -233,6 +236,21 @@ export class PromptManager {
 		}
 	}
 
+	/** 只读文件头部用于模板元数据抽取（frontmatter / 首行描述）：
+	 *  扫描路径不得把整个模板文件读进内存——用户手工放入超大 .md 时，列表扫描会逐文件全量拉取（资源边界约束）。
+	 *  失败与空文件一律返回空串，与旧 readFile().catch("") 语义一致（扫描跳过，不报错）。 */
+	private async readFileHead(fullPath: string): Promise<string> {
+		const handle = await open(fullPath, "r").catch(() => null);
+		if (!handle) return "";
+		try {
+			const buf = Buffer.alloc(TEMPLATE_META_MAX_BYTES);
+			const { bytesRead } = await handle.read(buf, 0, TEMPLATE_META_MAX_BYTES, 0);
+			return buf.subarray(0, bytesRead).toString("utf8");
+		} finally {
+			await handle.close();
+		}
+	}
+
 	private validProjectPromptName(value: string): string {
 		const raw = value.trim().replace(/\.md$/i, "");
 		const normalized = this.normalizeName(raw);
@@ -260,7 +278,7 @@ export class PromptManager {
 			} catch {
 				continue;
 			}
-			const raw = await readFile(fullPath, "utf8").catch(() => "");
+			const raw = await this.readFileHead(fullPath);
 			if (!raw) continue;
 
 			const name = basename(entry, ".md");
@@ -340,7 +358,7 @@ export class PromptManager {
 			} catch {
 				continue;
 			}
-			const raw = await readFile(fullPath, "utf8").catch(() => "");
+			const raw = await this.readFileHead(fullPath);
 			if (!raw) continue;
 			const name = basename(entry.name, ".md");
 			const frontmatter = this.parseFrontmatter(raw);

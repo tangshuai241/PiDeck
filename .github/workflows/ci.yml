@@ -35,7 +35,7 @@ jobs:
         # main（AGENTS.md「CI 防漂移」承诺的实际执行点）。
         # 必须放在 Build 之前：npm run build 链会静默再生成清单，mask 已提交漂移；
         # check:xueprompts 已内联在 npm run build 脚本链里，不重复接入。
-        run: npm run check:announcements && npm run check:pi-ai-catalog && npm run check:extensions-manifest && npm run check:prompts-manifest && npm run check:skills-manifest
+        run: npm run check:pi-ai-catalog && npm run check:extensions-manifest && npm run check:prompts-manifest && npm run check:skills-manifest
 
       - name: Check formatting
         # biome 格式门禁（chore/formatter-baseline）：与上面的 check:* 同一职责——

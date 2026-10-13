@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type { AppSettings, PiInstallStatus, Project } from "../../../../shared/types";
 import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -18,23 +18,14 @@ export interface SettingsUpdaterDeps {
 	onProjectsChanged: (projects: Project[]) => void;
 	activeProjectId: string | undefined;
 	refreshProjectSessions: (projectId: string, silent?: boolean) => Promise<unknown>;
-	webServiceEnabled: boolean;
 }
 
 /**
- * 设置写入域：updateSettings（按 patch 字段路由 toast/联动动作）与 restartWebService。
- * webServiceChanging 状态由本 hook 持有——它只服务于写入/重启期间的按钮禁用态。
+ * 设置写入域：按 patch 字段路由保存提示和配置联动。
  */
-export function useSettingsUpdater({ showToast, piUpdate, onSettingsApplied, onProjectsChanged, activeProjectId, refreshProjectSessions, webServiceEnabled }: SettingsUpdaterDeps) {
-	const [webServiceChanging, setWebServiceChanging] = useState(false);
-
+export function useSettingsUpdater({ showToast, piUpdate, onSettingsApplied, onProjectsChanged, activeProjectId, refreshProjectSessions }: SettingsUpdaterDeps) {
 	const updateSettings = useCallback(
 		async (patch: Partial<AppSettings>) => {
-			const changesWebService = "webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch;
-			if (changesWebService) {
-				setWebServiceChanging(true);
-				showToast(patch.webServiceEnabled === false ? t("app.webStopping") : t("app.webApplying"));
-			}
 			try {
 				const next = await api.settings.update(patch);
 				onSettingsApplied(next);
@@ -50,9 +41,7 @@ export function useSettingsUpdater({ showToast, piUpdate, onSettingsApplied, onP
 				if ("sendShortcut" in patch) {
 					notice = t("app.sendShortcutSaved");
 				}
-				if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
-					notice = next.webServiceEnabled ? t("app.webServiceStarted", { port: next.webServicePort }) : t("app.webServiceStopped");
-				}
+
 				if ("useNativeTitleBar" in patch) {
 					notice = t("app.titleBarSaved");
 				}
@@ -90,25 +79,10 @@ export function useSettingsUpdater({ showToast, piUpdate, onSettingsApplied, onP
 				showToast(error instanceof Error ? error.message : String(error));
 				return false;
 			} finally {
-				if (changesWebService) setWebServiceChanging(false);
 			}
 		},
 		[showToast, piUpdate, onSettingsApplied, onProjectsChanged, activeProjectId, refreshProjectSessions],
 	);
 
-	const restartWebService = useCallback(async () => {
-		if (!webServiceEnabled || webServiceChanging) return;
-		setWebServiceChanging(true);
-		showToast(t("settings.webRestarting"));
-		try {
-			await api.settings.restartWebService();
-			showToast(t("settings.webRestarted"));
-		} catch (error) {
-			showToast(error instanceof Error ? error.message : String(error));
-		} finally {
-			setWebServiceChanging(false);
-		}
-	}, [showToast, webServiceEnabled, webServiceChanging]);
-
-	return { updateSettings, restartWebService, webServiceChanging };
+	return { updateSettings };
 }

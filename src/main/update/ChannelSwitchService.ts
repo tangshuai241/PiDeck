@@ -8,6 +8,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { once } from "node:events";
 import { join } from "node:path";
 import { getAppLogger } from "../logging/sharedLogger";
+import { compareVersions } from "../utils/versionCompare";
 import { RELEASES_URL, UPDATE_REPO, UPDATE_REPO_OWNER } from "./releaseRepo";
 import { inverseChannel, selectTargetRelease, toReleaseList } from "./releaseSelection";
 import type { ChannelSwitchSnapshot, TargetChannelRelease, UpdateChannel } from "../../shared/types/app";
@@ -26,6 +27,8 @@ export function toChannelSwitchErrorMessage(error: unknown): string {
 export interface ChannelSwitchServiceDeps {
 	/** 当前构建通道（编译期固定）：查询目标 = inverseChannel(当前通道)。 */
 	currentChannel: () => UpdateChannel;
+	/** 当前客户端版本（app.getVersion()）：目标通道最新版不高于它时判「已是最新」，不提供下载。 */
+	currentVersion: () => string;
 	/** 网络出口：主进程注入 Electron net.fetch（保持本模块无 electron import，单测可桩）。 */
 	netFetch: (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
 	/** 系统临时目录根（app.getPath("temp")）。 */
@@ -68,6 +71,8 @@ export class ChannelSwitchService {
 
 	/**
 	 * 查询反向通道最新发行物（规格 §3：stable 构建查 dev 预发布，dev 构建查 stable 正式）。
+	 * 版本守卫：目标最新版不高于当前版本（如正式版 0.9.0 高于 dev 0.8.0-beta.9）时推 up-to-date 快照，
+	 * 不提供下载入口；反向契约（beta 客户端升级同号正式版，0.8.0-beta.9 < 0.8.0）仍进 available。
 	 * 无匹配 / 网络失败：推 error 快照（附 RELEASES_URL 手动下载退化入口）并向上抛结构化错误。
 	 */
 	async queryTargetChannelLatest(): Promise<TargetChannelRelease> {
@@ -91,7 +96,12 @@ export class ChannelSwitchService {
 			if (!release) {
 				throw new Error(`目标通道（${target}）暂无可安装发行物`);
 			}
-			this.push({ phase: "available", target: release });
+			// 版本守卫：目标通道最新版不高于当前版本 → 已是最新，不提供下载（返回值契约不变，仍是目标最新 release）。
+			if (compareVersions(release.version, this.deps.currentVersion()) > 0) {
+				this.push({ phase: "available", target: release });
+			} else {
+				this.push({ phase: "up-to-date", targetChannel: target, currentVersion: this.deps.currentVersion() });
+			}
 			return release;
 		} catch (error) {
 			const message = toChannelSwitchErrorMessage(error);
