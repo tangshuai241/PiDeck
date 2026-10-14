@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "959c9cceabf767807399d9c23bbbc124f28e104bca614c1d9310fb18188a933a",
-  "fileCount": 31,
+  "bundleSha256": "9fdebee1332e7655224c19e636333326853adb77458f298b62d569f9bc778b23",
+  "fileCount": 61,
   "files": [
     {
       "name": "pi-deck-alignment-mode.ts",
@@ -18,6 +18,156 @@
       "name": "pi-deck-ask-question.ts",
       "sha256": "b6b604c09feccece07ac7307882876f2d0071190051cdf3d2d03cef47e2cfb00",
       "bytes": 13855
+    },
+    {
+      "name": "pi-deck-cloud-memory-capture-plan.ts",
+      "sha256": "745e411a4d740238eb7411b2c9c9bd577df0435acca3869f96bebfe5372d09b4",
+      "bytes": 24762
+    },
+    {
+      "name": "pi-deck-cloud-memory-capture-store.ts",
+      "sha256": "5f65a0d9e2b3a6daf366246f2d9bde9f0db70eee2d886b9275e7c87772be83e0",
+      "bytes": 12914
+    },
+    {
+      "name": "pi-deck-cloud-memory-capture.ts",
+      "sha256": "f6c5c40c88df969e0e31c4639b08f8d5e2ba1dc66b02f36011c1eb36016a3834",
+      "bytes": 9616
+    },
+    {
+      "name": "pi-deck-cloud-memory-config.ts",
+      "sha256": "a5c11b65189c2a8ba7f72aaacd83b9e1ef7abb934367b349b995e4992c10a214",
+      "bytes": 9992
+    },
+    {
+      "name": "pi-deck-cloud-memory-log.ts",
+      "sha256": "fdd7dd2a2007f927b51e603c93a367ef7493af67295a183af66b775c17233c86",
+      "bytes": 2319
+    },
+    {
+      "name": "pi-deck-cloud-memory-persona.ts",
+      "sha256": "722043e04bef52b48848ec330b12be4808827d116a007e606c73762138d1303e",
+      "bytes": 6294
+    },
+    {
+      "name": "pi-deck-cloud-memory-policy.ts",
+      "sha256": "39de3d0b44556c509df795410643d7b72ae4cd789ccfd39ea5bfd762299598e1",
+      "bytes": 31589
+    },
+    {
+      "name": "pi-deck-cloud-memory-response.ts",
+      "sha256": "e0b0c13abb79f9b5a57ea7227db673d1a310ec267da6d1f2b5a2443e1854a7e1",
+      "bytes": 21990
+    },
+    {
+      "name": "pi-deck-cloud-memory-runtime-config.ts",
+      "sha256": "fa1ef0f6c768588ac2ad3668239e0b99cb960911e5a93e431ce1ce5ceb2b19ca",
+      "bytes": 11535
+    },
+    {
+      "name": "pi-deck-cloud-memory-runtime.ts",
+      "sha256": "3fce312c15a554880b1e753b72fa8e0e41f33d2f18878e0738bdf298ff104534",
+      "bytes": 25688
+    },
+    {
+      "name": "pi-deck-cloud-memory-status.ts",
+      "sha256": "6e6b404135fe10639cd01557c28dcacbcdaebcc79147acf97af1e1d7c1a478e0",
+      "bytes": 6026
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-batch.ts",
+      "sha256": "a83f6e8cf1345b575bef98c84645de7637505d33e5724bfc1dc65995c783ef65",
+      "bytes": 3954
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-bridge.ts",
+      "sha256": "c613a5918c46ca9a3ba1cfd59f989f8cb128cec92dd05ec6e7ee1a796df1e65e",
+      "bytes": 4222
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-chunk-transport.ts",
+      "sha256": "ea37f51f3054bd4c4f4e45021555313519e8864b9d5a385e71f67fc252089fd6",
+      "bytes": 8289
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-identity.ts",
+      "sha256": "b7ae06241843af443975c35622ac26885f6b617ca6d74913193324914358984c",
+      "bytes": 14979
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-outbox-fs.ts",
+      "sha256": "266406f2da332e47cc0e91b501ece5c156a899b42a7c89a73e572c678e826d73",
+      "bytes": 9890
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-outbox.ts",
+      "sha256": "b082b746b08a960fd3692db2a7dec4c3751129b5427435bcf23bc02bf8f74ba7",
+      "bytes": 30462
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-auth.ts",
+      "sha256": "03366a478b63902852e2ef1aa87d7147b1b891d6290a19eaef2a962857c17227",
+      "bytes": 2969
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-chunk.ts",
+      "sha256": "97d23e145d2c6971f65cd67f7618456a32ce7eb9176ffcf92cc7591b94257ba0",
+      "bytes": 6825
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-delivery.ts",
+      "sha256": "d368fcf24d9992b0df047f8e5db1f30f14801f3f628f83a4d30dc024793f1ec1",
+      "bytes": 12750
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-host.ts",
+      "sha256": "f513a2c17cbc2a542da78618dd150f6965c059e424398c751e44807a0e6ac212",
+      "bytes": 5259
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-loop.ts",
+      "sha256": "86b5e2c7ca1bd304d3608154867035187f287995d4a3dc3c96050ddbc2a4cc3d",
+      "bytes": 13302
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-recover.ts",
+      "sha256": "de57b0d006aa1e494af276a23e26b7ed14c89ceb6869203a29dca4c26a37ed6b",
+      "bytes": 2872
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-scan.ts",
+      "sha256": "403b7c5817b0ada4b622af94fb6568346b43b30671d68a7e7560068a176636ca",
+      "bytes": 2467
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender-types.ts",
+      "sha256": "9e63f453df91b426f2cb83b1deda01280aec51a525fcb3c87e72f079c36a272b",
+      "bytes": 2963
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-sender.ts",
+      "sha256": "8cb43ac9d9c5a5f096869aa5884c8835a7d1c9bfb1ab05ccba1f313b952a9f02",
+      "bytes": 818
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-transport.ts",
+      "sha256": "9b721c3e320bc6a9ac544fe5d8ab3629710cd7d60de663ce6877ab1d479e2f86",
+      "bytes": 10555
+    },
+    {
+      "name": "pi-deck-cloud-memory-sync-types.ts",
+      "sha256": "519cb7973d715fc3306af812740a5e96e0e635f603f922a498892050d3f6ea0f",
+      "bytes": 12104
+    },
+    {
+      "name": "pi-deck-cloud-memory-tool-runner.ts",
+      "sha256": "acff189a1a291fc6612156478c81080ebb5443e0ff4464a1c6c72f596a859f8f",
+      "bytes": 13825
+    },
+    {
+      "name": "pi-deck-cloud-memory.ts",
+      "sha256": "7a37afa7c04324206d3769d410f3a8d066091e03dbe6eccdb0b3f9ec0461129c",
+      "bytes": 12903
     },
     {
       "name": "pi-deck-document-materials.ts",

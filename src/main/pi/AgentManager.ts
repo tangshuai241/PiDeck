@@ -124,6 +124,7 @@ import type { ProjectTrustChoice } from "./projectTrustGate";
 
 export type { ProjectTrustChoice };
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import { NATIVE_STATUS_CUSTOM_TYPE } from "../cloudMemory/cloudMemoryStatusProjection";
 
 /** 从 RPC 返回的未知 ask 记录中安全读取字段，避免批量答案转换扩散 any 强转。 */
 function readAskField(input: unknown, key: string): unknown {
@@ -560,12 +561,34 @@ export class AgentManager {
 	}
 
 	/**
+	 * 云端记忆原生状态 sink（main/index.ts 注入 CloudMemoryService.ingestNativeStatus 与 forgetNativeStatus）。
+	 * AgentManager 只做事件转发，不持有状态策略（投影/作用域/去重都在 cloudMemory domain）。
+	 */
+	setCloudMemoryStatusSink(sink: { ingest: (binding: { agentId: string; sessionId: string; deckSessionId: string; runtimeGeneration: number }, payload: unknown) => boolean; forget: (agentId: string) => void } | undefined): void {
+		this.cloudMemoryStatusSink = sink;
+	}
+
+	private cloudMemoryStatusSink?: { ingest: (binding: { agentId: string; sessionId: string; deckSessionId: string; runtimeGeneration: number }, payload: unknown) => boolean; forget: (agentId: string) => void };
+
+	/**
 	 * 开发诊断埋点。未开启时 sink 为空，recordTiming 直接返回。
 	 * 用来对照「点 pi 会话卡死」时 create / history.load 是否把主进程堵住。
 	 */
 	setDiagnosticsSink(sink: ((name: string, startedAt: number, detail?: Record<string, string | number | boolean | null>) => void) | undefined): void {
 		this.diagnosticsSink = sink;
 	}
+
+	/**
+	 * 云端记忆 spawn 档案提供者（由 main/index.ts 注入 CloudMemoryService.getSpawnProfile）。
+	 * 用 setter 而非构造参数：spawn 选项来源多，追加位置参数容易错位；
+	 * profile.identity 同时进 standby 指纹 —— 路径不变但账号/实例/开关变化时，
+	 * 池化进程必须作废（旧 runtime 不能悄悄换账号）。
+	 */
+	setCloudMemoryPathsProvider(provider: (() => { configPath: string; dataDir: string; identity: string } | undefined) | undefined): void {
+		this.cloudMemoryPathsProvider = provider;
+	}
+
+	private cloudMemoryPathsProvider?: () => { configPath: string; dataDir: string; identity: string } | undefined;
 
 	private diagnosticsSink?: (name: string, startedAt: number, detail?: Record<string, string | number | boolean | null>) => void;
 
@@ -588,6 +611,8 @@ export class AgentManager {
 		if (this.securityStore) {
 			void this.securityStore.ensureSnapshotWritten();
 		}
+		// 云端记忆投影：只取路径字段注入 env；identity 进指纹（见 computeStandbyFingerprintFor）
+		const cloudMemoryProfile = this.cloudMemoryPathsProvider?.();
 		return new PiProcess(cwd, settings, undefined, {
 			// GUI 扩展桥：注册本 agent 的端点会话，拿到注入用的 URL/token。
 			// 端点未就绪时返回 undefined → 不注入 → 桥静默不工作（fail-safe）。
@@ -607,6 +632,8 @@ export class AgentManager {
 			// 查询用与 securitySessionId 相同的会话 key，保证与 FeishuBridge 的 sessionId 索引一致。
 			feishuLinked: this.isFeishuSession?.(securitySessionKey ?? sessionPath) ?? false,
 			securitySnapshotPath: this.securityStore?.getSnapshotPath(),
+			// 云端记忆：显式注入 config/data 路径（未装配 service 时不注入，扩展按默认目录工作）
+			cloudMemoryPaths: cloudMemoryProfile ? { configPath: cloudMemoryProfile.configPath, dataDir: cloudMemoryProfile.dataDir } : undefined,
 			// 预检修复：全部 spawn 路径（create/reattach/withTemporarySession）都在 start() 内生效。
 			repairSessionFileBeforeStart: this.repairSessionFile,
 		});
@@ -1108,6 +1135,8 @@ export class AgentManager {
 			bridgeAvailable: bridge.ready,
 			bridgeUrl: bridge.ready ? String(bridge.listeningPort) : "",
 			autoSessionTitle: Boolean(settings.autoSessionTitle),
+			// 云端记忆身份属于「只能 spawn 时确定」的输入：账号/实例/开关变化即废弃池化进程
+			cloudMemoryIdentity: this.cloudMemoryPathsProvider?.()?.identity ?? "",
 		});
 	}
 
@@ -3620,6 +3649,8 @@ export class AgentManager {
 	 */
 	private clearAgentState(agentId: string) {
 		this.clearAlignmentState(agentId);
+		// 云端记忆原生状态随 runtime 生命周期清理：stop/restart/replace 后没有新鲜状态就是未知
+		this.cloudMemoryStatusSink?.forget(agentId);
 		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
 		this.liveStream.clearAll(agentId);
 		this.streamingAgents.delete(agentId);
@@ -4609,6 +4640,14 @@ export class AgentManager {
 		if (!isRecord(event)) return;
 		const typed = event;
 		const runtime = this.agents.get(agentId);
+		// 云端记忆状态：扩展用 display:false 的 custom message 经原生通道上报（不进入时间线），
+		// 宿主只在既有 message_end 上读 details，不新增通道、不读扩展文件。
+		if (typed.type === "message_end" && runtime && this.cloudMemoryStatusSink && (!sourceProcess || runtime.process === sourceProcess)) {
+			const message = typed.message;
+			if (isRecord(message) && message.role === "custom" && message.customType === NATIVE_STATUS_CUSTOM_TYPE) {
+				this.cloudMemoryStatusSink.ingest({ agentId, sessionId: runtime.tab.sessionId ?? "", deckSessionId: runtime.tab.deckSessionId ?? "", runtimeGeneration: runtime.tab.runtimeGeneration ?? 0 }, Reflect.get(message, "details"));
+			}
+		}
 		// Hidden custom messages do not pass through the timeline projector. Keep their
 		// native state separately and reject events from a replaced process/binding.
 		if (

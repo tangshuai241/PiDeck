@@ -31,6 +31,8 @@ export interface StandbyFingerprintInput {
 	bridgeAvailable: boolean;
 	bridgeUrl: string;
 	autoSessionTitle: boolean;
+	/** 云端记忆身份（账号/实例/启用/范围；与路径无关但同样只能在 spawn 时确定）。 */
+	cloudMemoryIdentity?: string;
 }
 
 export function computeStandbyFingerprint(input: StandbyFingerprintInput): string {
@@ -52,6 +54,7 @@ export function computeStandbyFingerprint(input: StandbyFingerprintInput): strin
 		bridgeAvailable: input.bridgeAvailable,
 		bridgeUrl: input.bridgeUrl,
 		autoSessionTitle: input.autoSessionTitle,
+		cloudMemoryIdentity: input.cloudMemoryIdentity ?? "",
 	};
 	return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }

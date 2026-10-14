@@ -958,6 +958,22 @@ export const ipcChannels = {
 	 */
 	imagegenReadImageBlob: "imagegen:read-image-blob",
 
+	// ===== 云端记忆连接（N04）：连接/登出/开关/人格缓存状态 =====
+	/** 读取连接与人格缓存状态（不含任何凭据；离线时返回缓存稿并标 stale） */
+	cloudMemoryGetStatus: "cloud-memory:get-status",
+	/** 连接云端账号：URL 白名单 → login → whoami 校验 → 原子保存（凭据加密落盘） */
+	cloudMemoryConnect: "cloud-memory:connect",
+	/** 登出：撤销本地会话并删除令牌与人格缓存（保留地址/账号便于再次登录） */
+	cloudMemoryLogout: "cloud-memory:logout",
+	/** 总开关：只在用户明确操作时改；同时登记/撤销内置扩展（新会话或重启运行时后生效） */
+	cloudMemorySetEnabled: "cloud-memory:set-enabled",
+	/** 归档范围开关（个人与项目可见消息） */
+	cloudMemorySetSyncEnabled: "cloud-memory:set-sync-enabled",
+	/** 按需刷新已确认人格版本（离线时保留缓存；不阻塞当前回答） */
+	cloudMemoryRefreshPersona: "cloud-memory:refresh-persona",
+	/** 连接/开关/人格缓存变化推送（主进程 → 渲染层，订阅式；渲染层收到后重拉状态） */
+	cloudMemoryStatusChanged: "cloud-memory:status-changed",
+
 	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
 	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
 	videogenSubmit: "videogen:submit",

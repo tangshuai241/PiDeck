@@ -26,6 +26,7 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	vision: SETTINGS_TAB_LABEL_KEYS.vision,
 	imagegen: SETTINGS_TAB_LABEL_KEYS.imagegen,
 	videogen: SETTINGS_TAB_LABEL_KEYS.videogen,
+	cloudmemory: SETTINGS_TAB_LABEL_KEYS.cloudmemory,
 
 	hostplugins: SETTINGS_TAB_LABEL_KEYS.hostplugins,
 
@@ -43,6 +44,7 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	vision: "settings.modules.visionDesc",
 	imagegen: "settings.modules.imagegenDesc",
 	videogen: "settings.modules.videogenDesc",
+	cloudmemory: "settings.modules.cloudmemoryDesc",
 
 	hostplugins: "settings.modules.hostpluginsDesc",
 
@@ -99,6 +101,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "process":
 
 			case "hostplugins":
+			case "cloudmemory":
 			case "composerModes":
 				return null;
 		}

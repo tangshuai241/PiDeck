@@ -375,6 +375,11 @@ import { directoryLabel, resolveRealPath } from "./document-work/documentWorkPat
 import { registerPasteFilesIpc } from "./ipc/pasteFilesIpc";
 import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
+import { registerCloudMemoryIpc } from "./ipc/cloudMemoryIpc";
+import { createCloudMemoryClient } from "./cloudMemory/cloudMemoryClient";
+import { resolveCloudMemoryPaths, CLOUD_MEMORY_EXTENSION_ENTRY } from "./cloudMemory/cloudMemoryPaths";
+import { CloudMemoryService } from "./cloudMemory/CloudMemoryService";
+import { CloudMemoryStore } from "./cloudMemory/cloudMemoryStore";
 import { registerImageGenIpc } from "./ipc/imagegenIpc";
 import { ImageGenService } from "./imagegen/ImageGenService";
 import { ImageSessionStore } from "./imagegen/ImageSessionStore";
@@ -490,6 +495,8 @@ let minimaxSessionImporter: MinimaxSessionImporter;
 let directorySessionImporter: DirectorySessionImporter;
 let settingsStore: SettingsStore;
 let securityStore: SecurityStore;
+/** 云端记忆（N04）：连接/凭据/人格缓存；spawn 时以显式 env 注入配置路径。 */
+let cloudMemoryService: CloudMemoryService | undefined;
 let worktreeService: WorktreeService;
 let gitService: GitService;
 /** refs 变化监听：面板订阅 push/commit/fetch，主进程推送后角标秒级跟平（轮询仍作兜底） */
@@ -2773,6 +2780,39 @@ function registerIpc() {
 		log: (message, ...args) => appLogger.info("vision", message, ...args),
 	});
 
+	// 云端记忆连接（N04）：凭据加密落盘、人格缓存与设置投影。
+	// 路径全部落在 userData/cloud-memory/（启动/设置数据），不写全局 process.env；
+	// spawn 时由 PiProcess 把 config/data 路径显式注入子进程（含 WSL 转换）。
+	const cloudMemoryPaths = resolveCloudMemoryPaths(app.getPath("userData"));
+	const cloudMemoryLog = (message: string, details?: Record<string, unknown>) => void appLogger.info("cloud-memory", message, details);
+	cloudMemoryService = new CloudMemoryService({
+		paths: cloudMemoryPaths,
+		store: new CloudMemoryStore({
+			filePath: cloudMemoryPaths.connectionFile,
+			isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+			protect: (plainText) => safeStorage.encryptString(plainText),
+			unprotect: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted)),
+			log: cloudMemoryLog,
+		}),
+		client: createCloudMemoryClient({ fetchImpl: (url, init) => fetch(url, init), timeoutMs: 10_000 }),
+		isPiExtensionEnabled: () => (settingsStore.get().enabledBuiltInExtensions ?? []).includes(CLOUD_MEMORY_EXTENSION_ENTRY),
+		// 唯一自动改设置的入口：只在用户在设置页明确开关时登记/撤销默认关闭的内置扩展。
+		setPiExtensionEnabled: async (enabled) => {
+			const current = settingsStore.get().enabledBuiltInExtensions ?? [];
+			const has = current.includes(CLOUD_MEMORY_EXTENSION_ENTRY);
+			if (has === enabled) return;
+			const next = enabled ? [...current, CLOUD_MEMORY_EXTENSION_ENTRY] : current.filter((name) => name !== CLOUD_MEMORY_EXTENSION_ENTRY);
+			await settingsStore.update({ enabledBuiltInExtensions: next });
+		},
+		// 可见状态变化推送：不给渲染层第二条事实通道，只通知「重拉一次」
+		onStatusChanged: () => {
+			if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.cloudMemoryStatusChanged);
+		},
+		log: cloudMemoryLog,
+	});
+	void cloudMemoryService.initialize().catch(() => undefined);
+	registerCloudMemoryIpc({ ipc: ipcMain, service: cloudMemoryService, log: cloudMemoryLog });
+
 	const whisperRuntimeRoot = join(app.getPath("userData"), "voice-runtime");
 	const whisperRuntimeManager = new WhisperRuntimeManager({
 		platform: process.platform,
@@ -4116,8 +4156,18 @@ app
 				}
 			},
 		);
+		// 云端记忆投影路径：spawn 时显式注入 PIDECK_CLOUD_MEMORY_CONFIG / _DATA_DIR（WSL 不注入），
+		// provider 进 standby 指纹——账号/实例/开关变化即废弃池化进程，避免新旧进程拿到不同投影。
+		agentManager.setCloudMemoryPathsProvider(() => cloudMemoryService?.getSpawnProfile());
+		// 原生 RPC 状态：extension 经 custom message（display:false）上报，宿主在既有 message_end 上转发
+		agentManager.setCloudMemoryStatusSink({
+			ingest: (binding, payload) => cloudMemoryService?.ingestNativeStatus(binding, payload) ?? false,
+			forget: (agentId) => cloudMemoryService?.forgetNativeStatus(agentId),
+		});
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+		// 云端记忆：丢弃在飞请求的迟到结果（不阻塞退出）
+		quitCleanup.register("cloud-memory", () => cloudMemoryService?.dispose());
 
 		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
 		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。

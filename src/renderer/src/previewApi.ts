@@ -7,6 +7,7 @@ import { ACP_TOOL_PRESETS } from "../../shared/acpToolPresets";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
 import type { ResourceImportKind } from "../../shared/types/resourceImport";
 import type { ReplyActionRule } from "../../shared/types/replyActions";
+import type { CloudMemoryStatus } from "../../shared/types/cloudMemory";
 import { t } from "./i18n";
 
 const now = Date.now();
@@ -1919,5 +1920,39 @@ export function createPreviewApi(): PiDesktopApi {
 			getState: async () => ({ enabled: false, sessionOverrides: {} }),
 			setState: async () => ({ enabled: false, sessionOverrides: {} }),
 		},
+		// 预览/演示态没有主进程连接域：状态报告「未配置」而不是伪造已连接
+		cloudMemory: {
+			getStatus: async () => ({ ok: true as const, status: previewCloudMemoryStatus() }),
+			connect: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),
+			logout: async () => ({ ok: true as const, status: previewCloudMemoryStatus() }),
+			setEnabled: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),
+			setSyncEnabled: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),
+			refreshPersona: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),
+			onStatusChanged: () => () => {},
+		},
 	};
+
+	/** 预览态云端记忆状态：全部路径为空字符串，不指向真实 userData。 */
+	function previewCloudMemoryStatus(): CloudMemoryStatus {
+		return {
+			enabled: false,
+			state: "notConfigured",
+			baseUrl: "",
+			account: null,
+			cloudInstanceId: null,
+			syncMode: "personal",
+			syncEnabled: false,
+			rememberSignIn: false,
+			credentialStored: false,
+			secureStorageAvailable: false,
+			lastError: null,
+			lastConnectedAt: null,
+			lastPersonaFetchAt: null,
+			extensionEnabled: false,
+			restartRequired: false,
+			persona: null,
+			native: null,
+			paths: { dataDir: "", configFile: "", authFile: "", logFile: "", personaCacheFile: "" },
+		};
+	}
 }

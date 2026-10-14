@@ -34,6 +34,7 @@ export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "vision" },
 	{ id: "imagegen" },
 	{ id: "videogen" },
+	{ id: "cloudmemory" },
 
 	{ id: "hostplugins" },
 
@@ -77,6 +78,7 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
 	videogen: "settings.tabs.videogen",
+	cloudmemory: "settings.tabs.cloudmemory",
 
 	hostplugins: "settings.tabs.hostplugins",
 };
@@ -105,6 +107,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	vision: ["视觉", "图片识别", "视觉桥", "vision", "multimodal"],
 	imagegen: ["生图", "画图", "图片生成", "imagegen", "image"],
 	videogen: ["生视频", "视频生成", "videogen", "video"],
+	cloudmemory: ["云端记忆", "记忆", "人格", "云端连接", "memory", "persona", "cloud"],
 
 	hostplugins: ["插件", "宿主插件", "工作台插件", "plugin", "host plugin", "扩展安装", "pideck 插件"],
 };

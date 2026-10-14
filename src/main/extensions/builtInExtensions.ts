@@ -36,6 +36,8 @@ export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-ask-question.ts",
 	"pi-deck-goal-mode.ts",
 	"pi-deck-model-trace.ts",
+	// 云端个人记忆先观察耗时；只有用户显式开启并提供私有连接配置才读取。
+	"pi-deck-cloud-memory.ts",
 	"pi-deck-nul-redirect-fix.ts",
 	"pi-deck-plan-mode.ts",
 	"pi-deck-alignment-mode.ts",
@@ -63,7 +65,7 @@ const ALL_BUILT_IN_EXTENSIONS = [...BUILT_IN_EXTENSIONS, ...INTERNAL_BUILT_IN_EX
  * 注意：面板（ext-points）依赖桥挂出的 ctx.ui.gui，单独开启面板而桥关闭时
  * 面板会降级（读不到 GUI 落点），不报错。
  */
-export const DEFAULT_DISABLED_BUILT_IN_EXTENSIONS = ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"] as const;
+export const DEFAULT_DISABLED_BUILT_IN_EXTENSIONS = ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts", "pi-deck-cloud-memory.ts"] as const;
 
 /** 是否为默认关闭的内置扩展（opt-in 集合成员）。 */
 export function isDefaultDisabledBuiltInExtension(name: string): boolean {
@@ -183,7 +185,7 @@ export function resolveBuiltInExtensionPath(extensionName: string, roots: BuiltI
 	}
 	// TPA 的对齐和文稿协议由当前应用实现持有；上游覆盖层不能替换这些入口。
 	// 入口从随包目录加载，其相对 import 的状态、类型和材料模块也随之固定。
-	if (name === "pi-deck-alignment-mode.ts" || name === "pi-deck-document-work.ts" || name === "pi-deck-document-materials.ts") {
+	if (name === "pi-deck-alignment-mode.ts" || name === "pi-deck-document-work.ts" || name === "pi-deck-document-materials.ts" || name === "pi-deck-cloud-memory.ts") {
 		return join(resolveBuiltInExtensionsDir(roots), name);
 	}
 	// 覆盖层优先：热更新写入的版本必须真正参与 -e 注入，否则「更新成功」只是自欺。

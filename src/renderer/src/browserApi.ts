@@ -368,5 +368,12 @@ export function createBrowserApi(): PiDesktopApi {
 				webServiceEnabled: true,
 			}),
 		},
+		// 局域网 Web 端没有主进程凭据域：云端连接一律声明为不可用，不能假装已连接。
+		cloudMemory: {
+			...base.cloudMemory,
+			connect: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "unavailable in browser" } }),
+			setEnabled: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "unavailable in browser" } }),
+			setSyncEnabled: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "unavailable in browser" } }),
+		},
 	};
 }

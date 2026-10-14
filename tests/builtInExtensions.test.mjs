@@ -50,7 +50,9 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
 		// Alignment is an entry point; its state parser must be packaged but never injected as an extension.
-		assert.equal(BUILT_IN_EXTENSIONS.length, 18);
+		assert.equal(BUILT_IN_EXTENSIONS.length, 19);
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-cloud-memory.ts"));
+		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-cloud-memory-policy.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-mode.ts"));
 		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-state.ts"));
 		// 文稿入口也是入口点；它的镜像类型文件必须随包分发，但不作为独立扩展注入。
@@ -101,7 +103,7 @@ test("hidden built-ins (gui-bridge/ext-points) are never injected, not even when
 		assert.equal(JSON.stringify([...HIDDEN_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
 		assert.equal(isHiddenBuiltInExtension("pi-deck-ext-points.ts"), true);
 		assert.equal(isHiddenBuiltInExtension("pi-deck-ask-question.ts"), false);
-		assert.equal(JSON.stringify([...DEFAULT_DISABLED_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
+		assert.equal(JSON.stringify([...DEFAULT_DISABLED_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts", "pi-deck-cloud-memory.ts"]));
 		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-gui-bridge.ts"), true);
 		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-ask-question.ts"), false);
 	} finally {

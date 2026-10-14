@@ -13,6 +13,7 @@ import type { DataEnvChoiceFailure, DataEnvChoiceResult, DataEnvInfo, DataEnvMod
 import type { GitExecutableInfo } from "../shared/types/git";
 import type { DshRunnerNodeInfo, DshRunnerNodeInstallResult } from "../shared/types/dshRunnerNode";
 import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
+import type { CloudMemoryConnectInput, CloudMemoryConnectResult, CloudMemoryStatusResult } from "../shared/types/cloudMemory";
 import type { VideoGenConfigFile, VideoGenRequest, VideoGenSaveResult, VideoGenSubmitResult, VideoGenJobSnapshot } from "../shared/types/videogen";
 import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
@@ -1657,6 +1658,19 @@ const api = {
 		getState: () => ipcRenderer.invoke(ipcChannels.cuaGetState) as Promise<{ enabled: boolean; sessionOverrides: Record<string, boolean> }>,
 		/** 设置 CUA 开关。 */
 		setState: (patch: { enabled?: boolean; sessionOverride?: { sessionId: string; enabled: boolean | null } }) => ipcRenderer.invoke(ipcChannels.cuaSetState, patch) as Promise<{ enabled: boolean; sessionOverrides: Record<string, boolean> }>,
+	},
+	// ── 云端记忆（N04）：只暴露连接/状态/开关，绝不回传凭据 ──
+	cloudMemory: {
+		/** 连接与人格缓存状态（离线时 persona.stale = true）。 */
+		getStatus: () => ipcRenderer.invoke(ipcChannels.cloudMemoryGetStatus) as Promise<CloudMemoryStatusResult>,
+		/** 连接云端账号：密码只经主进程加密落盘，渲染层不保存。 */
+		connect: (input: CloudMemoryConnectInput) => ipcRenderer.invoke(ipcChannels.cloudMemoryConnect, input) as Promise<CloudMemoryConnectResult>,
+		logout: () => ipcRenderer.invoke(ipcChannels.cloudMemoryLogout) as Promise<CloudMemoryStatusResult>,
+		setEnabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.cloudMemorySetEnabled, enabled) as Promise<CloudMemoryStatusResult>,
+		setSyncEnabled: (syncEnabled: boolean) => ipcRenderer.invoke(ipcChannels.cloudMemorySetSyncEnabled, syncEnabled) as Promise<CloudMemoryStatusResult>,
+		refreshPersona: () => ipcRenderer.invoke(ipcChannels.cloudMemoryRefreshPersona) as Promise<CloudMemoryStatusResult>,
+		/** 状态变化推送（连接/开关/后台刷新完成）；返回退订函数，渲染层收到后重拉状态。 */
+		onStatusChanged: (callback: () => void) => subscribe(ipcChannels.cloudMemoryStatusChanged, callback),
 	},
 };
 

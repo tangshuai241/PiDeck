@@ -55,3 +55,4 @@ export * from "./types/piAuth";
 export * from "./types/quickMessages";
 export * from "./types/miniOverlay";
 export * from "./types/noticeHistory";
+export * from "./types/cloudMemory";

@@ -32,6 +32,16 @@ type PiProcessOptions = {
 	 */
 	resolveBuiltInExtensionPaths?: (settings?: PiProcessSettings, includeProjectResources?: boolean) => string[];
 	/**
+	 * 云端记忆投影路径（userData/cloud-memory/ 下的 config.json 与 data 目录）。
+	 * 注入 `PIDECK_CLOUD_MEMORY_CONFIG` / `PIDECK_CLOUD_MEMORY_DATA_DIR`：扩展按显式路径读取，
+	 * 不去猜用户目录。
+	 *
+	 * WSL 首版**不支持**：config JSON 内的 authFile/logFile/stateDir/personaCacheFile 是 Windows 路径，
+	 * distro 内无法解析；与其注入一份半残配置假称支持，不如不注入（扩展回「未配置」），
+	 * 普通 WSL 工作不受影响。支持 WSL 需要另写 Linux 侧投影（本期不做）。
+	 */
+	cloudMemoryPaths?: { configPath: string; dataDir: string };
+	/**
 	 * 安全策略快照路径（userData/security-policy.json）。
 	 * 注入 PIDECK_SECURITY_CONFIG 环境变量，pi-deck-security-gate 扩展据此加载规则。
 	 */
@@ -423,6 +433,14 @@ export class PiProcess extends EventEmitter {
 			}
 			if (this.options.securitySessionId) {
 				env.PIDECK_SESSION_ID = this.options.securitySessionId;
+			}
+			// 云端记忆：配置快照与数据目录是宿主写、扩展只读的启动数据；
+			// 路径必须显式注入（含 WSL 转换），扩展才能在不猜目录的前提下找到 config/auth/cache。
+			// 云端记忆：配置快照与数据目录是宿主写、扩展只读的启动数据；路径必须显式注入。
+			// WSL 不注入（首版不支持，见选项注释）：JSON 内部路径仍是 Windows 形式，不会假称可用。
+			if (this.options.cloudMemoryPaths && !command.startsWith("wsl://")) {
+				env.PIDECK_CLOUD_MEMORY_CONFIG = this.options.cloudMemoryPaths.configPath;
+				env.PIDECK_CLOUD_MEMORY_DATA_DIR = this.options.cloudMemoryPaths.dataDir;
 			}
 			// 飞书绑定会话：ask_question 换成禁用提示版（扩展读取此标记，纯标志位无需路径转换）
 			if (this.options.feishuLinked) {
