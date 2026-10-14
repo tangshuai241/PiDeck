@@ -62,7 +62,7 @@ export async function openSettings(window: Page) {
  */
 export async function openConfigPane(window: Page) {
 	const dialog = await openSettings(window);
-	await dialog.getByRole("tab", { name: /配置管理/ }).click();
+	await dialog.getByRole("tab", { name: /模型与工具/ }).click();
 	const pane = window.locator(".config-modal");
 	await expect(pane).toBeVisible({ timeout: 15_000 });
 	return pane;

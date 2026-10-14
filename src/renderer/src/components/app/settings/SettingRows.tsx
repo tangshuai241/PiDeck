@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ChevronsUpDown, X } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { t } from "../../../i18n";
@@ -14,15 +14,15 @@ export function DirtyMarker(props: { dirty: boolean; label: string }) {
 
 /**
  * 设置内容淡色框：包住一级标题下的二级内容行。
- * 四角圆弧、极淡底色（bg-muted 30%）+ 淡边框；行间分隔线由 SettingRow 自身提供。
+ * 四角圆弧、极淡底色 + 淡边框；行间分隔线由 SettingRow 自身提供。
  */
 export function SettingBox(props: { children: ReactNode }) {
-	return <div className="rounded-lg border border-border-subtle/70 bg-bg-muted/30 px-1 pb-1">{props.children}</div>;
+	return <div className="rounded-2xl bg-settings-surface px-5 [[data-settings-section]_&]:rounded-none [[data-settings-section]_&]:bg-transparent [[data-settings-section]_&]:px-0">{props.children}</div>;
 }
 
 /**
- * 设置行（UI 2.0 行式布局）：label 左 + 控件右（固定 260px 列），
- * 行间无分隔线（淡色框内由留白分区）。
+ * 设置行：宽容器为 label 左 + 控件右（260px 列），窄容器自动上下排列。
+ * 容器查询跟随设置面板实际宽度，避免桌面窄窗口仍挤成两列。
  *
  * - level=1：一级标题行（单行分区合并用，加粗加大、缩进更小）；
  * - level=2：普通行（标题略缩进，形成与一级的层级差）；
@@ -51,12 +51,14 @@ export function SettingRow(props: {
 }) {
 	const level = props.level ?? 2;
 	return (
-		<div id={props.anchor ? `settings-section-${props.anchor}` : undefined} className={cn("grid gap-6 border-t border-border-subtle/60 py-1.5 first:border-t-0", level === 1 ? "px-0.5" : "px-1", props.stacked ? "min-h-0 grid-cols-1 items-start" : "min-h-[54px] grid-cols-[minmax(0,1fr)_260px] items-center")}>
-			<span className="min-w-0">
-				<span className={cn("inline-flex items-center gap-1.5 text-foreground", level === 1 ? "text-body font-bold" : "text-control font-medium")}>{props.title}</span>
-				{props.description && <small className="mt-0.5 block text-caption leading-relaxed text-muted-foreground">{props.description}</small>}
-			</span>
-			<span className={cn("min-w-0", !props.stacked && (props.alignEnd ?? true) && "flex justify-end")}>{props.children}</span>
+		<div id={props.anchor ? `settings-section-${props.anchor}` : undefined} className="@container border-t border-border-subtle/50 first:border-t-0">
+			<div className={cn("grid grid-cols-1 gap-3 py-3.5 @2xl:gap-6", level === 1 ? "px-0.5" : "px-1", props.stacked ? "items-start" : "min-h-[64px] items-center @2xl:grid-cols-[minmax(0,1fr)_260px]")}>
+				<span className="min-w-0">
+					<span className={cn("inline-flex items-center gap-1.5 text-foreground", level === 1 ? "text-body font-bold" : "text-control font-medium")}>{props.title}</span>
+					{props.description && <small className="mt-0.5 block text-caption leading-relaxed text-muted-foreground">{props.description}</small>}
+				</span>
+				<div className={cn("min-w-0", !props.stacked && (props.alignEnd ?? true) && "flex @2xl:justify-end")}>{props.children}</div>
+			</div>
 		</div>
 	);
 }
@@ -116,19 +118,28 @@ export function SettingSwitchRow(props: {
 	anchor?: string;
 	onChange: (checked: boolean) => void;
 }) {
+	const labelId = useId();
+	const descriptionId = useId();
 	const dirtyLabel = props.dirtyLabel ?? (typeof props.title === "string" ? props.title : "");
 	return (
 		<SettingRow
 			anchor={props.anchor}
 			title={
 				<>
-					<span>{props.title}</span>
+					<span id={labelId}>{props.title}</span>
 					<DirtyMarker dirty={Boolean(props.dirty)} label={dirtyLabel} />
 				</>
 			}
-			description={props.description}
+			description={props.description ? <span id={descriptionId}>{props.description}</span> : undefined}
 		>
-			<Switch checked={props.checked} disabled={props.disabled} onCheckedChange={props.onChange} />
+			<Switch
+				aria-labelledby={labelId}
+				aria-describedby={props.description ? descriptionId : undefined}
+				checked={props.checked}
+				disabled={props.disabled}
+				onCheckedChange={props.onChange}
+				className="data-[size=default]:h-5 data-[size=default]:w-9 duration-180 [&_[data-slot=switch-thumb]]:duration-180 [&_[data-slot=switch-thumb][data-state=checked]]:translate-x-[18px] motion-reduce:transition-none motion-reduce:[&_[data-slot=switch-thumb]]:transition-none"
+			/>
 		</SettingRow>
 	);
 }

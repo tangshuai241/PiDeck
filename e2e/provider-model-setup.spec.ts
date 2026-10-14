@@ -13,7 +13,7 @@ test("供应商中文名可新建和重命名，窄窗添加/编辑表单不横�
 	const config = window.locator(".settings-modal");
 	if (!(await config.isVisible())) await window.getByRole("button", { name: /^设置/ }).click();
 	await expect(config).toBeVisible();
-	await config.getByRole("tab", { name: "配置管理", exact: true }).click();
+	await config.getByRole("tab", { name: "模型与工具", exact: true }).click();
 	await config.getByRole("tab", { name: "Pi 配置管理", exact: true }).click();
 	await config.getByRole("tab", { name: "模型", exact: true }).click();
 	await config.getByRole("button", { name: "+ 添加供应商", exact: true }).click();

@@ -168,7 +168,7 @@ test("background update downloads a verified local installer and becomes ready",
 	await settingsButton.click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
-	await modal.getByText("开发设置").click();
+	await modal.getByText("开发选项").click();
 	await expect(modal.getByText(`v${UPDATE_VERSION} 已下载，可重启安装。`)).toBeVisible();
 	await expect(modal.getByRole("button", { name: "重启并安装" })).toBeVisible();
 });

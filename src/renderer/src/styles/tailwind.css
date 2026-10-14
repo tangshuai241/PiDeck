@@ -42,6 +42,9 @@
  * 父级 padding 套不到时间线和 composer。 */
 
 @theme inline reference {
+  --color-settings-canvas: var(--color-settings-canvas);
+  --color-settings-surface: var(--color-settings-surface);
+  --color-settings-control: var(--color-settings-control);
   /* 应用域 token（旧 CSS 继续用） */
   --color-bg-app: var(--color-bg-app);
   --color-bg-panel: var(--color-bg-panel);
@@ -393,4 +396,16 @@
       transform: translateX(calc(-1 * var(--title-scroll-distance, 0px)));
     }
   }
+}
+
+/* Only the clipped pigment layer moves; the silhouette and surrounding UI stay fixed. */
+@keyframes theme-orb-flow {
+  0% { transform: rotate(0deg) scale(1.1); }
+  35% { transform: rotate(110deg) scale(1.22); }
+  70% { transform: rotate(245deg) scale(1.14); }
+  100% { transform: rotate(360deg) scale(1.1); }
+}
+@keyframes settings-content-enter {
+  from { opacity: 0.2; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
 }

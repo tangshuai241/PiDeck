@@ -1,6 +1,5 @@
 import { memo } from "react";
 import type { AppSettings } from "../../../../../shared/types";
-import type { AppSkinId } from "../../../../../shared/types/settings";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { SKIN_PRESETS } from "../../../themePresets";
@@ -16,8 +15,8 @@ import { BrandingSection } from "./BrandingSection";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { ComposerFeaturesSection } from "./ComposerFeaturesSection";
 import { CustomThemeSection } from "./CustomThemeSection";
-import { Check, Minus, Plus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Minus, Plus } from "lucide-react";
+import { AppearanceModePicker, AppearanceThemePicker } from "./AppearanceChoices";
 
 type AppearanceTabProps = {
 	draft: AppSettings;
@@ -39,12 +38,6 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
  */
 export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabProps) {
 	const { draft, updateDraft, isDirty } = props;
-	const themeOptions: SelectOption[] = [
-		{ value: "system", label: t("settings.themeSystem") },
-		{ value: "schedule", label: t("settings.themeSchedule") },
-		{ value: "light", label: t("settings.themeLight") },
-		{ value: "dark", label: t("settings.themeDark") },
-	];
 	// 主题色预设来自 themePresets.ts；外观主题选择器中每套主题自带推荐主色，
 	// 保留 ACCENT_PRESETS 仅供自定义主题参考（无独立主色下拉）。
 	const fontSizeOptions: SelectOption[] = [
@@ -69,29 +62,9 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 	};
 
 	return (
-		<>
+		<div className="@container">
 			{/* 主题与背景 */}
-			<SettingsSection id="settings-section-appearance-theme-background" title={t("settings.sectionThemeBackground")}>
-				<SettingRow
-					anchor="appearance-navigation-mode"
-					title={
-						<>
-							<span>{t("settings.navigationMode")}</span>
-							<DirtyMarker dirty={isDirty("navigationMode")} label={t("settings.navigationMode")} />
-						</>
-					}
-					description={t("settings.navigationModeDesc")}
-				>
-					<Select value={draft.navigationMode} onValueChange={(value) => updateDraft({ navigationMode: value as AppSettings["navigationMode"] })}>
-						<SelectTrigger className="w-40">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="tabs">{t("settings.navigationTabs")}</SelectItem>
-							<SelectItem value="simple">{t("settings.navigationSimple")}</SelectItem>
-						</SelectContent>
-					</Select>
-				</SettingRow>
+			<SettingsSection id="settings-section-appearance-theme-background" title={t("settings.sectionThemeBackground")} boxed={false}>
 				<SettingRow
 					title={
 						<>
@@ -99,23 +72,10 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 							<DirtyMarker dirty={isDirty("theme")} label={t("settings.theme")} />
 						</>
 					}
-					alignEnd={false}
+					stacked
 				>
-					<Select value={draft.theme} onValueChange={(value) => updateDraft({ theme: value as AppSettings["theme"] })}>
-						<SelectTrigger className="w-full">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{themeOptions.map((option) => (
-								<SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-									{option.label}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+					<AppearanceModePicker value={draft.theme} onPick={(theme) => updateDraft({ theme })} />
 				</SettingRow>
-				{/* Logo 风格 / 自定义 logo 图 / 应用显示名称：品牌区专属几行（含选图异步态），拆到 BrandingSection 控制本文件体量 */}
-				<BrandingSection draft={draft} updateDraft={updateDraft} isDirty={isDirty} />
 				{draft.theme === "schedule" && (
 					<SettingRow
 						title={
@@ -156,19 +116,20 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						}}
 					/>
 				</SettingRow>
-				{/* 自定义主题包（userData/custom-themes/）：卡片列表 + JSON 编辑器 + AI 指南 */}
-				<SettingRow
-					title={
-						<>
-							<span>{t("settings.sectionCustomThemes")}</span>
-							<DirtyMarker dirty={isDirty("customTheme") || (isDirty("themeSkin") && draft.themeSkin === "custom")} label={t("settings.sectionCustomThemes")} />
-						</>
-					}
-					description={t("settings.customThemesDesc")}
-					stacked
-				>
-					<CustomThemeSection draft={draft} updateDraft={updateDraft} />
-				</SettingRow>
+			</SettingsSection>
+			<SettingsSection
+				title={
+					<span className="inline-flex items-center gap-1.5">
+						{t("settings.sectionCustomThemes")}
+						<DirtyMarker dirty={isDirty("customTheme") || (isDirty("themeSkin") && draft.themeSkin === "custom")} label={t("settings.sectionCustomThemes")} />
+					</span>
+				}
+				description={t("settings.customThemesDesc")}
+				boxed={false}
+			>
+				<CustomThemeSection draft={draft} updateDraft={updateDraft} />
+			</SettingsSection>
+			<SettingsSection title={t("settings.backgroundImage")}>
 				{/* 背景图片：pideck-bg:// 协议加载 userData/backgrounds/ 下文件 */}
 				<SettingRow
 					title={
@@ -484,6 +445,28 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 
 			{/* 窗口样式 */}
 			<SettingsSection id="settings-section-appearance-window-style" title={t("settings.sectionWindowStyle")}>
+				<SettingRow
+					anchor="appearance-navigation-mode"
+					title={
+						<>
+							<span>{t("settings.navigationMode")}</span>
+							<DirtyMarker dirty={isDirty("navigationMode")} label={t("settings.navigationMode")} />
+						</>
+					}
+					description={t("settings.navigationModeDesc")}
+				>
+					<Select value={draft.navigationMode} onValueChange={(value) => updateDraft({ navigationMode: value as AppSettings["navigationMode"] })}>
+						<SelectTrigger className="w-40">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="tabs">{t("settings.navigationTabs")}</SelectItem>
+							<SelectItem value="simple">{t("settings.navigationSimple")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</SettingRow>
+				{/* Logo 风格 / 自定义 logo 图 / 应用显示名称：品牌区专属几行（含选图异步态），拆到 BrandingSection 控制本文件体量 */}
+				<BrandingSection draft={draft} updateDraft={updateDraft} isDirty={isDirty} />
 				{/* 会话 Tab 宽度上限：仅封顶不设最小宽，Tab 仍按内容收缩；拖动时先本地夹取预览，保存时主进程再归一化。 */}
 				<SettingRow anchor="appearance-session-tab-width" title={<span>{t("settings.sessionTabMaxWidth")}</span>} description={t("settings.sessionTabMaxWidthDesc")}>
 					<div className="flex w-full items-center gap-2">
@@ -508,59 +491,6 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			<ModuleVisibilitySection draft={draft} updateDraft={updateDraft} isDirty={isDirty} visionEnabled={props.visionEnabled} />
 			{/* 输入框功能显示：与功能模块同域（按需收起入口），紧跟其后成组 */}
 			<ComposerFeaturesSection draft={draft} updateDraft={updateDraft} isDirty={isDirty} />
-		</>
-	);
-});
-
-/**
- * 外观主题选择器：每个主题一张色板预览卡（背景/侧栏/面板/主色/边框五色块），
- * 选中态用主色描边 + 勾选标记。选择即联动写入 themeSkin + 主题自带主色 accent
- * （值更新在父级 AppearanceTab 的 onPick 中完成）。
- * custom 主题没有内置色板（由 customThemeOverrides 驱动），仅当当前值为 custom 时
- * 显示一个占位卡，避免选中状态丢失；自定义覆盖的高级编辑不在本组件范围。
- */
-const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value: AppSkinId; onPick: (id: AppSkinId) => void }) {
-	const { value, onPick } = props;
-	return (
-		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-5" role="radiogroup" aria-label={t("settings.accent")}>
-			{SKIN_PRESETS.map((preset) => {
-				const selected = preset.id === value;
-				const surface = preset.previewSurfaces;
-				return (
-					<button
-						key={preset.id}
-						type="button"
-						role="radio"
-						aria-checked={selected}
-						title={t(preset.descKey)}
-						onClick={() => onPick(preset.id)}
-						className={cn("group relative flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors duration-fast", selected ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]" : "border-border-subtle bg-bg-panel hover:border-border-default")}
-					>
-						{/* 色板迷你预览：左=侧栏，右=应用区（边框线/主色/面板块） */}
-						<span className="flex h-12 w-full overflow-hidden rounded-sm border border-border-subtle" style={{ background: surface.background }} aria-hidden="true">
-							<span className="h-full w-[32%] border-r border-border-subtle" style={{ background: surface.sidebar }} />
-							<span className="flex-1 p-1.5">
-								<span className="mb-1 block h-1.5 w-3/4 rounded-sm" style={{ background: surface.border }} />
-								<span className="block h-1.5 w-1/2 rounded-sm" style={{ background: surface.accent }} />
-								<span
-									className="mt-1 block h-1.5 w-2/3 rounded-sm"
-									style={{
-										background: surface.panel,
-										border: `1px solid ${surface.border}`,
-									}}
-								/>
-							</span>
-						</span>
-						<span className="text-control leading-tight text-foreground">{t(preset.labelKey)}</span>
-						{selected && <Check className="absolute right-1.5 top-1.5 size-3.5 text-[var(--color-accent)]" strokeWidth={3} aria-hidden="true" />}
-					</button>
-				);
-			})}
-			{value === "custom" && (
-				<button type="button" role="radio" aria-checked={true} className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-default bg-bg-panel p-2 text-control leading-tight text-muted-foreground">
-					{t("settings.skin.custom")}
-				</button>
-			)}
 		</div>
 	);
 });

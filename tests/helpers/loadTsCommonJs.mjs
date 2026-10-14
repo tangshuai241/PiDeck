@@ -30,6 +30,12 @@ export function loadTsCommonJs(filePath, options = {}) {
 	function load(resolvedPath) {
 		const absolutePath = resolve(resolvedPath);
 		if (cache.has(absolutePath)) return cache.get(absolutePath).exports;
+		// Mirror Node/bundler JSON imports when a production module owns data assets.
+		if (absolutePath.endsWith(".json")) {
+			const exports = JSON.parse(readFileSync(absolutePath, "utf8"));
+			cache.set(absolutePath, { exports });
+			return exports;
+		}
 
 		const output = ts.transpileModule(readFileSync(absolutePath, "utf8"), {
 			compilerOptions: {

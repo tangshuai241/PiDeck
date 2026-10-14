@@ -21,7 +21,7 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * 内置主题在 themePresets.ts SKIN_PRESETS 定义；custom 由 customThemeOverrides 驱动。
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
-export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
+export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "t3-code" | "t3-chat" | "t3-grove" | "t3-ocean" | "t3-ember" | "t3-iris" | "custom";
 /** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π；custom = 用户自备图片（logoCustomImage）。 */
 export type LogoStyle = "classic" | "pi-tui" | "custom";
 

@@ -34,7 +34,7 @@ test("DSH 添加页走真实 host 发现/保存，校验失败保留草稿，顶
 		const config = window.locator(".settings-modal");
 		if (!(await config.isVisible())) await window.getByRole("button", { name: /^设置/ }).click();
 		await expect(config).toBeVisible();
-		await config.getByRole("tab", { name: "配置管理", exact: true }).click();
+		await config.getByRole("tab", { name: "模型与工具", exact: true }).click();
 		await config.getByRole("tab", { name: "DSH 配置管理", exact: true }).click();
 		await config.getByRole("button", { name: "启动 host", exact: true }).click();
 		const modelTab = config.getByRole("navigation", { name: "DSH 配置管理" }).getByRole("button", { name: "模型", exact: true });

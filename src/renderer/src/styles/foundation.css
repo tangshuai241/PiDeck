@@ -3264,3 +3264,10 @@ select:focus-visible {
 .mini-overlay-root .composer-bar-btn.model-thinking {
   max-width: 18ch;
 }
+
+/* Settings surfaces derive from the active palette. Peripheral atmosphere is static. */
+:root {
+  --color-settings-canvas: color-mix(in srgb, var(--color-bg-app) 65%, var(--color-bg-muted));
+  --color-settings-surface: var(--color-bg-panel);
+  --color-settings-control: var(--color-bg-muted);
+}

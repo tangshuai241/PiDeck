@@ -10,7 +10,7 @@ async function openSettingsDialog(window: Page) {
 
 async function openConfigurationManagement(window: Page) {
 	const settingsDialog = await openSettingsDialog(window);
-	await settingsDialog.getByRole("tab", { name: "配置管理", exact: true }).click();
+	await settingsDialog.getByRole("tab", { name: "模型与工具", exact: true }).click();
 	const modal = settingsDialog.locator(".config-layout");
 	await expect(modal).toBeVisible();
 	return modal;

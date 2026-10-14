@@ -395,51 +395,7 @@
   box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
-/* ── 设置弹窗头部 ─────────────────────────── */
-
-.settings-layout {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 196px minmax(0, 1fr);
-  flex: 1;
-  /* 与右侧设置项同底：默认浅色整页 panel 白，不再给左侧单独叠灰 */
-  background: var(--color-bg-panel);
-}
-
-/* 侧边栏导航：紧凑设计，仅图标+标签。
-   按钮本身已迁移为 shadcn TabsTrigger（选中态由 data-[state=active] utility 承担），
-   旧 .settings-tabs button 系列规则已删除，仅保留容器与图标样式。 */
-.settings-tabs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-3);
-  border-right: 1px solid var(--color-border-subtle);
-  /* 与内容区同底；选中态仍靠 bg-active 区分 */
-  background: var(--color-bg-panel);
-}
-.settings-tab-icon {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-tertiary);
-  transition: all 0.12s ease;
-}
-.settings-tabs button:hover .settings-tab-icon {
-  color: var(--color-text-secondary);
-}
-.settings-tab-icon:hover {
-  color: var(--color-text-secondary);
-}
-/* 选中态图标用 primary（=accent 同色相的语义强调色）：--color-accent 是「面」色，
-   不作字色/图标色（AGENTS CSS 第 5 条）。 */
-.settings-tabs [data-state="active"] .settings-tab-icon {
-  color: var(--color-primary);
-}
+/* 设置页导航与面板布局已迁移到 SettingsModal 的 Tailwind utilities。 */
 .modal-header {
   height: 68px;
   display: flex;
@@ -685,22 +641,7 @@
     box-shadow: inset 0 0 0 2px var(--color-accent);
   }
 }
-
-.settings-panel {
-  min-height: 0;
-  overflow-y: auto;
-  flex: 1;
-  padding: var(--space-4);
-  color: var(--color-text-primary);
-  /* 与 config-main 统一：内容区用面板白 */
-  background: var(--color-bg-panel);
-  /* tab 切换入场：内层 TabsContent 按 tab 条件挂载，挂载即播一次淡入；
-     全局 reduced-motion 规则会把它压成单帧。 */
-  animation: fadeIn 160ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* 设置分区与设置行已迁移 UI 2.0（Tailwind + shadcn，见 settings/SettingRows.tsx）：
-   去卡片化 + 行式布局，旧手写规则全部删除，不再在此维护。 */
+/* 设置分区与设置行由 settings/SettingRows.tsx 统一维护。 */
 
 /* 代理面板 */
 .setting-proxy-panel {
@@ -959,21 +900,6 @@
     height: 80vh;
     min-height: 0;
   }
-  .settings-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .settings-tabs {
-    flex-direction: row;
-    overflow-x: auto;
-    padding: var(--space-2) var(--space-3);
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-  .settings-tabs button {
-    flex: 0 0 auto;
-    min-width: 100px;
-  }
 }
 
 /* ── 配置管理弹窗 ─────────────────────────────────── */
@@ -1217,7 +1143,7 @@
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
   border-color: var(--color-border-subtle);
-}:root[data-theme="dark"] .modal-header, :root[data-theme="dark"] .settings-tabs, :root[data-theme="dark"] .feedback-actions{
+}:root[data-theme="dark"] .modal-header, :root[data-theme="dark"] .feedback-actions{
   background: var(--color-bg-panel);
   border-color: var(--color-border-subtle);
 }:root[data-theme="dark"] pre, :root[data-theme="dark"] code{

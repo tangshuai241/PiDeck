@@ -54,7 +54,7 @@ test("tab bar font size change applies immediately after save", async ({ window 
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 
-	await modal.getByText("外观设置").click();
+	await modal.getByText("外观").click();
 
 	// 「自定义各区域字号」开关：开启后才渲染 界面/Tab 栏/会话/输入 字号四行
 	const perAreaSwitch = modal.locator("div.min-h-\\[54px\\]").filter({ hasText: "自定义各区域字号" }).getByRole("switch");
@@ -91,7 +91,7 @@ test("tab bar font size change applies immediately after save", async ({ window 
 	// 快照里各区域字号均为 null，重开弹窗时「自定义各区域字号」开关回到关，需重新打开
 	await window.getByRole("button", { name: /^设置/ }).click();
 	await expect(modal).toBeVisible();
-	await modal.getByText("外观设置").click();
+	await modal.getByText("外观").click();
 	if (!(await perAreaSwitch.isChecked())) {
 		await perAreaSwitch.click();
 	}

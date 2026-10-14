@@ -14,7 +14,7 @@ async function switchMode(window: Page, label: string) {
 	await window.getByRole("button", { name: /^设置/ }).first().click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
-	await modal.getByRole("tab", { name: "外观设置", exact: true }).click();
+	await modal.getByRole("tab", { name: "外观", exact: true }).click();
 	await modal.locator("#settings-section-appearance-navigation-mode").getByRole("combobox").click();
 	await window.getByRole("option", { name: label, exact: true }).click();
 	await modal.getByRole("button", { name: "保存", exact: true }).click();
