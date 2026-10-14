@@ -9,7 +9,7 @@ import { SettingBox, SettingRow } from "./SettingRows";
 import { LogViewer } from "./LogViewer";
 
 /**
- * 设置分区：一级标题（加粗、text-body） + 二级内容。
+ * 设置分区：一级标题（text-body） + 二级内容。
  * - 默认二级内容入淡色框（boxed）；数据展示页（用量统计）传 boxed={false} 不套框；
  * - divided 用于「层次分明的页面」：与上一级之间用淡横线分隔。
  */
@@ -26,9 +26,9 @@ export function SettingsSection(props: {
 	/** 标题行右侧动作（如「全部展开」）：由分区统一排版，避免各页自己拼 flex 头部长出第二套视觉 */
 	action?: ReactNode;
 }) {
-	const heading = <SectionHeading className="settings-section-header pb-2" titleClassName="text-body font-bold text-foreground" title={props.title} description={props.description} />;
+	const heading = <SectionHeading className="settings-section-header pb-2" titleClassName="text-body font-medium text-foreground" title={props.title} description={props.description} />;
 	return (
-		<section id={props.id} className={props.divided ? "mt-2 border-t border-border-subtle pt-4" : "mt-4 first:mt-0"}>
+		<section id={props.id} className={props.divided ? "mt-5 border-t border-border-subtle pt-5" : "mt-7 first:mt-0"}>
 			{props.action != null ? (
 				<div className="flex items-start justify-between gap-2">
 					{heading}

@@ -260,7 +260,9 @@ test("SettingsModal registers process tab; ConfigModal no longer hosts it", () =
 	//（labelKey 走 i18n）+ lazy ProcessMetricsTab 渲染；ConfigModal 移除。
 	// labelKey 的取值已收敛到 settingsTabLayout.ts 的 SETTINGS_TAB_LABEL_KEYS
 	//（命令面板 Ctrl+P 搜设置项复用同一份 key，两处各写一份迟早漂移）。
-	assert.match(settings, /process: \{ labelKey: SETTINGS_TAB_LABEL_KEYS\.process/);
+	const navigation = readFileSync("src/renderer/src/components/app/settings/SettingsNavigation.tsx", "utf8");
+	assert.match(navigation, /process:\s*Activity/);
+	assert.match(settings, /<SettingsNavigation\s/);
 	const tabLayout = readFileSync("src/renderer/src/components/app/settings/settingsTabLayout.ts", "utf8");
 	assert.match(tabLayout, /process: "settings\.tabs\.process"/);
 	assert.match(settings, /activeTab === "process"/);

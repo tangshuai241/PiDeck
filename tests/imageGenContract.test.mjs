@@ -137,8 +137,10 @@ test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 	assert.doesNotMatch(controller, /provider: model\.provider/);
 	assert.doesNotMatch(controller, /imageGenArkFieldsSupported/);
 	assert.match(settingsModal, /value="imagegen"/);
-	// TAB_META 只留 icon，labelKey 取 SETTINGS_TAB_LABEL_KEYS（值仍指向 settings.tabs.imagegen）
-	assert.match(settingsModal, /labelKey: SETTINGS_TAB_LABEL_KEYS\.imagegen/);
+	// 导航拆到独立组件，仍从同一份标题目录取文案。
+	const navigation = readFileSync("src/renderer/src/components/app/settings/SettingsNavigation.tsx", "utf8");
+	assert.match(navigation, /imagegen:\s*ImageIcon/);
+	assert.match(settingsModal, /<SettingsNavigation\s/);
 	assert.match(settingsTabLayout, /imagegen: "settings\.tabs\.imagegen"/);
 	assert.match(configUi, /config\.imagegen\.extraParams/);
 	assert.doesNotMatch(configUi, /kindOpenai|kindArk|IMAGE_GEN_KINDS/);

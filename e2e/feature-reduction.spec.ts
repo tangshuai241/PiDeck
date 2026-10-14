@@ -21,11 +21,11 @@ test("retired services have no desktop API or settings entry and retained integr
 	const modal = await openSettings(window);
 	await expect(modal.getByRole("tab", { name: "Web 服务", exact: true })).toHaveCount(0);
 	await expect(modal.getByRole("tab", { name: "ACP 工具", exact: true })).toHaveCount(0);
-	for (const name of ["飞书机器人", "桌面宠物", "生图", "生视频"]) await expect(modal.getByRole("tab", { name, exact: true })).toBeVisible();
-	await modal.getByRole("tab", { name: "开发设置", exact: true }).click();
+	for (const name of ["飞书机器人", "桌面宠物", "图片生成", "视频生成"]) await expect(modal.getByRole("tab", { name, exact: true })).toBeVisible();
+	await modal.getByRole("tab", { name: "开发选项", exact: true }).click();
 	await expect(modal.getByText("TPA 应用更新来自自己的发布仓库。资源更新仍可使用上游镜像。", { exact: true })).toBeVisible();
 	await expect(modal.getByText("遥测", { exact: true })).toHaveCount(0);
-	await modal.getByRole("tab", { name: "配置管理", exact: true }).click();
+	await modal.getByRole("tab", { name: "模型与工具", exact: true }).click();
 	const config = modal.getByRole("tabpanel", { name: "Pi 配置管理", exact: true });
 	await config.getByText("提示词模板", { exact: true }).click();
 	await config.getByText("社区提示词库", { exact: true }).click();

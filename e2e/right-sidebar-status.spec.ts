@@ -83,7 +83,7 @@ test.describe("设置页切换", () => {
 		await window.getByRole("button", { name: /^设置/ }).click();
 		const modal = window.locator(".settings-modal");
 		await expect(modal).toBeVisible();
-		await modal.getByText("外观设置").click();
+		await modal.getByText("外观").click();
 		const trigger = modal.locator("#settings-section-appearance-session-status-placement").getByRole("combobox");
 		await expect(trigger).toHaveText("右侧边栏");
 		await trigger.click();

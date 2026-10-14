@@ -65,35 +65,33 @@ test("不可隐藏的 tab 即使出现在 hiddenModules 里也不会消失", () 
 	assert.equal(isSettingsTabHidden(["im"], "im"), true);
 });
 
-test("隐藏簇首项时分割线顺延到该簇下一个可见项", () => {
-	// 「扩展集成」簇首项是 im（dividerBefore）；隐藏 im 后 pet 应带上分割线
-	const visible = resolveVisibleSettingsTabs(["im"], new Set());
-	const ids = visible.map((e) => e.id);
-	assert.equal(ids.includes("im"), false);
-	assert.equal(visible.find((e) => e.id === "pet").dividerBefore, true);
-	// 其余分割线位置不受影响
-	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["pet", "editors", "dev"]);
+test("hiding the first group member preserves remaining group ownership", () => {
+	const visible = resolveVisibleSettingsTabs(["vision"], new Set());
+	assert.equal(
+		visible.some((entry) => entry.id === "vision"),
+		false,
+	);
+	assert.equal(visible.find((entry) => entry.id === "imagegen").group, "ai");
+	assert.equal(visible.find((entry) => entry.id === "proxy").group, "connections");
 });
 
-test("整簇隐藏时该簇分割线消失，不留连续两条线", () => {
-	const visible = resolveVisibleSettingsTabs(["im", "pet", "vision", "imagegen", "videogen", "cloudmemory", "hostplugins"], new Set());
-	// 全簇隐藏后不残留分割线；仅隐部分成员时，分割线顺延到簇内下一个可见项（上一条测试）
-	assert.deepEqual(plain(visible.filter((e) => e.dividerBefore).map((e) => e.id)), ["editors", "dev"]);
+test("hiding a whole group leaves no entries and does not merge adjacent groups", () => {
+	const visible = resolveVisibleSettingsTabs(["vision", "imagegen", "videogen", "cloudmemory"], new Set());
+	assert.equal(
+		visible.some((entry) => entry.group === "ai"),
+		false,
+	);
+	assert.equal(visible.find((entry) => entry.id === "editors").group, "workspace");
+	assert.equal(visible.find((entry) => entry.id === "proxy").group, "connections");
 });
 
-test("revealedTabs 让隐藏 tab 临时出现在侧栏（深链 / 搜索找回）", () => {
+test("deep links reveal a hidden tab in its original group without revealing siblings", () => {
 	const visible = resolveVisibleSettingsTabs(["im", "pet"], new Set(["im"]));
-	const ids = visible.map((e) => e.id);
-	assert.equal(ids.includes("im"), true);
-	assert.equal(ids.includes("pet"), false);
-	assert.equal(visible.find((e) => e.id === "im").dividerBefore, true);
-});
-
-test("首个可见项永不带分割线", () => {
-	// 把 common 之前人为放一条 divider 的布局：过滤后首项 divider 必须被抑制
-	const layout = [{ id: "im", dividerBefore: true }, { id: "pet" }];
-	const visible = resolveVisibleSettingsTabs([], new Set(), layout);
-	assert.equal(visible[0].dividerBefore, undefined);
+	assert.equal(
+		visible.some((entry) => entry.id === "pet"),
+		false,
+	);
+	assert.equal(visible.find((entry) => entry.id === "im").group, "connections");
 });
 
 test("初始 tab：深链优先（即使指向隐藏 tab）；记忆值被隐藏时回退 common", () => {

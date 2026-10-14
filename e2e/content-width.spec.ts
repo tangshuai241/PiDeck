@@ -21,7 +21,7 @@ test("content width: 85% shared margin, composer aligns with message list", asyn
 	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
-	await modal.getByText("外观设置").click();
+	await modal.getByText("外观").click();
 
 	const slider = modal.locator('input[type="range"][aria-label="聊天内容宽度"]');
 	await expect(slider).toBeVisible();

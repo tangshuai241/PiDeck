@@ -79,7 +79,7 @@ test("visual tour: light + dark", async ({ window }) => {
 	const modal = await openSettings(window);
 	await shot(window, "04-settings-common-light");
 	// 开发设置（Switch）
-	await modal.getByText("开发设置").click();
+	await modal.getByText("开发选项").click();
 	await window.waitForTimeout(300);
 	await shot(window, "05-settings-dev-light");
 	// 缓存与日志（按钮）

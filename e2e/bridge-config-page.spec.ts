@@ -116,7 +116,7 @@ test("配置管理里应出现桥贡献的「扩展点」页，并且能搜索�
 
 	// 切到「配置管理」分区（ConfigPane 就是 ConfigModal 的嵌入形态，侧栏即 Agent 能力组），
 	// 验证新落点 `config.page`：面板现在是侧栏里一个独立整页，不再是设置弹窗底部那块。
-	const cfgTab = modal.getByRole("tab", { name: "配置管理", exact: true }).first();
+	const cfgTab = modal.getByRole("tab", { name: "模型与工具", exact: true }).first();
 	await expect(cfgTab).toBeVisible({ timeout: 15_000 });
 	// 用真实鼠标点击：Radix Tabs 在 mousedown 上切页，`el.click()` 不会触发。
 	await cfgTab.click();

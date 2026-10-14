@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+﻿import { test, expect } from "./fixtures";
 import { openSettings } from "./open-session";
 
 /**
@@ -17,10 +17,10 @@ test("appearance theme switch applies data-appearance and bundled accent", async
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 
-	// 外观设置 tab：主题 Select（系统/浅色/深色）→ 外观主题卡片（每套自带主色）
-	await modal.getByText("外观设置").click();
+	// 外观设置 tab：明暗预览卡片 → 外观主题卡片（每套自带主色）
+	await modal.getByText("外观").click();
 	// 背景图字段渲染（选图/清除按钮存在；弹系统对话框不在 e2e 范围）
-	await expect(modal.getByText("背景图片")).toBeVisible();
+	await expect(modal.getByText("背景图片", { exact: true }).first()).toBeVisible();
 	await expect(modal.getByRole("button", { name: "选择图片…" })).toBeVisible();
 	// 外观主题卡片（radio）：选择森系绿 → 联动主色 green
 	await modal.getByRole("radio", { name: "森系绿" }).click();
@@ -35,4 +35,84 @@ test("appearance theme switch applies data-appearance and bundled accent", async
 	await expect(modal).toHaveCount(0);
 	await expect(window.locator("html")).toHaveAttribute("data-appearance", "fresh-green");
 	await expect(window.locator("html")).toHaveAttribute("data-accent", "green");
+});
+
+/** 常驻分组、搜索和原有锚点定位共用真实桌面设置页面。 */
+test("settings navigation shows persistent groups and searches field anchors", async ({ window }, testInfo) => {
+	await window.setViewportSize({ width: 1440, height: 1000 });
+	await openSettings(window);
+	const modal = window.locator(".settings-modal");
+	const nav = modal.getByRole("complementary", { name: "设置分类" });
+	await expect(nav.getByRole("heading")).toHaveText(["日常设置", "工作区", "AI 能力", "连接与扩展", "维护与诊断"]);
+	await expect(nav.locator("[aria-expanded]")).toHaveCount(0);
+	await expect(nav.getByRole("tab")).toHaveCount(20);
+	const search = nav.getByRole("textbox", { name: "搜索设置…" });
+	await search.fill("session tab width");
+	await nav.getByRole("button", { name: "会话 Tab 宽度上限", exact: true }).click();
+	await expect(nav.getByRole("tab", { name: "外观", exact: true })).toHaveAttribute("data-state", "active");
+	await expect(modal.locator("#settings-section-appearance-session-tab-width")).toBeInViewport();
+	await search.fill("no-such-setting-829");
+	await expect(nav.getByRole("status")).toHaveText("没有找到相关设置");
+	await search.press("Escape");
+	await expect(search).toHaveValue("");
+	await expect(modal).toBeVisible();
+	await expect(nav.getByRole("heading")).toHaveCount(5);
+	await nav.getByRole("tab", { name: "常规", exact: true }).click();
+	await nav.getByRole("tab", { name: "外观", exact: true }).click();
+	await modal.getByRole("radio", { name: "浅色", exact: true }).click();
+	await window.screenshot({ path: testInfo.outputPath("navigation-light.png") });
+	await modal.getByRole("radio", { name: "暗色", exact: true }).click();
+	await window.screenshot({ path: testInfo.outputPath("navigation-dark.png") });
+	await modal.getByRole("tab", { name: "模型与工具", exact: true }).click();
+	await expect(modal.getByRole("tab", { name: "Pi 配置管理", exact: true })).toBeVisible();
+	await modal.getByRole("tab", { name: "应用设置", exact: true }).click();
+	await expect(modal.getByRole("radio", { name: "暗色", exact: true })).toBeChecked();
+});
+
+/** 新的明暗卡片沿用草稿预览与保存边界；方向键和窄窗口均可操作。 */
+test("appearance cards support keyboard selection, cancel, save and narrow windows", async ({ window }, testInfo) => {
+	await window.setViewportSize({ width: 1440, height: 1000 });
+	await openSettings(window);
+	const modal = window.locator(".settings-modal");
+	await modal.getByRole("tab", { name: "外观", exact: true }).click();
+	const light = modal.getByRole("radio", { name: "浅色", exact: true });
+	const dark = modal.getByRole("radio", { name: "暗色", exact: true });
+	await light.click();
+	await modal.getByRole("button", { name: "保存", exact: true }).click();
+	await expect(modal.getByRole("button", { name: "取消", exact: true })).toHaveCount(0);
+	await window.screenshot({ path: testInfo.outputPath("appearance-light.png") });
+
+	await light.focus();
+	// Radix 用异步 roving focus 识别仍按住的方向键；保留真实按键的按下阶段。
+	await window.keyboard.press("ArrowRight", { delay: 80 });
+	await expect(dark).toBeChecked();
+	await expect(window.locator("html")).toHaveAttribute("data-theme", "dark");
+	await window.screenshot({ path: testInfo.outputPath("appearance-dark.png") });
+	await modal.getByRole("button", { name: "取消", exact: true }).click();
+	await expect(light).toBeChecked();
+	await expect(window.locator("html")).toHaveAttribute("data-theme", "light");
+
+	await modal.getByRole("radio", { name: "跟随时间", exact: true }).click();
+	await expect(modal.getByLabel("浅色开始", { exact: true })).toBeVisible();
+	await light.click();
+	await modal.getByRole("radio", { name: "森系绿", exact: true }).click();
+	await modal.getByRole("button", { name: "保存", exact: true }).click();
+	await expect(modal.getByRole("button", { name: "取消", exact: true })).toHaveCount(0);
+	await modal.getByRole("button", { name: "关闭", exact: true }).first().click();
+	await openSettings(window);
+	await modal.getByRole("tab", { name: "外观", exact: true }).click();
+	await expect(light).toBeChecked();
+	await expect(modal.getByRole("radio", { name: "森系绿", exact: true })).toBeChecked();
+	await window.screenshot({ path: testInfo.outputPath("appearance-green.png") });
+
+	await window.setViewportSize({ width: 800, height: 900 });
+	await expect(light).toBeVisible();
+	const panel = modal.locator('[role="tabpanel"][data-state="active"]').last();
+	await expect.poll(() => panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+	await window.screenshot({ path: testInfo.outputPath("appearance-narrow.png") });
+	await modal.getByRole("tab", { name: "常规", exact: true }).click();
+	await expect.poll(() => panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+	await window.screenshot({ path: testInfo.outputPath("settings-rows-narrow.png") });
+	await window.setViewportSize({ width: 1440, height: 1000 });
+	await window.screenshot({ path: testInfo.outputPath("settings-rows.png") });
 });

@@ -1,10 +1,10 @@
-import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard, Cloud } from "lucide-react";
-import { t, type TranslationKey } from "../../i18n";
+import { Loader2, SlidersHorizontal, MonitorCog, X } from "lucide-react";
+import { t } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
 import { Button } from "../ui-shadcn/button";
@@ -15,8 +15,9 @@ import { cn } from "../../lib/utils";
 import { deepClone } from "../../utils/deepEqual";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
-import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
+import { dirtySettingsTabIds } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
+import { SettingsNavigation, preventSettingsSearchDismiss } from "./settings/SettingsNavigation";
 import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
 import { isSettingsTabHidden, resolveInitialSettingsTab, resolveVisibleSettingsTabs } from "./settings/settingsTabVisibility";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
@@ -58,7 +59,7 @@ import type { ConfigPaneHandle, ConfigPaneState } from "../../ConfigModal";
 
 // DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
 // SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab；
-// 展示顺序与分组分割线统一收敛在 settings/settingsTabLayout.ts。
+// 展示顺序与常驻分组统一收敛在 settings/settingsTabLayout.ts。
 
 /** localStorage 键：设置页上次打开的 tab（重开弹窗时恢复位置，跨应用重启保留）。 */
 const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
@@ -180,7 +181,7 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 		return (
 			<Dialog open onOpenChange={(next) => !next && this.props.onClose()}>
 				<DialogContent showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", settingsModalSizeClass, "settings-modal")}>
-					<DialogHeader className="flex-row items-center justify-between px-4 py-3">
+					<DialogHeader className="shrink-0 flex-row items-center justify-between border-b border-border-subtle/60 px-5 py-3">
 						<DialogTitle>{t("settings.loadFailed")}</DialogTitle>
 						<DialogClose asChild>
 							<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")}>
@@ -236,37 +237,6 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		</SettingsModalErrorBoundary>
 	);
 });
-
-/**
- * 各 tab 的图标元数据：label 渲染时经 t() 取当前语言文案（不能模块级求值，
- * 否则语言切换后不生效）；展示顺序与分割线由 SETTINGS_TAB_LAYOUT 决定，
- * 标题 i18n key 由 SETTINGS_TAB_LABEL_KEYS 提供（命令面板 Ctrl+P 搜设置项时
- * 复用同一份 key，见 settingsTabLayout.ts）。
- */
-const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNode }> = {
-	common: { labelKey: SETTINGS_TAB_LABEL_KEYS.common, icon: <Settings2 size={16} /> },
-	shortcuts: { labelKey: SETTINGS_TAB_LABEL_KEYS.shortcuts, icon: <Keyboard size={16} /> },
-	appearance: { labelKey: SETTINGS_TAB_LABEL_KEYS.appearance, icon: <Brush size={16} /> },
-	terminal: { labelKey: SETTINGS_TAB_LABEL_KEYS.terminal, icon: <TerminalSquare size={16} /> },
-	proxy: { labelKey: SETTINGS_TAB_LABEL_KEYS.proxy, icon: <Network size={16} /> },
-
-	editors: { labelKey: SETTINGS_TAB_LABEL_KEYS.editors, icon: <FileCode2 size={16} /> },
-	git: { labelKey: SETTINGS_TAB_LABEL_KEYS.git, icon: <GitBranch size={16} /> },
-	dev: { labelKey: SETTINGS_TAB_LABEL_KEYS.dev, icon: <Wrench size={16} /> },
-	im: { labelKey: SETTINGS_TAB_LABEL_KEYS.im, icon: <MessageSquare size={16} /> },
-	pet: { labelKey: SETTINGS_TAB_LABEL_KEYS.pet, icon: <PawPrint size={16} /> },
-	notification: { labelKey: SETTINGS_TAB_LABEL_KEYS.notification, icon: <Bell size={16} /> },
-	storage: { labelKey: SETTINGS_TAB_LABEL_KEYS.storage, icon: <Trash2 size={16} /> },
-	backup: { labelKey: SETTINGS_TAB_LABEL_KEYS.backup, icon: <DatabaseBackup size={16} /> },
-	usage: { labelKey: SETTINGS_TAB_LABEL_KEYS.usage, icon: <ChartColumnBig size={16} /> },
-	process: { labelKey: SETTINGS_TAB_LABEL_KEYS.process, icon: <Activity size={16} /> },
-	vision: { labelKey: SETTINGS_TAB_LABEL_KEYS.vision, icon: <Eye size={16} /> },
-	imagegen: { labelKey: SETTINGS_TAB_LABEL_KEYS.imagegen, icon: <ImageIcon size={16} /> },
-	videogen: { labelKey: SETTINGS_TAB_LABEL_KEYS.videogen, icon: <Clapperboard size={16} /> },
-	cloudmemory: { labelKey: SETTINGS_TAB_LABEL_KEYS.cloudmemory, icon: <Cloud size={16} /> },
-
-	hostplugins: { labelKey: SETTINGS_TAB_LABEL_KEYS.hostplugins, icon: <Puzzle size={16} /> },
-};
 
 /**
  * 设置弹框壳：只持有跨 tab 共享状态（草稿/脏标记/视觉桥/重置信号）与 Tabs 导航，
@@ -584,12 +554,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
-	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
-		id: entry.id,
-		dividerBefore: entry.dividerBefore ?? false,
-		label: t(TAB_META[entry.id].labelKey),
-		icon: TAB_META[entry.id].icon,
-	}));
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs);
 	// 当前 tab 被隐藏（深链 / 命令面板直达）时临时显示并提示一次，避免用户看到内容却在侧栏里找不到高亮项。
 	useEffect(() => {
 		if (!isSettingsTabHidden(hiddenModules, activeTab) || revealedTabs.has(activeTab)) return;
@@ -617,8 +582,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
-			<DialogContent showCloseButton={false} stagger className={cn("flex flex-col gap-0 overflow-hidden p-0", settingsModalSizeClass, "settings-modal")}>
-				<DialogHeader className="flex-row items-center justify-between px-4 py-3">
+			<DialogContent showCloseButton={false} onEscapeKeyDown={preventSettingsSearchDismiss} className={cn("flex flex-col gap-0 overflow-hidden p-0", settingsModalSizeClass, "settings-modal")}>
+				<DialogHeader className="shrink-0 flex-row items-center justify-between border-b border-border-subtle/60 px-5 py-3">
 					<DialogTitle>{t("settings.title")}</DialogTitle>
 					<div className="flex items-center gap-2">
 						{isConfigPane ? (
@@ -681,7 +646,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 				>
 					{/* 顶层分区 tab：直接用 shadcn Tabs 默认观感（bg-muted p-1 圆角条），与全局组件统一；
 				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
-					<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
+					<TabsList className="mx-5 my-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
 						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-control">
 							<MonitorCog className="size-4" aria-hidden="true" />
 							{t("settings.panes.system")}
@@ -726,28 +691,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 							}}
 							className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent"
 						>
-							<TabsList className="settings-tabs flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[196px]" aria-label={t("settings.title")}>
-								{tabs.map((tab) => (
-									<Fragment key={tab.id}>
-										{/* 分组分割线（纯视觉）：竖排侧栏为横线；≤820px 横排时变竖线，
-								    与 surfaces.css 里 .settings-tabs 转横向布局的媒体查询同条件 */}
-										{tab.dividerBefore ? <div aria-hidden="true" className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px" /> : null}
-										<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-											<span className="settings-tab-icon">{tab.icon}</span>
-											<strong>{tab.label}</strong>
-											{/* 右侧状态点：更新亮点（仅 dev tab，app/pi/模型目录任一有更新）+ 未保存黄点。
-										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
-											<div className="ml-auto flex items-center gap-1">
-												{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
-												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
-											</div>
-										</TabsTrigger>
-									</Fragment>
-								))}
-							</TabsList>
+							<SettingsNavigation tabs={tabs} dirtyTabs={dirtyTabIds} hasPendingUpdate={hasPendingUpdate} />
 							{/* ── 常用设置 tab ── */}
 							{activeTab === "common" && (
-								<TabsContent value="common" className="settings-panel min-w-0">
+								<TabsContent value="common" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<CommonTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} />
 									</Suspense>
@@ -756,7 +703,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 快捷键管理 tab（全局快捷键自定义，见 shared/shortcuts.ts 注册表） ── */}
 							{activeTab === "shortcuts" && (
-								<TabsContent value="shortcuts" className="settings-panel min-w-0">
+								<TabsContent value="shortcuts" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<ShortcutsTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} platform={props.appInfo.platform} onInvalidChange={handleShortcutsInvalidChange} />
 									</Suspense>
@@ -765,7 +712,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 外观设置 tab ── */}
 							{activeTab === "appearance" && (
-								<TabsContent value="appearance" className="settings-panel min-w-0">
+								<TabsContent value="appearance" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<AppearanceTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} perAreaFontSize={perAreaFontSize} setPerAreaFontSize={setPerAreaFontSize} visionEnabled={visionDraft.draft?.enabled} />
 									</Suspense>
@@ -774,7 +721,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 终端设置 tab ── */}
 							{activeTab === "terminal" && (
-								<TabsContent value="terminal" className="settings-panel min-w-0">
+								<TabsContent value="terminal" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<TerminalTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} />
 									</Suspense>
@@ -783,7 +730,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 代理设置 tab ── */}
 							{activeTab === "proxy" && (
-								<TabsContent value="proxy" className="settings-panel min-w-0 [overflow-anchor:none]">
+								<TabsContent value="proxy" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4 [overflow-anchor:none]">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<ProxyTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} piProxyChecking={props.piProxyChecking} piProxyNotice={props.piProxyNotice} piProxyNoticeTone={props.piProxyNoticeTone} onTestPiProxy={props.onTestPiProxy} />
 									</Suspense>
@@ -794,7 +741,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 外部编辑器 tab（由 Pi 管理界面迁入，原为开发设置内区块） ── */}
 							{activeTab === "editors" && (
-								<TabsContent value="editors" className="settings-panel min-w-0">
+								<TabsContent value="editors" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<EditorsTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} />
 									</Suspense>
@@ -803,7 +750,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── Git 设置 tab（原为常用设置内区块，由 Git 面板深链直达） ── */}
 							{activeTab === "git" && (
-								<TabsContent value="git" className="settings-panel min-w-0">
+								<TabsContent value="git" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<GitTab
 											draft={draftSettings}
@@ -825,7 +772,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 开发设置 tab（环境/版本/运行/调试；Web 与外部编辑器已拆独立 tab） ── */}
 							{activeTab === "dev" && (
-								<TabsContent value="dev" className="settings-panel min-w-0">
+								<TabsContent value="dev" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<DevTab
 											draft={draftSettings}
@@ -868,7 +815,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 外部连接 tab（飞书机器人，由 Pi 管理界面迁入） ── */}
 							{activeTab === "im" && (
-								<TabsContent value="im" className="settings-panel min-w-0">
+								<TabsContent value="im" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<ImTab />
 									</Suspense>
@@ -877,7 +824,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 桌面宠物 tab ── */}
 							{activeTab === "pet" && (
-								<TabsContent value="pet" className="settings-panel min-w-0">
+								<TabsContent value="pet" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<PetTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} resetKey={petTabResetKey} />
 									</Suspense>
@@ -886,7 +833,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 通知设置 tab（系统通知 + 声音提醒） ── */}
 							{activeTab === "notification" && (
-								<TabsContent value="notification" className="settings-panel min-w-0">
+								<TabsContent value="notification" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<NotificationTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} />
 									</Suspense>
@@ -895,7 +842,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── 进程监控 tab（由 Pi 管理界面迁入） ── */}
 							{activeTab === "process" && (
-								<TabsContent value="process" className="settings-panel min-w-0">
+								<TabsContent value="process" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<ProcessMetricsTab />
 									</Suspense>
@@ -903,7 +850,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 							{/* ── 存储与日志 tab ── */}
 							{activeTab === "storage" && (
-								<TabsContent value="storage" className="settings-panel min-w-0">
+								<TabsContent value="storage" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<StorageTab settings={draftSettings} onChange={updateDraft} />
 									</Suspense>
@@ -911,7 +858,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 							{/* ── 配置备份 tab ── */}
 							{activeTab === "backup" && (
-								<TabsContent value="backup" className="settings-panel min-w-0">
+								<TabsContent value="backup" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<BackupTab />
 									</Suspense>
@@ -919,7 +866,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 							{/* ── 用量统计 tab ── */}
 							{activeTab === "usage" && (
-								<TabsContent value="usage" className="settings-panel min-w-0">
+								<TabsContent value="usage" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<UsageStatsTab />
 									</Suspense>
@@ -927,7 +874,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 							{/* ── 视觉桥 tab：草稿/脏标记/保存由弹框统一管理，本组件只呈现表单 */}
 							{activeTab === "vision" && (
-								<TabsContent value="vision" className="settings-panel min-w-0">
+								<TabsContent value="vision" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4">
 									<Suspense fallback={<SettingsTabLoading />}>
 										<VisionBridgeSettingsTab draft={visionDraft.draft} saving={visionDraft.saving} configDir={visionDraft.configDir} notice={visionDraft.notice} onChange={visionDraft.updateDraft} />
 									</Suspense>
@@ -935,19 +882,19 @@ function SettingsModalContent(props: SettingsModalProps) {
 							)}
 							{/* ── 生图 tab：独立 imagegen.json，不属于 pi/dsh，放在设置页统一管理。
 					    草稿保存在 ImageGenSection 内部，切换 tab 时保持挂载（hidden 而非卸载）以免丢失未保存修改。 */}
-							<TabsContent value="imagegen" className="settings-panel min-w-0" hidden={activeTab !== "imagegen"}>
+							<TabsContent value="imagegen" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4" hidden={activeTab !== "imagegen"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<ImageGenSettingsTab ref={imageGenRef} onDirtyChange={handleImageGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
 							{/* ── 生视频 tab：独立 videogen.json，草稿/脏标记/保存链与生图同构（hidden 保挂载）。 ── */}
-							<TabsContent value="videogen" className="settings-panel min-w-0" hidden={activeTab !== "videogen"}>
+							<TabsContent value="videogen" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4" hidden={activeTab !== "videogen"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<VideoGenSettingsTab ref={videoGenRef} onDirtyChange={handleVideoGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
 							{/* ── 云端记忆 tab：连接/凭据/人格缓存自管理（连接与开关即保存，不进通用草稿）。 ── */}
-							<TabsContent value="cloudmemory" className="settings-panel min-w-0" hidden={activeTab !== "cloudmemory"}>
+							<TabsContent value="cloudmemory" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4" hidden={activeTab !== "cloudmemory"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<CloudMemorySettingsTab />
 								</Suspense>
@@ -956,14 +903,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 							{/* ── PiDeck 插件 tab：宿主插件管理（安装/授权/启停）。独立于 pi 配置弹窗，
 							    归属应用设置；无草稿语义，切 tab 即卸载（动作型 IPC 即时生效）。 ── */}
-							<TabsContent value="hostplugins" className="settings-panel min-w-0" hidden={activeTab !== "hostplugins"}>
+							<TabsContent value="hostplugins" className="settings-panel min-h-0 min-w-0 overflow-y-auto px-6 py-5 text-foreground max-[820px]:px-4" hidden={activeTab !== "hostplugins"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<HostPluginsTab />
 								</Suspense>
 							</TabsContent>
 						</Tabs>
 						{/* GUI 扩展桥：设置弹窗内的扩展区块（ctx.gui.setSettingsSection）。
-						    **追加**在全部设置 tab 之下 —— 不改 SETTINGS_TAB_LAYOUT / TAB_META /
+						    **追加**在全部设置 tab 之下 —— 不改 SETTINGS_TAB_LAYOUT / SettingsNavigation /
 						    i18n 标签这套 tab 注册表（它有独立的契约测试），也不新增 TabsContent。
 						    无贡献时返回 null，不占位。
 

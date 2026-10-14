@@ -11,9 +11,9 @@ test("代理模型分组首次全选保持设置滚动位置", async ({ window }
 	await window.getByRole("button", { name: "设置" }).click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
-	await modal.getByRole("tab", { name: "代理设置" }).click();
+	await modal.getByRole("tab", { name: "网络代理" }).click();
 
-	const panel = modal.getByRole("tabpanel", { name: "代理设置" });
+	const panel = modal.getByRole("tabpanel", { name: "网络代理" });
 	await expect(panel.getByText("按模型走代理", { exact: true })).toBeVisible({ timeout: 20_000 });
 	const providerRow = panel.locator('[data-proxy-model-provider="mock"]');
 	await expect(providerRow).toBeVisible({ timeout: 20_000 });

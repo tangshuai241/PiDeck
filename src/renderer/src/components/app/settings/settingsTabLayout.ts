@@ -1,51 +1,20 @@
 import type { SettingsTabId } from "../../../atoms";
 import type { TranslationKey } from "../../../i18n";
 
-/**
- * 设置页侧栏展示布局：tab 顺序 + 分组分割线位置。
- * 只影响视觉呈现，不改变 SettingsTabId 本身——深链（settingsFocusAtom）、
- * localStorage 记忆位置、脏标记黄点都仍按 tab id 工作。
- *
- * 14 个 tab 平铺不易扫读，按「基础 → 扩展集成 → 开发者工具 → 开发与维护」四个簇
- * 重排并在簇边界渲染一条分割线：
- * - 基础：常用 / 快捷键 / 通知 / 外观 / 代理（打开应用必看的全局项）
- * - 扩展集成：飞书机器人 / 桌面宠物 / 视觉桥 / 生图（外部能力与增值功能）
- * - 开发者工具：局域网 Web 服务 / 外部编辑器 / Git
- * - 开发与维护：开发设置 / 用量统计 / 进程监控 / 缓存与日志 / 配置备份
- *
- * 局域网 Web 服务、外部编辑器与 Git 设置原为其它 tab 内的区块，因用户频繁使用
- * 单独抽为 tab，集中为「开发者工具」；缓存与日志放在开发设置同一组，便于低频维护项集中。
- */
-export type SettingsTabLayoutEntry = {
-	id: SettingsTabId;
-	/** 渲染此 tab 前是否先插入分组分割线；纯视觉标记，首项必须缺省 */
-	dividerBefore?: boolean;
-};
+/** Stable tab identities are shared by navigation, deep links and the command palette. */
+export type SettingsGroupId = "daily" | "workspace" | "ai" | "connections" | "maintenance";
+export type SettingsTabLayoutEntry = { id: SettingsTabId; group: SettingsGroupId };
 
-export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
-	{ id: "common" },
-	{ id: "shortcuts" },
-	{ id: "notification" },
-	{ id: "appearance" },
-	{ id: "terminal" },
-	{ id: "proxy" },
-	{ id: "im", dividerBefore: true },
-	{ id: "pet" },
-	{ id: "vision" },
-	{ id: "imagegen" },
-	{ id: "videogen" },
-	{ id: "cloudmemory" },
-
-	{ id: "hostplugins" },
-
-	{ id: "editors", dividerBefore: true },
-	{ id: "git" },
-	{ id: "dev", dividerBefore: true },
-	{ id: "usage" },
-	{ id: "process" },
-	{ id: "storage" },
-	{ id: "backup" },
+/** Persistent headings: groups never collapse and empty groups are omitted after filtering. */
+export const SETTINGS_NAV_GROUPS: readonly { id: SettingsGroupId; labelKey: TranslationKey; tabs: readonly SettingsTabId[] }[] = [
+	{ id: "daily", labelKey: "settings.groups.daily", tabs: ["common", "appearance", "shortcuts", "notification"] },
+	{ id: "workspace", labelKey: "settings.groups.workspace", tabs: ["terminal", "git", "editors"] },
+	{ id: "ai", labelKey: "settings.groups.ai", tabs: ["vision", "imagegen", "videogen", "cloudmemory"] },
+	{ id: "connections", labelKey: "settings.groups.connections", tabs: ["proxy", "im", "hostplugins", "pet"] },
+	{ id: "maintenance", labelKey: "settings.groups.maintenance", tabs: ["usage", "process", "storage", "backup", "dev"] },
 ];
+
+export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = SETTINGS_NAV_GROUPS.flatMap((group) => group.tabs.map((id) => ({ id, group: group.id })));
 
 /** 全部合法 tab id（顺序即展示顺序）：校验 localStorage 记忆值、防止旧版本残留值导致无高亮。 */
 export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = SETTINGS_TAB_LAYOUT.map((entry) => entry.id);
@@ -55,7 +24,7 @@ export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = SETTINGS_TAB_LAYOUT.ma
  *
  * 与 SETTINGS_TAB_LAYOUT 放在同一份文件是刻意的：命令面板（Ctrl+P 搜设置项）
  * 与设置页侧栏必须展示同一套标题，两处各维护一份字符串迟早漂移成
- * 「命令面板搜到的名字和侧栏对不上」。SettingsModal 的 TAB_META 只保留图标，
+ * 「命令面板搜到的名字和侧栏对不上」。SettingsNavigation 只保留图标，
  * 标题一律从这里取。
  */
 export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
