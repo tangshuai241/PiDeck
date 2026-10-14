@@ -153,6 +153,9 @@ const defaultSettings: AppSettings = {
 	startupWindowMode: "last",
 	piEnvironmentChecked: false,
 	sessionTabOpenMode: "preview",
+	// 个人工作台分组默认展开：用户第一次看到侧栏时要能发现阅读/待办入口，收起是后续选择。
+	// 只影响入口分组的显示，不影响功能页可用性与会话。
+	personalWorkbenchCollapsed: false,
 	// 默认开启：标题由当前 pi 模型异步生成，侧栏不再全是「新会话」；
 	// 会额外消耗一次模型调用和少量 token，设置说明已写明，用户可随时关闭。
 	autoSessionTitle: true,
@@ -476,6 +479,11 @@ export class SettingsStore {
 			if (typeof this.settings.alertOnlyWhenUnfocused !== "boolean") {
 				this.settings.alertOnlyWhenUnfocused = defaultSettings.alertOnlyWhenUnfocused;
 			}
+			// 个人工作台分组折叠态同理：旧 settings.json 缺字段回落展开；脏值（字符串等）也按展开处理——
+			// 误展开只是多占两行，误折叠会让入口直接看不见。
+			if (typeof this.settings.personalWorkbenchCollapsed !== "boolean") {
+				this.settings.personalWorkbenchCollapsed = defaultSettings.personalWorkbenchCollapsed;
+			}
 			// toast 展示时长：旧 settings.json 缺字段或脏值（0/负数/超大/字符串）钳回默认，
 			// 避免升级后 toast 永不再消失或瞬间消失。
 			this.settings.toastDurationMs = clampToastDurationMs(this.settings.toastDurationMs);
@@ -727,6 +735,10 @@ export class SettingsStore {
 		// CUA 开关来自渲染层，入参不可信：只接受布尔值，非法值保持原有设置。
 		if ("cuaEnabled" in safePatch && typeof safePatch.cuaEnabled !== "boolean") {
 			delete safePatch.cuaEnabled;
+		}
+		// 个人工作台分组折叠态：只接受布尔值（手改脏值不能把入口改成奇怪状态）。
+		if ("personalWorkbenchCollapsed" in safePatch && typeof safePatch.personalWorkbenchCollapsed !== "boolean") {
+			delete safePatch.personalWorkbenchCollapsed;
 		}
 		// 免审批开关同理：只接受布尔值（安全相关设置，非法值一律回退原值）。
 		if ("cuaAutoApprove" in safePatch && typeof safePatch.cuaAutoApprove !== "boolean") {

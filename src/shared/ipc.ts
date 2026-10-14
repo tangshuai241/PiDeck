@@ -974,6 +974,68 @@ export const ipcChannels = {
 	/** 连接/开关/人格缓存变化推送（主进程 → 渲染层，订阅式；渲染层收到后重拉状态） */
 	cloudMemoryStatusChanged: "cloud-memory:status-changed",
 
+	// ===== 个人待办（P02）：云端权威记录 + 本地缓存/待传队列，账号沿用云端记忆连接 =====
+	/** 读取账号作用域、队列摘要与云端写入可用性（不含凭据） */
+	personalTodoGetStatus: "personal-todo:get-status",
+	/** 列表：缓存优先，后台刷新云端；筛选/排序在本机按缓存窗口计算 */
+	personalTodoList: "personal-todo:list",
+	/** 单条视图（confirmed/draft/sync） */
+	personalTodoGet: "personal-todo:get",
+	/** 提交写操作：先耐久入队，后台待传；云端确认才显示已保存 */
+	personalTodoSubmit: "personal-todo:submit",
+	/** 重试失败/未知项：先查同 requestId 回执，不盲目重新创建 */
+	personalTodoRetry: "personal-todo:retry",
+	/** 冲突处理：keepMine 以云端最新 revision 重放草稿 / takeCloud 丢弃草稿 */
+	personalTodoResolveConflict: "personal-todo:resolve-conflict",
+	/** 变化推送（主进程 → 渲染层，订阅式；items 有上界，reload 时重拉列表） */
+	personalTodoChanged: "personal-todo:changed",
+
+	// ===== 阅读（P03）：DeepRead 只读适配 + TPA 本地位置/笔记注册 =====
+	/** 服务可用性/连接视图；不探测、不扫书库（页面调用才触达） */
+	readingGetStatus: "reading:get-status",
+	/** 连接回环 DeepRead：password 经主进程 safeStorage 保护，cookie 不出主进程 */
+	readingConnect: "reading:connect",
+	/** 断开：删除本地受保护密码与 cookie（不改服务配置） */
+	readingDisconnect: "reading:disconnect",
+	/** 作品与版本（book 参数只取返回的 rel） */
+	readingListLibrary: "reading:list-library",
+	/** 指定版本的 identity/toc/spine/analysis */
+	readingGetEdition: "reading:get-edition",
+	/** 按章正文（wire query=chapter，章号或 toc href） */
+	readingGetChapter: "reading:get-chapter",
+	/** 引文核验（必须带 expected_version） */
+	readingResolveQuote: "reading:resolve-quote",
+	/** noteId 列表（新接口未部署时返回 unsupported） */
+	readingListNotes: "reading:list-notes",
+	/** 按 noteId 读笔记（含 truncated 标记） */
+	readingReadNote: "reading:read-note",
+	/** 手工写笔记：先落未确认草稿再发；只有服务端 applied+revision 才算已保存 */
+	readingWriteNote: "reading:write-note",
+	/** 未确认草稿列表（重开恢复用；不做自动重发） */
+	readingListNoteDrafts: "reading:list-note-drafts",
+	/** 丢弃一份未确认草稿（本地，不影响服务端） */
+	readingDiscardNoteDraft: "reading:discard-note-draft",
+	/** 恢复草稿：先查服务端 request 台账（只读），必要时才用原请求重发 */
+	readingResumeNoteDraft: "reading:resume-note-draft",
+	/** 本地阅读位置（按 edition+contentVersion） */
+	readingGetPosition: "reading:get-position",
+	/** 保存阅读位置：原子写+备份，版本不符不覆盖 */
+	readingSavePosition: "reading:save-position",
+	/** 两棵旧会话树的来源列表 */
+	readingHistorySources: "reading:history-sources",
+	/** 旧会话列表（source 必填，source-labelled，只读） */
+	readingListHistory: "reading:list-history",
+	/** 旧会话摘要+原文（原样返回，truncated 标记） */
+	readingReadHistorySession: "reading:read-history-session",
+	/** P04：按 workId+editionId 列全部会话绑定（staleSessionIds=指向已消失会话的绑定） */
+	readingListBindings: "reading:list-bindings",
+	/** P04：解析某版本的绑定；missing/sessionMissing 明确返回，绝不静默新建或替换 */
+	readingResolveBinding: "reading:resolve-binding",
+	/** P04：显式绑定/重绑到已存在会话（存在性由 SessionCatalog 校验） */
+	readingBindSession: "reading:bind-session",
+	/** P04：解绑（只删绑定关系，不清会话内容/草稿） */
+	readingUnbindSession: "reading:unbind-session",
+
 	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
 	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
 	videogenSubmit: "videogen:submit",

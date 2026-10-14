@@ -138,6 +138,7 @@ import type {
 import { imageContentSrc } from "../../../../shared/imageContentSrc";
 import { parseRichInputChips, unwrapFileChipPath, formatChipDisplayLabel, isDirectoryFileChip } from "./composer/chips";
 import { buildBubbleRefSegments, replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
+import { workbenchMaterialSourceLine } from "../../../../shared/types/workbenchMaterial";
 import type { BubbleRefSegment } from "./composer/quoteChip";
 import removeMarkdown from "remove-markdown";
 
@@ -1242,11 +1243,13 @@ function renderBubbleSegments(
 			return;
 		}
 		const { block } = segment;
-		const chipKind = block.kind;
+		// P04 工作台材料（书段/待办）在气泡里复用引用 chip 的视觉位；专门图标与颜色留 UI 集成阶段。
+		const chipKind = block.kind === "reading_material" || block.kind === "todo_material" ? "quote" : block.kind;
 		const label = block.kind === "session" ? block.name : block.label;
 		// skill/template 正文可能是一整份 SKILL.md 或提示词；它属于模型上下文，不应在
-		// 原生 title 中撑出巨大浮层。quote/session 仍保留全文悬浮预览。
-		const title = block.kind === "skill" ? `/${label}` : block.text;
+		// 原生 title 中撑出巨大浮层。quote/session 仍保留全文悬浮预览；
+		// 工作台材料的悬浮预览带上「真实来源」一行（书与章节/事项身份），便于回看出处。
+		const title = block.kind === "skill" ? `/${label}` : block.kind === "reading_material" || block.kind === "todo_material" ? `${workbenchMaterialSourceLine(block.material)}\n\n${block.text}` : block.text;
 		const Icon = CHIP_ICONS[chipKind] ?? FileText;
 		nodes.push(
 			<span key={`${chipKind}-${block.start}`} className={`input-chip input-chip--${chipKind}`} data-type={chipKind} title={title}>

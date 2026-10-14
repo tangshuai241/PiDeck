@@ -30,6 +30,7 @@ import type { CloudMemoryPersistedSettings, CloudMemoryStore } from "./cloudMemo
 import { createDefaultCloudMemorySettings } from "./cloudMemoryStore";
 import { CloudMemoryNativeStatus } from "./cloudMemoryNativeStatus";
 import { errorInfo, type CloudMemoryConnectOutcome, type CloudMemoryServiceDeps, type CloudMemorySpawnProfile, type CommitFailure, type CommitOutcome, type CommitSuccess } from "./cloudMemoryServiceTypes";
+import { sameCloudMemoryAuthIdentity, type CloudMemoryAuthLeaseResult, type CloudMemoryAuthSnapshot } from "./cloudMemoryAuthSeam";
 import type { RuntimeBinding } from "./cloudMemoryStatusProjection";
 import { parsePersonaPayload } from "./cloudMemoryPersona";
 import { cloudInstanceIdFromOrigin, parseCloudMemoryConnectInput, verifyPersonaSnapshot, validateCloudPrincipal } from "./cloudMemoryValidation";
@@ -520,6 +521,34 @@ export class CloudMemoryService {
 		if (!this.persona) return null;
 		if (!this.sameIdentity(this.persona.account, this.persona.cloudInstanceId)) return null;
 		return { ...this.persona, stale: !this.fetchedThisRun };
+	}
+
+	// ── 认证复用 seam（P02 待办等主进程域）──────────────────────────────────────
+
+	/**
+	 * 当前连接身份（不含凭据）。与记忆总开关无关：记忆被关闭、或登出只删令牌保留地址/账号时，
+	 * 快照仍返回身份；是否真的能换到令牌由 acquireAuthLease 判定。
+	 */
+	getAuthSnapshot(): CloudMemoryAuthSnapshot | null {
+		const { baseUrl, account, cloudInstanceId } = this.settings;
+		if (!baseUrl || !account || !cloudInstanceId) return null;
+		return { origin: baseUrl, account, cloudInstanceId, configEpoch: this.settings.configEpoch };
+	}
+
+	/**
+	 * 换取一次会话令牌：先复核调用方持有的身份未被替换（防旧账号请求发到新账号），
+	 * 再走既有 ensureSession（令牌验一次，失效且记住登录时重登一次，不循环重试）。
+	 * `stale=true` 表示身份已切换，调用方不得展示为用户可见错误。
+	 */
+	async acquireAuthLease(expected: CloudMemoryAuthSnapshot): Promise<CloudMemoryAuthLeaseResult> {
+		const current = this.getAuthSnapshot();
+		if (!current || !sameCloudMemoryAuthIdentity(current, expected)) return { ok: false, stale: true, error: this.staleError() };
+		const epoch = this.intentEpoch;
+		const session = await this.ensureSession(epoch);
+		if (!session.ok) return { ok: false, stale: this.disposed || epoch !== this.intentEpoch, error: session.error };
+		const after = this.getAuthSnapshot();
+		if (this.disposed || epoch !== this.intentEpoch || !after || !sameCloudMemoryAuthIdentity(after, expected)) return { ok: false, stale: true, error: this.staleError() };
+		return { ok: true, lease: { ...after, token: session.value.token } };
 	}
 
 	// ── 原生 RPC 状态（N08 消费端）───────────────────────────────────────────────

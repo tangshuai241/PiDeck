@@ -8,6 +8,7 @@
 - [长期改进路线](docs/tpa-roadmap.md)：产品目标、阶段顺序与建设方式。
 - [第一阶段改进计划](docs/tpa-phase-1.md)：首阶段范围、改进后的场景与完成标准。
 - [文稿执行、成果归档与改稿方案](docs/tpa-document-work-v1.md)：TPA 独立执行、模块接口、核心逻辑单元测试与验收门禁。
+- [个人工作台功能区与迁移方案](docs/tpa-personal-workbench-plan-v1.md)：左侧阅读／待办入口、数据来源、实施节点与必要测试。
 
 ## 项目简介
 

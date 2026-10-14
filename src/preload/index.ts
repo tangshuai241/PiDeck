@@ -14,6 +14,50 @@ import type { GitExecutableInfo } from "../shared/types/git";
 import type { DshRunnerNodeInfo, DshRunnerNodeInstallResult } from "../shared/types/dshRunnerNode";
 import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type { CloudMemoryConnectInput, CloudMemoryConnectResult, CloudMemoryStatusResult } from "../shared/types/cloudMemory";
+import type {
+	PersonalTodoChangedEvent,
+	PersonalTodoGetResult,
+	PersonalTodoListResult,
+	PersonalTodoQuery,
+	PersonalTodoResolveConflictInput,
+	PersonalTodoResolveConflictResult,
+	PersonalTodoRetryInput,
+	PersonalTodoRetryResult,
+	PersonalTodoStatusResult,
+	PersonalTodoSubmitInput,
+	PersonalTodoSubmitResult,
+} from "../shared/types/personalTodo";
+import type {
+	ReadingBindSessionInput,
+	ReadingBindingListResult,
+	ReadingBindingMutationResult,
+	ReadingBindingRef,
+	ReadingBindingResolveResult,
+	ReadingChapterResult,
+	ReadingConnectInput,
+	ReadingEditionResult,
+	ReadingHistoryListResult,
+	ReadingHistoryQuery,
+	ReadingHistorySessionResult,
+	ReadingHistorySourceName,
+	ReadingHistorySourcesResult,
+	ReadingLibraryResult,
+	ReadingNoteDraftActionResult,
+	ReadingNoteDraftListResult,
+	ReadingNoteDraftRef,
+	ReadingNoteDraftResumeResult,
+	ReadingNoteListResult,
+	ReadingNoteReadResult,
+	ReadingNoteWriteInput,
+	ReadingNoteWriteResult,
+	ReadingPositionGetResult,
+	ReadingPositionSaveInput,
+	ReadingPositionSaveResult,
+	ReadingQuoteResult,
+	ReadingResolveQuoteInput,
+	ReadingStatusResult,
+	ReadingUnbindResult,
+} from "../shared/types/reading";
 import type { VideoGenConfigFile, VideoGenRequest, VideoGenSaveResult, VideoGenSubmitResult, VideoGenJobSnapshot } from "../shared/types/videogen";
 import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
@@ -1671,6 +1715,71 @@ const api = {
 		refreshPersona: () => ipcRenderer.invoke(ipcChannels.cloudMemoryRefreshPersona) as Promise<CloudMemoryStatusResult>,
 		/** 状态变化推送（连接/开关/后台刷新完成）；返回退订函数，渲染层收到后重拉状态。 */
 		onStatusChanged: (callback: () => void) => subscribe(ipcChannels.cloudMemoryStatusChanged, callback),
+	},
+	// ── 个人待办（P02）：账号沿用云端记忆连接；写操作先入待传队列，凭据与令牌不经此通道 ──
+	personalTodo: {
+		/** 账号作用域、队列摘要与云端写入可用性。 */
+		getStatus: () => ipcRenderer.invoke(ipcChannels.personalTodoGetStatus) as Promise<PersonalTodoStatusResult>,
+		/** 列表（缓存优先，后台刷新）；分页用返回的 nextCursor 再调一次。 */
+		list: (query: PersonalTodoQuery) => ipcRenderer.invoke(ipcChannels.personalTodoList, query) as Promise<PersonalTodoListResult>,
+		/** 单条视图（含 confirmed/draft 并列）。 */
+		get: (id: string) => ipcRenderer.invoke(ipcChannels.personalTodoGet, id) as Promise<PersonalTodoGetResult>,
+		/** 提交写操作：受理即已耐久入队，不等于云端已确认（确认走 onChanged）。 */
+		submit: (input: PersonalTodoSubmitInput) => ipcRenderer.invoke(ipcChannels.personalTodoSubmit, input) as Promise<PersonalTodoSubmitResult>,
+		/** 重试失败/未知项（复用原 requestId，不盲重新创建）。 */
+		retry: (input: PersonalTodoRetryInput) => ipcRenderer.invoke(ipcChannels.personalTodoRetry, input) as Promise<PersonalTodoRetryResult>,
+		/** 冲突处理：保留草稿或改用云端版本。 */
+		resolveConflict: (input: PersonalTodoResolveConflictInput) => ipcRenderer.invoke(ipcChannels.personalTodoResolveConflict, input) as Promise<PersonalTodoResolveConflictResult>,
+		/** 变化推送；返回退订函数，渲染层卸载必须退订。 */
+		onChanged: (callback: (event: PersonalTodoChangedEvent) => void) => subscribe<PersonalTodoChangedEvent>(ipcChannels.personalTodoChanged, callback),
+	},
+	// ── 阅读（P03）：DeepRead 只读适配；密码与 cookie 只在主进程，渲染层不 fetch、不传路径 ──
+	reading: {
+		/** 服务可用性/连接视图（不探测、不扫书库）。 */
+		getStatus: () => ipcRenderer.invoke(ipcChannels.readingGetStatus) as Promise<ReadingStatusResult>,
+		/** 连接回环 DeepRead；密码只经主进程安全存储，绝不在渲染层落盘。 */
+		connect: (input: ReadingConnectInput) => ipcRenderer.invoke(ipcChannels.readingConnect, input) as Promise<ReadingStatusResult>,
+		/** 断开本地会话与受保护密码（不改服务端配置）。 */
+		disconnect: () => ipcRenderer.invoke(ipcChannels.readingDisconnect) as Promise<ReadingStatusResult>,
+		/** 作品与版本；后续请求只能用它返回的 workId/editionId。 */
+		listLibrary: () => ipcRenderer.invoke(ipcChannels.readingListLibrary) as Promise<ReadingLibraryResult>,
+		/** 指定版本的 identity/toc/spine/analysis。 */
+		getEdition: (workId: string, editionId: string) => ipcRenderer.invoke(ipcChannels.readingGetEdition, { workId, editionId }) as Promise<ReadingEditionResult>,
+		/** 按章正文（chapter 可传章号或 toc href）。 */
+		getChapter: (workId: string, editionId: string, chapter: string | number) => ipcRenderer.invoke(ipcChannels.readingGetChapter, { workId, editionId, chapter }) as Promise<ReadingChapterResult>,
+		/** 引文核验（必须带 expectedVersion，offsets 原样展示）。 */
+		resolveQuote: (input: ReadingResolveQuoteInput) => ipcRenderer.invoke(ipcChannels.readingResolveQuote, input) as Promise<ReadingQuoteResult>,
+		/** noteId 列表（新接口未部署时返回 unsupported）。 */
+		listNotes: (workId: string, editionId: string) => ipcRenderer.invoke(ipcChannels.readingListNotes, { workId, editionId }) as Promise<ReadingNoteListResult>,
+		/** 按 noteId 读笔记（含 truncated）。 */
+		readNote: (workId: string, noteId: string) => ipcRenderer.invoke(ipcChannels.readingReadNote, { workId, noteId }) as Promise<ReadingNoteReadResult>,
+		/** 手工写笔记：先落未确认草稿再发；只有服务端 applied+revision 才返回 ok。 */
+		writeNote: (input: ReadingNoteWriteInput) => ipcRenderer.invoke(ipcChannels.readingWriteNote, input) as Promise<ReadingNoteWriteResult>,
+		/** 未确认草稿列表（重开恢复用；不做自动重发）。 */
+		listNoteDrafts: () => ipcRenderer.invoke(ipcChannels.readingListNoteDrafts) as Promise<ReadingNoteDraftListResult>,
+		/** 丢弃一份未确认草稿（仅本地，不影响服务端）。 */
+		discardNoteDraft: (ref: ReadingNoteDraftRef) => ipcRenderer.invoke(ipcChannels.readingDiscardNoteDraft, ref) as Promise<ReadingNoteDraftActionResult>,
+		/** 恢复草稿：先查服务端 request 台账（只读），必要时才用原请求重发。 */
+		resumeNoteDraft: (ref: ReadingNoteDraftRef) => ipcRenderer.invoke(ipcChannels.readingResumeNoteDraft, ref) as Promise<ReadingNoteDraftResumeResult>,
+		/** 本地阅读位置（按 edition+contentVersion；版本不符 stale）。 */
+		getPosition: (workId: string, editionId: string, contentVersion: string) => ipcRenderer.invoke(ipcChannels.readingGetPosition, { workId, editionId, contentVersion }) as Promise<ReadingPositionGetResult>,
+		/** 保存阅读位置：原子写+备份，版本不符不覆盖。 */
+		savePosition: (input: ReadingPositionSaveInput) => ipcRenderer.invoke(ipcChannels.readingSavePosition, input) as Promise<ReadingPositionSaveResult>,
+		/** 两树旧会话来源。 */
+		historySources: () => ipcRenderer.invoke(ipcChannels.readingHistorySources) as Promise<ReadingHistorySourcesResult>,
+		/** 旧会话列表（source 必填，source-labelled，只读；未部署返回 unsupported）。 */
+		listHistory: (query: ReadingHistoryQuery) => ipcRenderer.invoke(ipcChannels.readingListHistory, query) as Promise<ReadingHistoryListResult>,
+		/** 旧会话摘要+原文（原样返回，truncated 原样转达）。 */
+		readHistorySession: (source: ReadingHistorySourceName, id: string) => ipcRenderer.invoke(ipcChannels.readingReadHistorySession, { source, id }) as Promise<ReadingHistorySessionResult>,
+		// ── P04 会话绑定：本地关系读写；目标会话存在性由主进程 SessionCatalog 校验 ──
+		/** 全部绑定（staleSessionIds 指向已不存在的会话，界面需提示重绑）。 */
+		listBindings: () => ipcRenderer.invoke(ipcChannels.readingListBindings) as Promise<ReadingBindingListResult>,
+		/** 解析某版本的绑定；missing/sessionMissing 明确返回，不静默新建。 */
+		resolveBinding: (ref: ReadingBindingRef) => ipcRenderer.invoke(ipcChannels.readingResolveBinding, ref) as Promise<ReadingBindingResolveResult>,
+		/** 显式绑定/重绑（只写绑定关系，不写 Pi 会话文件）。 */
+		bindSession: (input: ReadingBindSessionInput) => ipcRenderer.invoke(ipcChannels.readingBindSession, input) as Promise<ReadingBindingMutationResult>,
+		/** 解绑（只删绑定关系；会话内容/草稿不动）。 */
+		unbindSession: (ref: ReadingBindingRef) => ipcRenderer.invoke(ipcChannels.readingUnbindSession, ref) as Promise<ReadingUnbindResult>,
 	},
 };
 

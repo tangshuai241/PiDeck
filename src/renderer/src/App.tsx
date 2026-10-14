@@ -164,7 +164,9 @@ import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
 import { HostPluginPanelHost } from "./components/plugins/HostPluginPanelHost";
 import { HostPluginPageOverlay } from "./components/plugins/HostPluginPageOverlay";
+import { PersonalWorkbenchStage } from "./components/personal-workbench/PersonalWorkbenchStage";
 import { useHostPluginPageTab } from "./hooks/useHostPluginPageTab";
+import { usePersonalWorkbenchNavigation } from "./hooks/usePersonalWorkbench";
 import { useHostPluginNavigation } from "./hooks/plugins/useHostPluginNavigation";
 import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
 import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
@@ -1954,6 +1956,11 @@ export function App() {
 		[store, refreshProjectSessions],
 	);
 
+	// 个人工作台覆盖层的「让位」动作（App 只装配，不持有页面状态）：用户在侧栏列表或会话 Tab 里
+	// 点会话（含当前会话）就是想看那个会话，功能页必须收起来。只取 closePage：打开功能页与
+	// 返回原会话由侧栏入口和页面容器自己处理，不在 App 再写一套导航规则。
+	const { closePage: closePersonalWorkbenchPage } = usePersonalWorkbenchNavigation();
+
 	const sidebarActions: SidebarActions = {
 		projects: {
 			add: addProject,
@@ -2004,6 +2011,8 @@ export function App() {
 			// 简洁模式没有临时预览；标签模式保留原设置及双击晋升。
 			simpleNavigation: settings.navigationMode === "simple",
 			open: async (projectId, sessionId, tabMode) => {
+				// 点会话（含当前会话）即看会话：功能页覆盖层先让位，再走原有选中/打开路径
+				closePersonalWorkbenchPage();
 				await openSidebarSessionByIdWithTab(projectId, sessionId, settings.navigationMode === "simple" ? "permanent" : (tabMode ?? settings.sessionTabOpenMode));
 			},
 			// 活动页「最近会话」跨项目展示：后台静默预热尚未扫描的项目 catalog。
@@ -2141,6 +2150,7 @@ export function App() {
 			settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
 			settingsNavTab={settings.sidebarNavTab}
 			settingsPinnedSessionIds={settings.pinnedSessionIds}
+			settingsPersonalWorkbenchCollapsed={settings.personalWorkbenchCollapsed}
 			settingsSessionSortMode={settings.sessionSortMode}
 			settingsLoaded={settingsLoaded}
 			onExpandedProjectsReady={() => setExpandedProjectsReady(true)}
@@ -2691,6 +2701,8 @@ export function App() {
 			// Overlay 的 scope 变化兑底只覆盖「切到别的会话」这一分支。
 			onSelect={(sessionId) => {
 				hostPluginPageTab?.onClose();
+				// 点会话 Tab（含当前 Tab）= 看那个会话：个人工作台功能页同样收起
+				closePersonalWorkbenchPage();
 				workspaceChrome.selectTab(sessionId);
 			}}
 			sessionActions={tabsSessionActions}
@@ -2746,7 +2758,11 @@ export function App() {
 			// 会话树保持挂载，关闭覆盖层即原样还原（滚动/草稿/终端内存态不丢）。
 			session={
 				<div className="relative flex h-full min-h-0 min-w-0 flex-col">
-					{chatPaneSessionNode}
+					{/* 个人工作台：页面容器 + 被遮会话列的 inert/焦点交接（业务在模块内，App 只装配）。
+					    返回原会话走侧栏同一条会话打开路径（openSidebarSessionByIdWithTab），不另开导航通道。 */}
+					<PersonalWorkbenchStage projectId={activeProject?.id} sessionId={currentSessionId} onRestoreSession={sidebarActions.sessions.open}>
+						{chatPaneSessionNode}
+					</PersonalWorkbenchStage>
 					<HostPluginPageOverlay projectId={activeProject?.id} sessionId={currentSessionId} />
 				</div>
 			}

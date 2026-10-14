@@ -1930,6 +1930,42 @@ export function createPreviewApi(): PiDesktopApi {
 			refreshPersona: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),
 			onStatusChanged: () => () => {},
 		},
+		// 个人待办（P02）：预览/浏览器模式没有主进程，一律返回未连接（不伪造云端数据）
+		personalTodo: {
+			getStatus: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			list: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			get: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			submit: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			retry: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			resolveConflict: async () => ({ ok: false as const, error: { code: "notConnected" as const, message: "desktop-only" } }),
+			onChanged: () => () => {},
+		},
+		// 阅读（P03）：预览/浏览器模式没有主进程，一律返回不可用（不伪造书库/笔记数据）
+		reading: {
+			getStatus: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			connect: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			disconnect: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			listLibrary: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			getEdition: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			getChapter: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			resolveQuote: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			listNotes: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			readNote: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			writeNote: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			listNoteDrafts: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			discardNoteDraft: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			resumeNoteDraft: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			getPosition: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			savePosition: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			historySources: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			listHistory: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			readHistorySession: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			// P04 会话绑定：预览/浏览器模式无会话目录，列/解析/绑定/解绑全部声明不可用（不伪造绑定）。
+			listBindings: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			resolveBinding: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			bindSession: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+			unbindSession: async () => ({ ok: false as const, error: { code: "unavailable" as const, message: "desktop-only" } }),
+		},
 	};
 
 	/** 预览态云端记忆状态：全部路径为空字符串，不指向真实 userData。 */

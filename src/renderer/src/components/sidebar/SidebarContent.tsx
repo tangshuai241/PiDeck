@@ -23,6 +23,7 @@ import { Dock, DockItem } from "../motion/dock";
 import { UpdateDotHint } from "./UpdateDotHint";
 
 import { AutomationDockButton } from "../automation/AutomationDockButton";
+import { PersonalWorkbenchSection } from "../personal-workbench/PersonalWorkbenchSection";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
@@ -145,6 +146,10 @@ export type SidebarContentProps = {
 	/** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
 	themeMode?: AppThemeMode;
 	onToggleTheme?: () => void;
+	/** settings.json 里保存的「个人工作台」分组折叠态（权威来源，缺省展开）。 */
+	settingsPersonalWorkbenchCollapsed?: boolean;
+	/** 首次 settings.get 已完成：此前不合并 settings 里的折叠态，避免迟到响应回盖首屏选择。 */
+	settingsLoaded?: boolean;
 };
 
 export function SidebarContent(props: SidebarContentProps) {
@@ -322,6 +327,12 @@ export function SidebarContent(props: SidebarContentProps) {
 						onQueryChange={(query) => controller.setSearch(query)}
 					/>
 				</div>
+
+				{/* 个人工作台：独立于会话分段的固定功能区（方案里左侧结构的第一段），两种导航模式都渲染——
+            simple 模式只收起会话分段栏，固定功能入口不属于分段控件，同时避免「入口被藏起来、
+            页面已打开」的返回歧义（页面头部仍常驻「返回会话」）。入口只是导航开关，
+            页面本体在会话区的覆盖层里呈现。 */}
+				<PersonalWorkbenchSection currentProjectId={props.currentProjectId} currentSessionId={props.currentSessionId} settingsLoaded={props.settingsLoaded ?? false} settingsCollapsed={props.settingsPersonalWorkbenchCollapsed} openSession={(projectId, sessionId) => void actions.sessions.open(projectId, sessionId)} />
 
 				{/* 活动 / 聊天 / 项目分段：beUI pill 分段（凹槽轨道 + 凸起高亮胶囊）。
             活动页收集所有已激活的 Agent 会话（跨项目），聊天页显示历史会话，项目页显示工作区目录。

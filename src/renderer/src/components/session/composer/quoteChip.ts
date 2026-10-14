@@ -12,6 +12,8 @@
 
 import { escapeXmlAttribute, parseExpandedRefBlocks, replaceExpandedRefBlocksWithLabels, sanitizeBlockClosingTag } from "./referenceBlocks";
 import type { ExpandedRefBlock } from "./referenceBlocks";
+import { formatWorkbenchMaterialBlock } from "../../../../../shared/workbenchMaterialBlocks";
+import type { WorkbenchMaterial } from "../../../../../shared/types/workbenchMaterial";
 
 // 自包含块的解析/折叠已下沉到 shared/expandedRefBlocks（主进程 preview、Web 端共用一份实现）；
 // 这里保留既有导出名，调用方与单测无需改 import 路径。
@@ -32,15 +34,23 @@ export {
 	replaceExpandedRefBlocksWithLabels,
 } from "./referenceBlocks";
 
-/** 引用快照：创建时捕获的文本 + 来源消息 id（时间线节点的 data-message-id）。 */
+/**
+ * 引用快照：创建时捕获的文本 + 来源消息 id（时间线节点的 data-message-id）。
+ *
+ * P04 扩展：同一仓同时承载工作台材料（书段/待办）。材料不是 Pi 会话消息，因此
+ * `material` 存在时 `messageId` 固定为空串（不伪造来源消息），展开走材料块而非
+ * `<quoted_context>`；`material` 缺省时行为与旧消息引用完全一致。
+ */
 export type QuoteSnippet = {
 	/** 形如 "q3f2a1b0c"（不含 # 前缀），与 token 正则的捕获体一致。 */
 	id: string;
 	/** 划选文本快照（纯文本、保留换行）；发送后不跟随源消息变化。 */
 	text: string;
-	/** 来源消息 id，用于展示出处与排查。 */
+	/** 来源消息 id（旧消息引用用于展示出处与排查）；工作台材料为空串。 */
 	messageId: string;
 	createdAt: number;
+	/** P04 工作台材料来源；缺省/null = 旧消息引用（走 <quoted_context>，行为不变）。 */
+	material?: WorkbenchMaterial | null;
 };
 
 /**
@@ -105,6 +115,8 @@ export function stripQuoteTokens(text: string): string {
  *
  * 输出形态：
  *   <quoted_context label="…" message_id="…">完整引文</quoted_context>
+ *   <reading_segment …>书段原文</reading_segment>（材料快照）
+ *   <personal_todo …>事项正文</personal_todo>（材料快照）
  *
  *   与第一段引文对应的问题…
  *
@@ -130,12 +142,9 @@ export function expandQuoteTokens(text: string, resolve: (id: string) => QuoteSn
 			seen.add(occurrence.id);
 			const snippet = resolve(occurrence.id);
 			if (snippet) {
-				parts.push(
-					formatQuoteBlock(snippet.text, {
-						label: truncateQuoteLabel(snippet.text),
-						messageId: snippet.messageId,
-					}),
-				);
+				// 工作台材料：自带完整来源与正文，直接展开为材料块；
+				// 旧消息引用：保持 <quoted_context> 形态（label/messageId 都由快照给出）。
+				parts.push(snippet.material ? formatWorkbenchMaterialBlock(snippet.material) : formatQuoteBlock(snippet.text, { label: truncateQuoteLabel(snippet.text), messageId: snippet.messageId }));
 			}
 		}
 		cursor = occurrence.end;
@@ -204,6 +213,8 @@ export type RehydratedDraft = {
  * 直接回填 message.text 会把 `<quoted_context …>` / `<referenced_session …>` /
  * `<skill …>` / `<prompt_template …>` 原文塞进输入框；这里还原成 chip 形态：
  * - quote → 新 `#q<id>` token + 快照（全文/出处不丢，重发时 expandQuoteTokens 会再展开）
+ * - 工作台材料（书段/待办）→ 同样还原成 `#q<id>` token + 携带 material 的快照，
+ *   重发时重新展开为同形材料块（来源身份不丢）
  * - session/skill/template → 原始 mention 文本（`&名称` / `/skill:名称` / `/模板名`），
  *   由 composer 的白名单解析重新渲染成 chip
  * 块两侧的 `\n\n` 是写给模型看的上下文分隔，回输入框时压成单个空格；
@@ -225,6 +236,17 @@ export function rehydrateDraftFromMessage(text: string, createId: () => string =
 				text: block.text,
 				messageId: block.messageId,
 				createdAt: Date.now(),
+			};
+			quotes.push(snippet);
+			parts.push(buildQuoteToken(snippet.id));
+		} else if (block.kind === "reading_material" || block.kind === "todo_material") {
+			// 材料块同样回填成 chip + 快照：来源身份与正文原样保留，重发即重建同形块。
+			const snippet: QuoteSnippet = {
+				id: createId(),
+				text: block.text,
+				messageId: "",
+				createdAt: Date.now(),
+				material: block.material,
 			};
 			quotes.push(snippet);
 			parts.push(buildQuoteToken(snippet.id));

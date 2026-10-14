@@ -6,6 +6,8 @@
  *   <referenced_session name="…">…</referenced_session>
  *   <skill name="…">…</skill>                    （pi 展开 /skill:名称）
  *   <prompt_template name="…">…</prompt_template>（PiDeck 展开 /模板名）
+ *   <reading_segment …>…</reading_segment>       （P04 书段材料，见 workbenchMaterialBlocks）
+ *   <personal_todo …>…</personal_todo>           （P04 待办材料，见 workbenchMaterialBlocks）
  *
  * 任何面向人的纯文本出口（侧栏会话 preview、Web 端消息、子代理转录、会话定位轴标题、
  * 复制/队列预览）都必须先折叠成 `❝label` / `&名称` / `/名称`，不能漏出 XML 原文。
@@ -14,24 +16,14 @@
  * 且不能反向依赖渲染层。本模块无 React / 无 Node 依赖，可被 node:test 直接加载。
  */
 
-/** XML 属性转义（label / name / messageId 可能含引号、尖括号）。 */
-export function escapeXmlAttribute(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+// XML 编解码基元已下沉到 xmlBlockCodec（与工作台材料块共用；避免两块域互相 import 形成环）。
+// 这里保留既有导出名，调用方与单测无需改 import 路径。
+export { decodeXmlAttribute, escapeXmlAttribute, sanitizeBlockClosingTag } from "./xmlBlockCodec";
 
-/** XML 属性反转义（仅处理本模块生成的四种实体）。 */
-export function decodeXmlAttribute(value: string): string {
-	return value
-		.replace(/&quot;/g, '"')
-		.replace(/&gt;/g, ">")
-		.replace(/&lt;/g, "<")
-		.replace(/&amp;/g, "&");
-}
-
-/** 正文里的闭合标签会提前截断解析：写入前改写成无害形态。 */
-export function sanitizeBlockClosingTag(value: string, tagName: string): string {
-	return value.replace(new RegExp(`</${tagName}>`, "gi"), `</${tagName}_>`);
-}
+import { decodeXmlAttribute, escapeXmlAttribute, sanitizeBlockClosingTag } from "./xmlBlockCodec";
+import type { ReadingSegmentMaterial, TodoMaterial } from "./types/workbenchMaterial";
+import { workbenchMaterialLabel } from "./types/workbenchMaterial";
+import { parsePersonalTodoMaterialBlocks, parseReadingSegmentMaterialBlocks } from "./workbenchMaterialBlocks";
 
 /**
  * 模板命令的发送/存储形态。
@@ -149,8 +141,20 @@ export function parseExpandedSessionBlocks(text: string): ExpandedSessionBlock[]
 	return blocks;
 }
 
-/** 统一后的引用块（quote / session / skill）。 */
-export type ExpandedRefBlock = { kind: "quote"; label: string; messageId: string; text: string; start: number; end: number } | { kind: "session"; name: string; text: string; start: number; end: number } | { kind: "skill"; label: string; text: string; start: number; end: number };
+/**
+ * 统一后的引用块（quote / session / skill + P04 工作台材料两类）。
+ *
+ * 材料变体自带结构化 material（来源身份 + 正文快照）：气泡/预览/编辑重放都从这里还原 chip，
+ * 不依赖运行时快照；材料不是会话消息，没有 messageId。
+ */
+export type ExpandedReadingMaterialBlock = { kind: "reading_material"; material: ReadingSegmentMaterial; label: string; text: string; start: number; end: number };
+export type ExpandedTodoMaterialBlock = { kind: "todo_material"; material: TodoMaterial; label: string; text: string; start: number; end: number };
+export type ExpandedRefBlock =
+	| { kind: "quote"; label: string; messageId: string; text: string; start: number; end: number }
+	| { kind: "session"; name: string; text: string; start: number; end: number }
+	| { kind: "skill"; label: string; text: string; start: number; end: number }
+	| ExpandedReadingMaterialBlock
+	| ExpandedTodoMaterialBlock;
 
 /**
  * 统一解析消息文本中所有需要折叠展示的自包含块。
@@ -191,6 +195,22 @@ export function parseExpandedRefBlocks(text: string): ExpandedRefBlock[] {
 			start: b.start,
 			end: b.end,
 		})),
+		...parseReadingSegmentMaterialBlocks(text).map((b) => ({
+			kind: "reading_material" as const,
+			material: b.material,
+			label: workbenchMaterialLabel(b.material),
+			text: b.text,
+			start: b.start,
+			end: b.end,
+		})),
+		...parsePersonalTodoMaterialBlocks(text).map((b) => ({
+			kind: "todo_material" as const,
+			material: b.material,
+			label: workbenchMaterialLabel(b.material),
+			text: b.text,
+			start: b.start,
+			end: b.end,
+		})),
 	];
 	blocks.sort((a, b) => a.start - b.start || b.end - a.end);
 
@@ -206,7 +226,11 @@ export function parseExpandedRefBlocks(text: string): ExpandedRefBlock[] {
 
 /** 块折叠后的展示标签（复制/预览/标题共用一套形态，避免各处自造写法）。 */
 function expandedRefBlockLabel(block: ExpandedRefBlock): string {
-	return block.kind === "quote" ? `❝${block.label}` : block.kind === "session" ? `&${block.name}` : `/${block.label}`;
+	if (block.kind === "quote") return `❝${block.label}`;
+	if (block.kind === "session") return `&${block.name}`;
+	if (block.kind === "skill") return `/${block.label}`;
+	// 工作台材料不属于 /技能 命名空间：用独立前缀，纯文本出口也能一眼看出是书段还是待办。
+	return block.kind === "reading_material" ? `📖${block.label}` : `☑${block.label}`;
 }
 
 /**
@@ -215,7 +239,7 @@ function expandedRefBlockLabel(block: ExpandedRefBlock): string {
  * 避免这些 UI 暴露模型需要的 XML 上下文。顺序按原位置保留。
  */
 export function replaceExpandedRefBlocksWithLabels(text: string): string {
-	if (!text.includes("<quoted_context") && !text.includes("<referenced_session") && !text.includes("<skill") && !text.includes("<prompt_template")) {
+	if (!text.includes("<quoted_context") && !text.includes("<referenced_session") && !text.includes("<skill") && !text.includes("<prompt_template") && !text.includes("<reading_segment") && !text.includes("<personal_todo")) {
 		return text;
 	}
 	const blocks = parseExpandedRefBlocks(text);
@@ -270,5 +294,6 @@ export function looksLikeExpandedRefBlockTitle(title: string | undefined): boole
 	if (parseExpandedRefBlocks(title).length > 0) return true;
 	// 写入方截断/只落了半个块时没有闭合标签，按「带 name/label 属性的块开标签」判定。
 	// 不用裸 `<skill>` 之类无属性形态，避免把用户手写的「<skill> 是什么意思」误判成脏标题。
-	return /<(?:quoted_context|referenced_session|skill|prompt_template)\b[^>]*\b(?:name|label)="/i.test(title);
+	// P04 工作台材料块同样带属性（材料进消息文本后必须能被标题链路剥掉，不能漏 XML）。
+	return /<(?:quoted_context|referenced_session|skill|prompt_template|reading_segment|personal_todo)\b[^>]*\b(?:name|label|work_id|todo_id)="/i.test(title);
 }

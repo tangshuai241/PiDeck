@@ -671,6 +671,12 @@ export type AppSettings = {
 	 */
 	sidebarNavTab?: "active" | "chats" | "projects";
 	/**
+	 * 侧栏「个人工作台」分组的折叠态（P01 导航落地时新增）。可选以兼容旧 settings.json；
+	 * localStorage 作首屏缓存，settings.json 作跨 renderer origin / dev 强杀的可靠恢复来源。
+	 * 缺省（缺字段/非法值）为展开，只影响入口分组的显示，不影响功能页与会话。
+	 */
+	personalWorkbenchCollapsed?: boolean;
+	/**
 	 * 侧栏中置顶的会话记录 id。SessionRecord.id 跨重启稳定；缺失或已删除的 id
 	 * 在展示时安全忽略，避免修改 pi 会话文件或把短生命周期 agentId 持久化。
 	 */

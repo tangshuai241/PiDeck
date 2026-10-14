@@ -42,6 +42,8 @@ interface AppSidebarProps {
 	settingsPinnedSessionIds?: readonly string[];
 	/** settings.json 中的会话排序模式（settings.sessionSortMode）。 */
 	settingsSessionSortMode?: SessionSortModeId;
+	/** settings.json 中「个人工作台」分组的折叠态（权威来源，缺省展开）。 */
+	settingsPersonalWorkbenchCollapsed?: boolean;
 	/** 首次 settings.get 已完成，controller 可安全处理旧 key 迁移。 */
 	settingsLoaded: boolean;
 	/** 展开集合完成权威 hydration 后，允许 App 按它懒加载会话。 */
@@ -100,6 +102,8 @@ export function AppSidebar(props: AppSidebarProps) {
 				actions={props.actions}
 				currentProjectId={props.currentProjectId}
 				currentSessionId={props.currentSessionId}
+				settingsPersonalWorkbenchCollapsed={props.settingsPersonalWorkbenchCollapsed}
+				settingsLoaded={props.settingsLoaded}
 				worktreesByProject={props.worktreesByProject}
 				branchByProject={props.branchByProject}
 				creatingWorktree={props.creatingWorktree}

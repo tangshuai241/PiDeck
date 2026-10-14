@@ -380,6 +380,14 @@ import { createCloudMemoryClient } from "./cloudMemory/cloudMemoryClient";
 import { resolveCloudMemoryPaths, CLOUD_MEMORY_EXTENSION_ENTRY } from "./cloudMemory/cloudMemoryPaths";
 import { CloudMemoryService } from "./cloudMemory/CloudMemoryService";
 import { CloudMemoryStore } from "./cloudMemory/cloudMemoryStore";
+import { registerPersonalTodoIpc } from "./ipc/personalTodoIpc";
+import { registerReadingIpc } from "./ipc/readingIpc";
+import { ReadingService } from "./personal-workbench/reading/ReadingService";
+import { ReadingConnectionStore } from "./personal-workbench/reading/readingConnectionStore";
+import { createReadingHttpClient } from "./personal-workbench/reading/readingHttpClient";
+import { resolveReadingPaths } from "./personal-workbench/reading/readingPaths";
+import { PersonalTodoService } from "./personal-workbench/PersonalTodoService";
+import { createHttpPersonalTodoTransport } from "./personal-workbench/personalTodoTransport";
 import { registerImageGenIpc } from "./ipc/imagegenIpc";
 import { ImageGenService } from "./imagegen/ImageGenService";
 import { ImageSessionStore } from "./imagegen/ImageSessionStore";
@@ -497,6 +505,10 @@ let settingsStore: SettingsStore;
 let securityStore: SecurityStore;
 /** 云端记忆（N04）：连接/凭据/人格缓存；spawn 时以显式 env 注入配置路径。 */
 let cloudMemoryService: CloudMemoryService | undefined;
+/** 个人待办（P02）：账号复用云端记忆连接；本地缓存/待传队列按账号隔离。 */
+let personalTodoService: PersonalTodoService | undefined;
+/** 阅读（P03）：DeepRead 只读适配 + 本地阅读位置；连接与密码与云端记忆完全独立。 */
+let readingService: ReadingService | undefined;
 let worktreeService: WorktreeService;
 let gitService: GitService;
 /** refs 变化监听：面板订阅 push/commit/fetch，主进程推送后角标秒级跟平（轮询仍作兜底） */
@@ -2807,11 +2819,50 @@ function registerIpc() {
 		// 可见状态变化推送：不给渲染层第二条事实通道，只通知「重拉一次」
 		onStatusChanged: () => {
 			if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.cloudMemoryStatusChanged);
+			// 账号/实例变化：待办立刻切作用域（旧账号在飞结果作废；缓存与队列按账号隔离保留）
+			personalTodoService?.handleIdentityMayHaveChanged();
 		},
 		log: cloudMemoryLog,
 	});
 	void cloudMemoryService.initialize().catch(() => undefined);
 	registerCloudMemoryIpc({ ipc: ipcMain, service: cloudMemoryService, log: cloudMemoryLog });
+
+	// 个人待办（P02）：账号与已连接凭据复用云端记忆（记忆总开关关闭不影响待办），
+	// 缓存/待传队列落在 userData/personal-todos/<accountKey>/，写入先耐久入队再后台发送。
+	const personalTodoLog = (message: string, details?: Record<string, unknown>) => void appLogger.info("personal-todo", message, details);
+	personalTodoService = new PersonalTodoService({
+		userDataDir: app.getPath("userData"),
+		auth: {
+			getSnapshot: () => cloudMemoryService?.getAuthSnapshot() ?? null,
+			acquireLease: (expected) => cloudMemoryService?.acquireAuthLease(expected) ?? Promise.resolve({ ok: false, stale: true, error: { code: "notConfigured" as const, message: "云端记忆服务尚未就绪" } }),
+		},
+		transport: createHttpPersonalTodoTransport({ fetchImpl: (url, init) => fetch(url, init), timeoutMs: 10_000 }),
+		log: personalTodoLog,
+		onChanged: (event) => {
+			if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.personalTodoChanged, event);
+		},
+	});
+	registerPersonalTodoIpc({ ipc: ipcMain, service: personalTodoService, log: personalTodoLog });
+
+	// 阅读（P03）：只访问回环 DeepRead；密码经 safeStorage 保护，cookie 不出主进程。
+	// 按需启动：构造不探测、不扫书库（页面调用才触达），dispose 中止在飞请求。
+	const readingPaths = resolveReadingPaths(app.getPath("userData"));
+	const readingLog = (message: string, details?: Record<string, unknown>) => void appLogger.info("reading", message, details);
+	readingService = new ReadingService({
+		paths: readingPaths,
+		client: createReadingHttpClient({ fetchImpl: (url, init) => fetch(url, init) }),
+		connection: new ReadingConnectionStore({
+			filePath: readingPaths.connectionFile,
+			isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+			protect: (plainText) => safeStorage.encryptString(plainText),
+			unprotect: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted)),
+			log: readingLog,
+		}),
+		// P04 会话绑定：存在性检查复用 SessionCatalog（只读查询，不新建会话/不写 Pi session 文件）
+		sessionExists: (sessionId) => Boolean(sessionCatalog.get(sessionId)),
+		log: readingLog,
+	});
+	registerReadingIpc({ ipc: ipcMain, service: readingService, log: readingLog });
 
 	const whisperRuntimeRoot = join(app.getPath("userData"), "voice-runtime");
 	const whisperRuntimeManager = new WhisperRuntimeManager({
@@ -4168,6 +4219,10 @@ app
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
 		// 云端记忆：丢弃在飞请求的迟到结果（不阻塞退出）
 		quitCleanup.register("cloud-memory", () => cloudMemoryService?.dispose());
+		// 个人待办：停退避定时器，作废在飞的发送结果
+		quitCleanup.register("personal-todo", () => personalTodoService?.dispose());
+		// 阅读：中止在飞请求，丢弃草稿与位置串行链
+		quitCleanup.register("reading", () => readingService?.dispose());
 
 		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
 		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。
