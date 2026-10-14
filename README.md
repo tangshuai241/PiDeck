@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,25 +101,9 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.0 (2026-10-10)**（2026-10-10）
+> **最新版本 v0.9.1 (2026-10-14)**（2026-10-14）
 
-### v0.9.0 (2026-10-10) 更新亮点
-- 🚀 **ACP 协议后端：接入更多 AI 编程工具**
-- 🚀 **独立 PiDeck 宿主插件系统**
-- 🚀 **内置外网访问与访问令牌**
-- 🚀 **Web 实时事件推送与计划模式**
-- 🚀 **终端设置、WebGL 与快照回放**
-- 🚀 **对齐 pi 1.0.4 原生会话与模型目录**
-- 🚀 **MCP 服务目录与 AI 配置助手**
-- 🚀 **会话分支面板**
-- 🚀 **项目置顶与列表管理**
-- 🚀 **繁体中文界面**
-- 🚀 **通知历史可跨重启查看**
-- 🚀 **输入框功能按需显示**
-- ✨ **草稿会话可预览扩展命令**
-- ✨ **资源开关反馈更及时**
-- ✨ **远程与移动端体验完善**
-- ✨ **安全与长运行稳定性加固**
+### v0.9.1 (2026-10-14) 更新亮点
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,9 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.0 (2026-10-10)** (2026-10-10)
+> **Latest: v0.9.1 (2026-10-14)** (2026-10-14)
 
-### v0.9.0 (2026-10-10) Release Highlights
-- 🚀 **ACP backend: more AI coding tools in one workbench**
-- 🚀 **Independent PiDeck host-plugin system**
-- 🚀 **Built-in remote access and access tokens**
-- 🚀 **Web live events and Plan Mode**
-- 🚀 **Terminal settings, WebGL and snapshot replay**
-- 🚀 **Native sessions and model catalogs aligned with pi 1.0.4**
-- 🚀 **MCP service catalog and AI configuration assistant**
-- 🚀 **Session branch panel**
-- 🚀 **Project pinning and list management**
-- 🚀 **Traditional Chinese UI**
-- 🚀 **Notification history across restarts**
-- 🚀 **Choose which composer controls to show**
-- ✨ **Extension-command previews in draft sessions**
-- ✨ **Faster resource-toggle feedback**
-- ✨ **Remote and mobile polish**
-- ✨ **Security and long-running stability hardening**
+### v0.9.1 (2026-10-14) Release Highlights
 
 [View Full Changelog →](CHANGELOG.md)
 

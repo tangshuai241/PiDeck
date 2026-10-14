@@ -10,6 +10,11 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.9.1 (2026-10-14)
+
+发布时间：2026-10-14
+
+
 ## v0.9.0 (2026-10-10)
 
 发布时间：2026-10-10

@@ -1,3 +1,16 @@
+## v0.9.1 (2026-10-14)
+
+### New features
+
+- Cloud memory connection: connect a cloud account in Settings and cache the approved persona revision. The feature is disabled by default and requires explicit connection and activation.
+- On-demand memory and source tools: Pi retrieves personal preferences, past decisions or project history when needed. Ordinary work does not force recall on every turn, and existing Engram remains available.
+- Background visible-conversation archives: preserve user and assistant text from personal and project sessions with project labels. Durable queues, chunk uploads and verified receipts support recovery without generating another cloud reply.
+
+### Scope
+
+- Requires the matching cloud interfaces. Initial activation archives new messages; history is not uploaded in bulk.
+- Windows is supported in this release; WSL sessions are not supported yet. Daily behavior is observed from actual records, with retrieval and background extraction costs recorded separately.
+
 ## v0.9.0 (2026-10-10)
 
 This is a major feature update: PiDeck expands beyond the pi / DSH workbench with ACP tools and an independent host-plugin system, alongside upgrades to remote access, the terminal and native session management.
