@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: fb751ef18beb4d18904c57390ca0412d1d4a4c447324bf9f2e896f94716d4801（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: f130b2ed56e622d07cb46d1ff14f8523b8d8c181a27191c7d6562c4b83d398dd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4665,6 +4665,14 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.accent": "外觀主題",
 	"settings.skin": "皮膚",
 	"settings.skin.classicGreen": "經典（出廠）",
+	"settings.skin.t3Code": "T3 Code",
+	"settings.skin.t3Chat": "T3 Chat",
+	"settings.skin.t3Grove": "Grove",
+	"settings.skin.t3Ocean": "Ocean",
+	"settings.skin.t3Ember": "Ember",
+	"settings.skin.t3Iris": "Iris",
+	"settings.skin.t3Desc": "T3 原版明暗配色；球體展示對應主題的色彩。",
+	"settings.skin.legacy": "原有主題",
 	"settings.skin.graphite": "石墨灰",
 	"settings.skin.seaBlue": "海鹽藍",
 	"settings.skin.warmBeige": "暖陽米",

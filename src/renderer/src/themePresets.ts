@@ -1,3 +1,4 @@
+import t3Palettes from "./themes/t3-palettes.json";
 import type { AppAccentMode, AppSkinId } from "../../shared/types/settings";
 import type { TranslationKey } from "./i18n";
 
@@ -76,7 +77,7 @@ export type SkinPreset = {
 	};
 };
 
-export const SKIN_PRESETS: readonly SkinPreset[] = [
+export const LEGACY_SKIN_PRESETS: readonly SkinPreset[] = [
 	{
 		id: "classic-green",
 		labelKey: "settings.skin.classicGreen",
@@ -155,3 +156,20 @@ export const SKIN_PRESETS: readonly SkinPreset[] = [
 
 /** 出厂外观主题：classic-green（中性黑白灰，与旧版出厂观感一致） */
 export const DEFAULT_SKIN: AppSkinId = "classic-green";
+
+/** T3 palettes retain source names and exact color values; legacy IDs remain readable. */
+const T3_PRESET_METADATA: readonly Pick<SkinPreset, "id" | "labelKey">[] = [
+	{ id: "t3-code", labelKey: "settings.skin.t3Code" },
+	{ id: "t3-chat", labelKey: "settings.skin.t3Chat" },
+	{ id: "t3-grove", labelKey: "settings.skin.t3Grove" },
+	{ id: "t3-ocean", labelKey: "settings.skin.t3Ocean" },
+	{ id: "t3-ember", labelKey: "settings.skin.t3Ember" },
+	{ id: "t3-iris", labelKey: "settings.skin.t3Iris" },
+];
+export const T3_SKIN_PRESETS: readonly SkinPreset[] = T3_PRESET_METADATA.map((preset) => {
+	const palette = t3Palettes.find((item) => item.id === preset.id);
+	if (!palette) throw new Error(`Missing T3 palette: ${preset.id}`);
+	const light = palette.light;
+	return { ...preset, descKey: "settings.skin.t3Desc", accent: "default", preview: light.canvas, previewSurfaces: { background: light.canvas, sidebar: light.sidebar, panel: light.surface, accent: light.accent, border: light.border } };
+});
+export const SKIN_PRESETS: readonly SkinPreset[] = [...LEGACY_SKIN_PRESETS, ...T3_SKIN_PRESETS];

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ChevronsUpDown, X } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { t } from "../../../i18n";
@@ -17,7 +17,7 @@ export function DirtyMarker(props: { dirty: boolean; label: string }) {
  * 四角圆弧、极淡底色 + 淡边框；行间分隔线由 SettingRow 自身提供。
  */
 export function SettingBox(props: { children: ReactNode }) {
-	return <div className="rounded-xl border border-border-subtle/70 bg-bg-muted/15 px-4">{props.children}</div>;
+	return <div className="rounded-2xl bg-settings-surface px-5 [[data-settings-section]_&]:rounded-none [[data-settings-section]_&]:bg-transparent [[data-settings-section]_&]:px-0">{props.children}</div>;
 }
 
 /**
@@ -118,19 +118,28 @@ export function SettingSwitchRow(props: {
 	anchor?: string;
 	onChange: (checked: boolean) => void;
 }) {
+	const labelId = useId();
+	const descriptionId = useId();
 	const dirtyLabel = props.dirtyLabel ?? (typeof props.title === "string" ? props.title : "");
 	return (
 		<SettingRow
 			anchor={props.anchor}
 			title={
 				<>
-					<span>{props.title}</span>
+					<span id={labelId}>{props.title}</span>
 					<DirtyMarker dirty={Boolean(props.dirty)} label={dirtyLabel} />
 				</>
 			}
-			description={props.description}
+			description={props.description ? <span id={descriptionId}>{props.description}</span> : undefined}
 		>
-			<Switch checked={props.checked} disabled={props.disabled} onCheckedChange={props.onChange} />
+			<Switch
+				aria-labelledby={labelId}
+				aria-describedby={props.description ? descriptionId : undefined}
+				checked={props.checked}
+				disabled={props.disabled}
+				onCheckedChange={props.onChange}
+				className="data-[size=default]:h-5 data-[size=default]:w-9 duration-180 [&_[data-slot=switch-thumb]]:duration-180 [&_[data-slot=switch-thumb][data-state=checked]]:translate-x-[18px] motion-reduce:transition-none motion-reduce:[&_[data-slot=switch-thumb]]:transition-none"
+			/>
 		</SettingRow>
 	);
 }

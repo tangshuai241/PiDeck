@@ -28,7 +28,7 @@ export function SettingsSection(props: {
 }) {
 	const heading = <SectionHeading className="settings-section-header pb-2" titleClassName="text-body font-medium text-foreground" title={props.title} description={props.description} />;
 	return (
-		<section id={props.id} className={props.divided ? "mt-5 border-t border-border-subtle pt-5" : "mt-7 first:mt-0"}>
+		<section id={props.id} data-settings-section="" className="mt-4 rounded-2xl bg-settings-surface px-5 py-[18px] first:mt-0">
 			{props.action != null ? (
 				<div className="flex items-start justify-between gap-2">
 					{heading}

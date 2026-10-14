@@ -23,6 +23,7 @@
 @import "./file-icons.css" layer(vendor);
 
 @import "./styles/foundation.css" layer(legacy);
+@import "./styles/t3-themes.css" layer(legacy);
 @import "./styles/timeline.css" layer(legacy);
 @import "./styles/surfaces.css" layer(legacy);
 @import "./styles/integrations.css" layer(legacy);

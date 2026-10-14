@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
+const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8") + readFileSync("src/renderer/src/styles/t3-themes.css", "utf8");
 const zhCN = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enUS = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
@@ -41,7 +41,7 @@ const REQUIRED_THEME_TOKENS = [
 function parseAppearanceBlocks(source) {
 	const light = {};
 	const dark = {};
-	const pattern = /:root\[data-theme="dark"\]\[data-appearance="([^"]+)"\]\s*\{([^}]*)\}|:root\[data-appearance="([^"]+)"\]\s*\{([^}]*)\}/g;
+	const pattern = /:root\[data-theme="dark"\]\[data-appearance="([^"]+)"\]\s*\{([^}]*)\}|:root(?:\[data-theme="light"\])?\[data-appearance="([^"]+)"\]\s*\{([^}]*)\}/g;
 	let match;
 	while ((match = pattern.exec(source)) !== null) {
 		if (match[1] !== undefined) {
@@ -56,16 +56,16 @@ function parseAppearanceBlocks(source) {
 test("SKIN_PRESETS is complete and DEFAULT is classic-green", () => {
 	// VM 加载的数组属于另一个 realm，需先展平为本地数组再比较
 	const ids = [...SKIN_PRESETS].map((preset) => preset.id);
-	assert.deepEqual(ids, ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige"]);
+	assert.deepEqual(ids, ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige", "t3-code", "t3-chat", "t3-grove", "t3-ocean", "t3-ember", "t3-iris"]);
 	assert.equal(DEFAULT_SKIN, "classic-green");
 	// 每个预设都有完整元数据：Label/描述/推荐主色/预览色块
 	for (const preset of SKIN_PRESETS) {
 		assert.ok(preset.labelKey.startsWith("settings.skin."), preset.id);
 		assert.ok(typeof preset.descKey === "string" && preset.descKey.length > 0, preset.id);
 		assert.ok(preset.accent.length > 0, preset.id);
-		assert.ok(preset.preview.startsWith("#"), preset.id);
+		assert.ok(/^(#[0-9a-f]{6}|oklch\([\d.]+ [\d.]+ [\d.]+\))$/i.test(preset.preview), preset.id);
 		for (const key of ["background", "sidebar", "panel", "accent", "border"]) {
-			assert.ok(preset.previewSurfaces[key].startsWith("#"), `${preset.id}.${key}`);
+			assert.ok(/^(#[0-9a-f]{6}|oklch\([\d.]+ [\d.]+ [\d.]+\))$/i.test(preset.previewSurfaces[key]), `${preset.id}.${key}`);
 		}
 	}
 });
@@ -126,7 +126,7 @@ test("appearance theme i18n keys exist in zh-CN and en-US dictionaries", () => {
 const STATUS_TOKENS = ["--color-info", "--color-warning", "--color-danger"];
 
 test("accent and appearance blocks never override semantic status colors", () => {
-	const blockPattern = /:root(\[data-theme="dark"\])?\[data-(accent|appearance)="[^"]+"\]\s*\{([^}]*)\}/g;
+	const blockPattern = /:root(\[data-theme="(?:light|dark)"\])?\[data-(accent|appearance)="[^"]+"\]\s*\{([^}]*)\}/g;
 	let match;
 	let count = 0;
 	while ((match = blockPattern.exec(foundation)) !== null) {

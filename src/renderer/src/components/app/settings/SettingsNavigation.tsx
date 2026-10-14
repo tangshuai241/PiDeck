@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { EASE_OUT } from "../../../lib/ease";
+import { useId, useState } from "react";
 import { useSetAtom } from "jotai";
 import { Activity, Bell, Brush, ChartColumnBig, Clapperboard, Cloud, DatabaseBackup, Eye, FileCode2, GitBranch, ImageIcon, Keyboard, MessageSquare, Network, PawPrint, Puzzle, Search, Settings2, TerminalSquare, Trash2, Wrench, X, type LucideIcon } from "lucide-react";
 import { settingsFocusAtom, type SettingsTabId } from "../../../atoms";
@@ -8,6 +10,8 @@ import { Button } from "../../ui-shadcn/button";
 import { TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 import type { SettingsTabLayoutEntry } from "./settingsTabLayout";
 import { resolveSettingsNavigation } from "./settingsNavigationSearch";
+
+const MotionTabsList = motion.create(TabsList);
 
 const TAB_ICONS: Record<SettingsTabId, LucideIcon> = {
 	common: Settings2,
@@ -38,7 +42,9 @@ export function preventSettingsSearchDismiss(event: KeyboardEvent): void {
 }
 
 /** Settings-only navigation owns its search state; selection and draft state stay in the modal. */
-export function SettingsNavigation({ tabs, dirtyTabs, hasPendingUpdate }: { tabs: readonly SettingsTabLayoutEntry[]; dirtyTabs: ReadonlySet<string>; hasPendingUpdate: boolean }) {
+export function SettingsNavigation({ activeTab, tabs, dirtyTabs, hasPendingUpdate }: { activeTab: SettingsTabId; tabs: readonly SettingsTabLayoutEntry[]; dirtyTabs: ReadonlySet<string>; hasPendingUpdate: boolean }) {
+	const highlightId = useId();
+	const reduceMotion = useReducedMotion();
 	const [query, setQuery] = useState("");
 	const setFocus = useSetAtom(settingsFocusAtom);
 	const groups = resolveSettingsNavigation(tabs, query, t);
@@ -67,7 +73,7 @@ export function SettingsNavigation({ tabs, dirtyTabs, hasPendingUpdate }: { tabs
 					</Button>
 				)}
 			</div>
-			<TabsList aria-label={t("settings.navigationLabel")} className="settings-tabs min-h-0 flex-1 flex-col items-stretch justify-start gap-5 overflow-y-auto rounded-none border-0 bg-transparent px-3 pb-5 pt-1">
+			<MotionTabsList layoutScroll aria-label={t("settings.navigationLabel")} className="settings-tabs min-h-0 flex-1 flex-col items-stretch justify-start gap-5 overflow-y-auto rounded-none border-0 bg-transparent px-3 pb-5 pt-1">
 				{groups.map((group) => (
 					<div key={group.id} className="flex shrink-0 flex-col gap-0.5">
 						<h3 className="mb-1 px-2.5 py-1.5 text-caption font-medium text-muted-foreground">{t(group.labelKey)}</h3>
@@ -75,7 +81,8 @@ export function SettingsNavigation({ tabs, dirtyTabs, hasPendingUpdate }: { tabs
 							const Icon = TAB_ICONS[tab.id];
 							return (
 								<div key={tab.id} className="flex shrink-0 flex-col">
-									<TabsTrigger value={tab.id} className="group h-9 w-full shrink-0 justify-start gap-2 rounded-lg px-2.5 text-control font-medium hover:bg-bg-hover data-[state=active]:border-transparent data-[state=active]:bg-primary/10 data-[state=active]:shadow-none">
+									<TabsTrigger value={tab.id} className="group relative isolate h-9 w-full shrink-0 justify-start gap-2 rounded-lg px-2.5 text-control font-medium hover:bg-bg-hover data-[state=active]:border-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+										{activeTab === tab.id && <motion.span aria-hidden="true" data-settings-highlight="" layoutId={reduceMotion ? undefined : highlightId} initial={false} transition={{ duration: reduceMotion ? 0 : 0.24, ease: EASE_OUT }} className="pointer-events-none absolute inset-0 -z-10 rounded-lg bg-bg-active" />}
 										<Icon className="size-4 shrink-0 text-muted-foreground group-data-[state=active]:text-primary" aria-hidden="true" />
 										<span className="truncate">{tab.label}</span>
 										<span className="ml-auto flex items-center gap-1">
@@ -98,7 +105,7 @@ export function SettingsNavigation({ tabs, dirtyTabs, hasPendingUpdate }: { tabs
 						{t("settings.searchEmpty")}
 					</p>
 				)}
-			</TabsList>
+			</MotionTabsList>
 		</aside>
 	);
 }
