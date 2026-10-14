@@ -12,6 +12,7 @@ import { t, type TranslationKey } from "../i18n";
  * 无需为描述字段扩展 IPC/共享类型；映射缺失时不渲染描述行（未知内置扩展兜底）。
  */
 const BUILT_IN_EXTENSION_DESC: Record<string, TranslationKey> = {
+	"pi-deck-cloud-memory.ts": "config.builtInExtDesc.pi-deck-cloud-memory",
 	"pi-deck-gui-bridge.ts": "config.builtInExtDesc.pi-deck-gui-bridge",
 	"pi-deck-ext-points.ts": "config.builtInExtDesc.pi-deck-ext-points",
 	"pi-deck-request-size-recovery.ts": "config.builtInExtDesc.pi-deck-request-size-recovery",
