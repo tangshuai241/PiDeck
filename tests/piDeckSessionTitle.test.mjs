@@ -1,41 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const extensionPath = "resources/extensions/pi-deck-session-title.ts";
 
-function compileExtension({ enabled = true, completeSimple }) {
-	const source = readFileSync(extensionPath, "utf8");
-	const output = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-			esModuleInterop: true,
-		},
-		fileName: extensionPath,
-	}).outputText;
-	const module = { exports: {} };
-	vm.runInNewContext(
-		output,
-		{
-			module,
-			exports: module.exports,
-			require: (specifier) => {
-				if (specifier === "@earendil-works/pi-ai/compat") return { completeSimple };
-				return {};
-			},
-			process: { env: { PIDECK_AUTO_SESSION_TITLE: enabled ? "1" : "0" } },
-			console,
-			AbortController,
-			setTimeout,
-			clearTimeout,
-		},
-		{ filename: extensionPath },
-	);
-	return module.exports;
+function compileExtension({ enabled = true, completeSimple, titleModelSetting }) {
+	return loadTsCommonJs(extensionPath, {
+		stubs: { "@earendil-works/pi-ai/compat": { completeSimple } },
+		globals: { process: { env: { PIDECK_AUTO_SESSION_TITLE: enabled ? "1" : "0", PIDECK_TITLE_MODEL: JSON.stringify(titleModelSetting ?? null) } } },
+	});
 }
 
 function userMessage(content) {
@@ -65,15 +39,18 @@ function messageEntry(message, index) {
 	};
 }
 
-function createHarness({ enabled = true, entries = [], titleName, authBaseUrl, hasModel = true, authResolver } = {}) {
+function createHarness({ enabled = true, entries = [], titleName, authBaseUrl, hasModel = true, hasTitleModel = hasModel, authResolver, titleModelSetting } = {}) {
 	let branch = entries;
 	let sessionId = "session-1";
 	let currentName = titleName;
 	let nextCompletion = () => Promise.resolve(assistantMessage([{ type: "text", text: "Title: 修复登录流程！" }]));
 	const handlers = new Map();
+	const commands = new Map();
 	const completeCalls = [];
 	const setNames = [];
 	const statusUpdates = [];
+	const authModels = [];
+	const titleModel = { provider: titleModelSetting?.provider ?? "opencode-go", id: titleModelSetting?.modelId ?? "deepseek-v4.1-flash" };
 	const sessionManager = {
 		getSessionId: () => sessionId,
 		getBranch: () => branch,
@@ -90,23 +67,30 @@ function createHarness({ enabled = true, entries = [], titleName, authBaseUrl, h
 			},
 		},
 		modelRegistry: {
-			getApiKeyAndHeaders:
-				authResolver ??
-				(async () => ({
-					ok: true,
-					apiKey: "test-key",
-					headers: {},
-					env: {},
-					...(authBaseUrl ? { baseUrl: authBaseUrl } : {}),
-				})),
+			find: (provider, id) => (hasTitleModel && provider === titleModel.provider && id === titleModel.id ? titleModel : undefined),
+			getApiKeyAndHeaders: async (model) => {
+				authModels.push(model);
+				return authResolver
+					? authResolver(model)
+					: {
+							ok: true,
+							apiKey: "test-key",
+							headers: {},
+							env: {},
+							...(authBaseUrl ? { baseUrl: authBaseUrl } : {}),
+						};
+			},
 		},
 	};
 	const completeSimple = (model, titleContext, options) => {
 		completeCalls.push({ model, titleContext, options });
 		return nextCompletion();
 	};
-	const extension = compileExtension({ enabled, completeSimple });
+	const extension = compileExtension({ enabled, completeSimple, titleModelSetting });
 	const pi = {
+		registerCommand(name, spec) {
+			commands.set(name, spec);
+		},
 		on(event, handler) {
 			handlers.set(event, handler);
 		},
@@ -122,10 +106,12 @@ function createHarness({ enabled = true, entries = [], titleName, authBaseUrl, h
 
 	return {
 		context,
+		commands,
 		completeCalls,
 		handlers,
 		setNames,
 		statusUpdates,
+		authModels,
 		setBranch(next) {
 			branch = next;
 		},
@@ -168,6 +154,146 @@ function freshBranch({ user = "请修复登录页面", assistant = "我会先检
 		),
 	];
 }
+
+test("explicit generation works when automatic naming is disabled and does not rename or append a turn", async () => {
+	const harness = createHarness({ enabled: false, entries: freshBranch(), titleName: "手动旧标题" });
+	await harness.commands.get("pideck-title").handler("request-one", harness.context);
+	assert.equal(harness.completeCalls.length, 1);
+	assert.equal(harness.setNames.length, 0);
+	assert.equal(harness.statusUpdates.at(-1).key, "pideck:title-result:request-one");
+	assert.equal(harness.statusUpdates.at(-1).text, "修复登录流程");
+});
+
+test("manual titles require Simplified Chinese and default to OpenCode Go DeepSeek V4.1 Flash", async () => {
+	const harness = createHarness({ entries: freshBranch({ user: "Browser-use setup with Edge auto-approval watcher", assistant: "Configured Edge and the watcher." }) });
+	harness.context.model = { provider: "selected-provider", id: "selected-model" };
+	await harness.commands.get("pideck-title").handler("chinese-title", harness.context);
+	const request = harness.completeCalls[0];
+	assert.match(request.titleContext.systemPrompt, /必须使用简体中文/);
+	assert.match(request.titleContext.systemPrompt, /即使.*英文/);
+	assert.equal(request.model.provider, "opencode-go");
+	assert.equal(request.model.id, "deepseek-v4.1-flash");
+	assert.equal(request.options.sessionId, "session-1", "OpenCode Go requires the native session id for routing");
+	assert.equal(harness.authModels[0].provider, "opencode-go");
+	assert.equal(harness.authModels[0].id, "deepseek-v4.1-flash");
+	assert.equal(harness.context.model.provider, "selected-provider");
+	assert.equal(harness.context.model.id, "selected-model");
+});
+
+test("automatic naming uses the default title model and its credentials without switching the conversation model", async () => {
+	const entries = freshBranch();
+	const harness = createHarness({ entries });
+	await startFresh(harness, entries);
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+	assert.equal(harness.completeCalls[0].model.provider, "opencode-go");
+	assert.equal(harness.completeCalls[0].model.id, "deepseek-v4.1-flash");
+	assert.equal(harness.completeCalls[0].options.sessionId, "session-1");
+	assert.ok(harness.authModels.every((model) => model.provider === "opencode-go" && model.id === "deepseek-v4.1-flash"));
+	assert.equal(harness.context.model.id, "test-model");
+});
+
+test("title generation does not require a selected conversation model", async () => {
+	const harness = createHarness({ entries: freshBranch(), hasModel: false, hasTitleModel: true });
+	await harness.commands.get("pideck-title").handler("independent-model", harness.context);
+	assert.equal(harness.completeCalls[0].model.id, "deepseek-v4.1-flash");
+});
+
+test("automatic titles use the configured launch model and manual commands can override it immediately", async () => {
+	const configured = { provider: "custom", modelId: "title-small" };
+	const entries = freshBranch();
+	const harness = createHarness({ entries, titleModelSetting: configured });
+	await startFresh(harness, entries);
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+	assert.equal(harness.completeCalls[0].model.id, "title-small");
+	const updated = { provider: "new-provider", modelId: "new-title" };
+	harness.context.modelRegistry.find = (provider, id) => (provider === updated.provider && id === updated.modelId ? { provider, id } : undefined);
+	await harness.commands.get("pideck-title").handler(JSON.stringify({ requestId: "updated-setting", model: updated }), harness.context);
+	assert.equal(harness.completeCalls[1].model.provider, updated.provider);
+	assert.equal(harness.completeCalls[1].model.id, updated.modelId);
+	assert.equal(harness.authModels.at(-1).provider, updated.provider);
+	assert.equal(harness.context.model.id, "test-model");
+});
+
+test("invalid model command arguments never send a model request", async () => {
+	const harness = createHarness({ entries: freshBranch() });
+	for (const model of [
+		{ provider: "", modelId: "x" },
+		{ provider: "test\nprovider", modelId: "x" },
+		{ provider: "x", modelId: "x".repeat(201) },
+	]) {
+		await assert.rejects(harness.commands.get("pideck-title").handler(JSON.stringify({ requestId: "bad-args", model }), harness.context));
+	}
+	assert.equal(harness.completeCalls.length, 0);
+});
+
+test("missing default model or its credentials never falls back to the conversation model", async () => {
+	for (const [options, code] of [
+		[{ hasTitleModel: false }, "TITLE_MODEL_UNAVAILABLE"],
+		[{ authResolver: async () => ({ ok: false }) }, "TITLE_AUTH_UNAVAILABLE"],
+	]) {
+		const harness = createHarness({ entries: freshBranch(), ...options });
+		await assert.rejects(harness.commands.get("pideck-title").handler("unavailable-model", harness.context));
+		assert.equal(harness.completeCalls.length, 0);
+		assert.deepEqual(harness.statusUpdates, [{ key: "pideck:title-error:unavailable-model", text: code }]);
+	}
+});
+
+test("an English-only title is corrected once before publishing a Chinese title", async () => {
+	const harness = createHarness({ entries: freshBranch() });
+	let attempts = 0;
+	harness.setCompletion(() => Promise.resolve(assistantMessage([{ type: "text", text: ++attempts === 1 ? "Browser-use setup with Edge auto-approval watcher" : "配置 Edge 浏览器与自动审批" }])));
+	await harness.commands.get("pideck-title").handler("correct-language", harness.context);
+	assert.equal(harness.completeCalls.length, 2);
+	assert.equal(harness.completeCalls[1].options.maxTokens, 512);
+	assert.match(harness.completeCalls[1].titleContext.systemPrompt, /上次.*纯英文/);
+	assert.deepEqual(harness.statusUpdates, [{ key: "pideck:title-result:correct-language", text: "配置 Edge 浏览器与自动审批" }]);
+});
+
+test("repeated English-only responses never replace the existing title or retry indefinitely", async () => {
+	const harness = createHarness({ entries: freshBranch(), titleName: "原有中文标题" });
+	harness.setCompletion(() => Promise.resolve(assistantMessage([{ type: "text", text: "Browser-use Edge setup" }])));
+	await assert.rejects(harness.commands.get("pideck-title").handler("reject-english", harness.context));
+	assert.equal(harness.completeCalls.length, 2);
+	assert.deepEqual(harness.statusUpdates, [{ key: "pideck:title-error:reject-english", text: "TITLE_INVALID_RESULT" }]);
+	assert.equal(harness.setNames.length, 0);
+});
+
+test("explicit title keeps opening and recent turns within its transcript budget", async () => {
+	const entries = [messageEntry(userMessage("开头目标：管理两个账号"), 0)];
+	for (let index = 1; index < 200; index++) entries.push(messageEntry(userMessage(`中间任务 ${"x".repeat(1000)}`), index));
+	entries.push(messageEntry(userMessage("最近目标：支持额度详情"), 200));
+	const harness = createHarness({ enabled: false, entries });
+	await harness.commands.get("pideck-title").handler("request-two", harness.context);
+	const serialized = JSON.stringify(harness.completeCalls[0].titleContext);
+	assert.match(serialized, /开头目标/);
+	assert.match(serialized, /最近目标/);
+	assert.ok(serialized.length < 7500);
+});
+
+test("manual rename during explicit generation cancels the proposed title", async () => {
+	const harness = createHarness({ entries: freshBranch() });
+	let release;
+	harness.setCompletion(
+		() =>
+			new Promise((resolve) => {
+				release = resolve;
+			}),
+	);
+	const pending = harness.commands.get("pideck-title").handler("request-three", harness.context);
+	await flushAsyncWork();
+	await harness.emit("session_info_changed");
+	release(assistantMessage([{ type: "text", text: "迟到标题" }]));
+	await assert.rejects(pending);
+	assert.deepEqual(harness.statusUpdates, [{ key: "pideck:title-error:request-three", text: "TITLE_RUNTIME_CHANGED" }]);
+});
+
+test("an empty session rejects explicit generation without a model request", async () => {
+	const harness = createHarness({ entries: [] });
+	await assert.rejects(harness.commands.get("pideck-title").handler("request-four", harness.context));
+	assert.equal(harness.completeCalls.length, 0);
+});
 
 test("首轮 settled 后只用最小独立 context 生成标题并写回 session_info", async () => {
 	const entries = freshBranch({ user: "请修复登录页面 api_key=super-secret-value" });

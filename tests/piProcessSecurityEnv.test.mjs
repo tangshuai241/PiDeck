@@ -99,6 +99,7 @@ function loadPiProcess(versionResult = { output: "0.82.1\n" }, options = { parke
 			if (id === "node:path") return require("node:path").win32;
 			if (id === "./PiRpcClient") return { PiRpcClient: MockRpcClient };
 			if (id === "./PiLocator") return { PiLocator: class {} };
+			if (id === "../../shared/sessionTitlePreference") return loadTsCommonJs("src/shared/sessionTitlePreference.ts");
 			if (id === "./piExtensionFilter") {
 				return {
 					parkBlockedExtensionsInDir: (directory) => {
@@ -193,6 +194,15 @@ test("自动标题设置以显式环境标志注入 pi 进程", async () => {
 	const enabledProc = new enabled.PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu", wslUser: "root" }, enabled.mockLocator);
 	await enabledProc.start(undefined, undefined, true);
 	assert.equal(enabled.getCaptured()?.env?.PIDECK_AUTO_SESSION_TITLE, "1");
+	assert.deepEqual(JSON.parse(enabled.getCaptured()?.env?.PIDECK_TITLE_MODEL), { provider: "opencode-go", modelId: "deepseek-v4.1-flash" });
+});
+
+test("标题模型设置在启动时注入，保留 provider/modelId 且不传凭据", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const model = { provider: "custom", modelId: "model-small" };
+	const proc = new PiProcess("C:\\proj", { sessionTitleModel: model, wslEnabled: true, wslDistro: "Ubuntu", wslUser: "root" }, mockLocator);
+	await proc.start(undefined, undefined, true);
+	assert.deepEqual(JSON.parse(getCaptured()?.env?.PIDECK_TITLE_MODEL), model);
 });
 
 test("无禁用技能（resolver 返回 null）时不注入 --no-skills/--skill", async () => {

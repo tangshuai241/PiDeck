@@ -90,6 +90,7 @@ function encodeSessionDir(cwd) {
 // 1) tmp 路径作为 get_state.sessionFile（fork/reattach 原语义，不绑项目路径）
 // 2) 项目 cwd/.pi/sessions 镜像，SessionScanner 扫历史（#113 3.2-9）
 let sessionFile = resumeSessionPath;
+let sessionName = "Mock Agent";
 let sessionHeaderWritten = false;
 const PROJECT_SESSIONS_DIR = path.join(process.cwd(), ".pi", "sessions");
 const PROJECT_SESSION_FILE_PATH = path.join(PROJECT_SESSIONS_DIR, sessionId + ".jsonl");
@@ -663,7 +664,7 @@ function handleCommand(cmd) {
 		case "get_state":
 			respond(cmd, {
 				sessionId,
-				sessionName: "Mock Agent",
+				sessionName,
 				sessionFile: sessionFile ?? undefined,
 				model: currentModel,
 				thinkingLevel: currentThinking,
@@ -698,7 +699,22 @@ function handleCommand(cmd) {
 			respond(cmd, {});
 			return;
 		}
+		case "get_commands":
+			respond(cmd, { commands: [{ name: "pideck-title", source: "extension", description: "Generate session title" }] });
+			return;
+		case "set_session_name":
+			sessionName = String(cmd.name || sessionName);
+			respond(cmd, {});
+			return;
 		case "prompt": {
+			// An extension command completes over RPC without appending a conversation turn.
+			if (typeof cmd.message === "string" && cmd.message.startsWith("/pideck-title ")) {
+				const args = cmd.message.slice("/pideck-title ".length);
+				const requestId = args.startsWith("{") ? JSON.parse(args).requestId : args;
+				emit({ type: "extension_ui_request", id: `title-${requestId}`, method: "setStatus", statusKey: `pideck:title-result:${requestId}`, statusText: "双账号额度管理" });
+				respond(cmd, { disposition: "handled" });
+				return;
+			}
 			// 先回 success（桌面端据此认为已受理），再异步推流
 			respond(cmd, {});
 			const text = typeof cmd.message === "string" ? cmd.message : "";

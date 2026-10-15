@@ -10,6 +10,7 @@ import { displayProjectDirectoryName } from "../../rendererUtils";
 import { Button } from "../ui-shadcn/button";
 import { DshAgentPresetControl } from "./DshAgentPresetControl";
 import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
+import { GenerateSessionTitleButton } from "./GenerateSessionTitleButton";
 
 type HeaderActions = {
 	headerRef: RefObject<HTMLDivElement | null>;
@@ -135,6 +136,7 @@ export function SessionHeader(props: SessionHeaderProps) {
 					<span className="min-w-0" aria-hidden="true" />
 				)}
 				{/* DSH 会话模式胶囊：草稿期可点开选择，激活后只读展示 */}
+				{sessionId && <GenerateSessionTitleButton sessionId={sessionId} />}
 				{session?.backend === "dsh" ? <DshAgentPresetControl sessionId={sessionId} /> : null}
 			</div>
 			{actions}

@@ -18,6 +18,7 @@ import { cn } from "../../lib/utils";
 import { SessionBackendBadge } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
+import { GenerateSessionTitleButton } from "./GenerateSessionTitleButton";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
@@ -947,6 +948,7 @@ function SessionTab(props: {
 	// 若还嫌宽，应先改「状态点/关闭按钮只在激活或 hover 时占位」的取舍，而不是继续压宽度。
 	// 截断细节由 hover 富提示（标题 + 工作区）与 TitleScrollText 滚动兜底。
 	const hasLeadingBadges = Boolean(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp" || runtime?.state?.planModeActive || (runtime?.state?.goal && runtime.state.goal.phase !== "complete"));
+	const hasTitleAction = active && !!record && (!record.backend || record.backend === "pi");
 	// Tab 级操作（固定/关闭等）改为右键菜单（ContextMenu，光标处弹出）；Tab 本体点击仍是切换，
 	// 拖拽排序与中键关闭与菜单互不干扰（drag/auxclick 不触发 click）。
 	// 运行控制（停止/重启/重新加载）只作用于当前会话，已上收右上角 ⋯ 更多操作菜单。
@@ -1021,6 +1023,8 @@ function SessionTab(props: {
 								// 有 DSH/生图徽标或模式 chip 时放宽上限：基础上限 + 徽标预留 28px
 								// （SESSION_TAB_BADGE_EXTRA_WIDTH，旧 132/104 差值）。
 								hasLeadingBadges ? "w-fit max-w-(--session-tab-max-w-badged)" : "w-fit max-w-(--session-tab-max-w)",
+								// Reserve only the action's own width so the user's title-width preference stays readable.
+								hasTitleAction && (hasLeadingBadges ? "max-w-[calc(var(--session-tab-max-w-badged)+26px)]" : "max-w-[calc(var(--session-tab-max-w)+26px)]"),
 								dragging && "opacity-50",
 								// 选中态：灰色柔和实底（bg-accent = --color-bg-active，与左侧 SessionTree 选中行一致），
 								// 背景由下方 span 画在激活 Tab 自身，切换瞬时出现；不做黑色实底/阴影/底部条。
@@ -1066,6 +1070,7 @@ function SessionTab(props: {
               新激活 tab 上，立即滚动体验很吵（原生 title 提示兜底）；
             - hoverDelayMs=500：快速扫过 tab 栏不触发，停留半秒才滚。 */}
 								<TitleScrollText text={title} disabled={active} hoverDelayMs={500} className={cn("truncate", active ? "font-medium" : "font-normal", preview && "italic")} />
+								{hasTitleAction && <GenerateSessionTitleButton sessionId={sessionId} />}
 								{!pinned && (
 									<button
 										type="button"

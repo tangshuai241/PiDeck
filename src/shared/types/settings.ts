@@ -1,4 +1,5 @@
 import type { AgentBackend } from "./agent";
+import type { SessionTitleModel } from "../sessionTitlePreference";
 import type { AcpToolConfig } from "./acp";
 import type { SessionSortModeId } from "./session";
 import type { BusySendDelivery } from "../busySendDelivery";
@@ -136,6 +137,8 @@ export type AppSettings = {
 	 * 非法形态（缺字段/非字符串）在 SettingsStore.update 时归一为 null。
 	 */
 	enhanceModel?: { provider: string; modelId: string } | null;
+	/** Independent title generation model; missing values use OpenCode Go DeepSeek V4.1 Flash. */
+	sessionTitleModel?: SessionTitleModel;
 	/** 增强时携带当前会话最近正文；缺省关闭，只有显式 true 才发送。 */
 	enhanceIncludeContext?: boolean;
 	/**

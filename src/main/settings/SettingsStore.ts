@@ -32,6 +32,7 @@ import { normalizeTpsDisplayMode } from "../../shared/tps";
 import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { normalizeEnhanceModel } from "../../shared/enhanceModelPreference";
+import { DEFAULT_SESSION_TITLE_MODEL, normalizeSessionTitleModel } from "../../shared/sessionTitlePreference";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
@@ -322,6 +323,7 @@ Gitmoji 对应关系：
 
 	// 提示词增强模型：null = 跟随会话模型；设置页可指定固定模型
 	enhanceModel: null,
+	sessionTitleModel: { ...DEFAULT_SESSION_TITLE_MODEL },
 	enhanceIncludeContext: false,
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
@@ -468,6 +470,7 @@ export class SettingsStore {
 				},
 			};
 			// 新增布尔开关按旧 settings.json 的缺省/脏数据回落，避免字符串值让 UI 或 pi env 误判。
+			this.settings.sessionTitleModel = normalizeSessionTitleModel(parsed.sessionTitleModel);
 			if (typeof this.settings.autoSessionTitle !== "boolean") {
 				this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;
 			}
@@ -969,6 +972,7 @@ export class SettingsStore {
 		if ("enhanceModel" in safePatch) {
 			this.settings.enhanceModel = normalizeEnhanceModel(this.settings.enhanceModel);
 		}
+		if ("sessionTitleModel" in safePatch) this.settings.sessionTitleModel = normalizeSessionTitleModel(safePatch.sessionTitleModel);
 		// 上下文会发送给所选供应商：脏值不能隐式打开。
 		if ("enhanceIncludeContext" in safePatch) {
 			this.settings.enhanceIncludeContext = safePatch.enhanceIncludeContext === true;

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
+import type { QuotaAccountInput, QuotaSnapshot } from "../shared/types/accountUsage";
 import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
 import type { HostPluginContext, HostPluginDesktopApi } from "../shared/types/hostPlugin";
 import type { PiDeckMcpDesktopApi } from "../shared/types/piDeckMcp";
@@ -284,6 +285,12 @@ const piDeckMcp: PiDeckMcpDesktopApi = {
 };
 
 const api = {
+	accountUsage: {
+		list: () => ipcRenderer.invoke(ipcChannels.accountUsageList) as Promise<QuotaSnapshot>,
+		save: (input: QuotaAccountInput) => ipcRenderer.invoke(ipcChannels.accountUsageSave, input) as Promise<QuotaSnapshot>,
+		remove: (id: string) => ipcRenderer.invoke(ipcChannels.accountUsageRemove, id) as Promise<QuotaSnapshot>,
+		refresh: (id?: string) => ipcRenderer.invoke(ipcChannels.accountUsageRefresh, id) as Promise<QuotaSnapshot>,
+	},
 	piDeckMcp,
 	hostPlugins,
 	clipboard: {
@@ -794,6 +801,7 @@ const api = {
 		/** DSH 动态插件卸载（undefine：删除插件与全部包版本）。 */
 		uninstallDshPlugin: (input: import("../shared/types").DshPluginLifecycleInput) => ipcRenderer.invoke(ipcChannels.dshPluginUninstall, input) as Promise<unknown>,
 		sendPrompt: (input: SendSessionPromptInput) => ipcRenderer.invoke(ipcChannels.sessionsSendPrompt, input) as Promise<SendSessionPromptResult>,
+		generateTitle: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsGenerateTitle, target) as Promise<{ ok: boolean; record?: SessionRecord; error?: import("../shared/sessionTitleErrors").SessionTitleErrorCode }>,
 		sendUiResponse: (input: SessionUiResponseInput) => ipcRenderer.invoke(ipcChannels.sessionsUiResponse, input) as Promise<void>,
 		/**
 		 * GUI 扩展桥：回灌一次交互事件（点列表项 / 按按钮 / 输入…）。

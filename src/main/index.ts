@@ -2,6 +2,8 @@ import { INTERNAL_CONTROL, sanitizeRendererPromptInput, type InternalPromptDeliv
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createAccountUsageService } from "./config/createAccountUsageService";
+import { registerAccountUsageIpc } from "./ipc/accountUsageIpc";
 import { basename, dirname, join } from "node:path";
 import { homedir, release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
@@ -2568,6 +2570,7 @@ function resolveBuiltInExtensionRoots(): BuiltInExtensionPathRoots {
 }
 
 function registerIpc() {
+	registerAccountUsageIpc(ipcMain, createAccountUsageService(app.getPath("userData")));
 	// 用量统计：业务在 UsageStatsService，handler 薄层只校验/适配
 	registerUsageStatsIpc(ipcMain, usageStatsService);
 	// 供应商认证（/login）：同样只做校验/适配，进程与协议在 PiAuthService

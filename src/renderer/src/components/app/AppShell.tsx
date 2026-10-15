@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 
 import { type Layout, type LayoutChangedMeta, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import { AppHeader } from "../AppHeader";
+import { AccountUsageBar } from "../account-usage/AccountUsageBar";
 import { RightSidebarStack } from "../workspace/RightSidebarStack";
 import { WorkspaceDrawerHost } from "../workspace/WorkspaceDrawerHost";
 import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
@@ -488,6 +489,7 @@ export function AppShell(props: AppShellProps) {
 					</div>
 				</ResizablePanel>
 			</ResizablePanelGroup>
+			<AccountUsageBar />
 			{/* 大纲浮层必须放在 Group 外：v4 只认 data-panel / data-separator 直系子节点，
           夹在 panel 之间会污染分隔条命中区计算（absolute 也不算例外）。 */}
 			{outlineContent}

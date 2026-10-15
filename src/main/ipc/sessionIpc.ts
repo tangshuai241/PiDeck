@@ -54,6 +54,7 @@ import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator
 import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImport";
 import type { DirectorySessionImporter } from "../sessions/DirectorySessionImporter";
 import { registerSessionImageMutationIpc } from "./sessionImageMutationIpc";
+import { registerSessionTitleIpc } from "./sessionTitleIpc";
 
 function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
 	if (!isRecord(input) || typeof input.settingsNs !== "string" || !input.settingsNs.trim()) return false;
@@ -402,6 +403,7 @@ async function handleSessionCommandResult<T>(appLogger: Pick<AppLogger, "warn">,
 }
 
 export function registerSessionIpc(deps: SessionIpcDeps): void {
+	const titleRequests = registerSessionTitleIpc(ipcMain, deps);
 	const {
 		projectStore,
 		settingsStore,
@@ -800,6 +802,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw new Error(mainCopy("session.agentPresetLocked"));
 		}
 		const title = patch.title?.trim();
+		if (title) titleRequests.invalidate(sessionId);
 		if (title && title !== entry.title) {
 			// Reserve the catalog before the asynchronous pi rename. A late automatic-title
 			// result must observe manual ownership even while set_session_name is in flight.

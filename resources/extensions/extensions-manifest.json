@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "9fdebee1332e7655224c19e636333326853adb77458f298b62d569f9bc778b23",
-  "fileCount": 61,
+  "bundleSha256": "18ca5c486b859e56c6e25c3f3da83bc754b8bc5b5fc4585b352015d068e68fd1",
+  "fileCount": 63,
   "files": [
     {
       "name": "pi-deck-alignment-mode.ts",
@@ -275,9 +275,19 @@
       "bytes": 13649
     },
     {
+      "name": "pi-deck-session-title-manual.ts",
+      "sha256": "e1820ca6e74b8f017dcf375a572aaa347e23479ac448c2dc316a92407f575cb5",
+      "bytes": 3416
+    },
+    {
+      "name": "pi-deck-session-title-model.ts",
+      "sha256": "215c01d15b5d2bdcdba6d9b15d3ad5859abaa005a03faa4521e7f568f9297c85",
+      "bytes": 2200
+    },
+    {
       "name": "pi-deck-session-title.ts",
-      "sha256": "fe5734a430b0686040b74164e6aa1b8bf59c55c9331201d38452812d4f677477",
-      "bytes": 24166
+      "sha256": "2b02368dfd8209f3ce26c57e7c9af6bccd84ff922c531658489ef1f59ffe0715",
+      "bytes": 25815
     },
     {
       "name": "pi-deck-shell-proxy.ts",

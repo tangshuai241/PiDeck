@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiRpcClient } from "./PiRpcClient";
+import { normalizeSessionTitleModel } from "../../shared/sessionTitlePreference";
 import { PiLocator } from "./PiLocator";
 import { createSpawnFailureError } from "./piSpawnFailure";
 import { parkBlockedExtensionsInDir, unparkBlockedExtensions, type ParkedExtension } from "./piExtensionFilter";
@@ -18,7 +19,7 @@ import { parsePiVersion, piVersionAtLeast } from "../extensions/extensionVersion
 
 type PiProcessSettings = Pick<
 	AppSettings,
-	"piProxyEnabled" | "piProxyUrl" | "piProxyBypass" | "customPiPath" | "wslEnabled" | "wslDistro" | "wslUser" | "piRpcOffline" | "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions" | "disabledExtensions" | "disabledSkills" | "disabledPrompts" | "autoSessionTitle"
+	"piProxyEnabled" | "piProxyUrl" | "piProxyBypass" | "customPiPath" | "wslEnabled" | "wslDistro" | "wslUser" | "piRpcOffline" | "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions" | "disabledExtensions" | "disabledSkills" | "disabledPrompts" | "autoSessionTitle" | "sessionTitleModel"
 >;
 
 type PiProcessLocator = Pick<PiLocator, "resolveCommand" | "createInvocation" | "createProcessEnv" | "resolveArgCharBudget"> & Partial<Pick<PiLocator, "warmWslCommand">>;
@@ -464,6 +465,7 @@ export class PiProcess extends EventEmitter {
 			// 会话自动标题由 PiDeck 内置扩展在 agent_settled 后独立调用模型；
 			// 显式注入 0/1，避免继承宿主环境中的同名变量。设置变更对新建/重启 Agent 生效。
 			env.PIDECK_AUTO_SESSION_TITLE = this.settings?.autoSessionTitle === false ? "0" : "1";
+			env.PIDECK_TITLE_MODEL = JSON.stringify(normalizeSessionTitleModel(this.settings?.sessionTitleModel));
 
 			// spawn 前记录工作目录事实，仅用于「失败后还原真实原因」：
 			// Windows 下 cwd 无效会被 libuv 报成 "spawn <cmd.exe> ENOENT"（实测复现），

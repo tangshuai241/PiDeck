@@ -185,6 +185,7 @@ test("fingerprint: 每个 spawn 输入字段翻转都改变指纹", () => {
 		fingerprintInput({ bridgeAvailable: false }),
 		fingerprintInput({ bridgeUrl: "54322" }),
 		fingerprintInput({ autoSessionTitle: false }),
+		fingerprintInput({ sessionTitleModel: { provider: "custom", modelId: "other-title-model" } }),
 	];
 	for (const [index, variant] of variants.entries()) {
 		assert.notEqual(computeStandbyFingerprint(variant), base, `variant #${index} must change the fingerprint`);

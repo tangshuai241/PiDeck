@@ -281,6 +281,12 @@ export function createPreviewApi(): PiDesktopApi {
 		return tab;
 	};
 	return {
+		accountUsage: {
+			list: async () => ({ accounts: [], results: {} }),
+			save: async () => ({ accounts: [], results: {}, error: "storage" }),
+			remove: async () => ({ accounts: [], results: {}, error: "storage" }),
+			refresh: async () => ({ accounts: [], results: {} }),
+		},
 		piDeckMcp: {
 			getState: async () => ({ ok: false, code: "desktop-only" }),
 			setAccess: async () => ({ ok: false, code: "desktop-only" }),
@@ -911,6 +917,7 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				value: { target, value: {} },
 			}),
+			generateTitle: async () => ({ ok: false }),
 			cloneRuntime: async (target) => ({
 				ok: true,
 				value: { targetSessionId: `${target.sessionId}:copy` },

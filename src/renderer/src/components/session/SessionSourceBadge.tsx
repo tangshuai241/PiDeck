@@ -42,7 +42,7 @@ const SOURCE_TONES: Record<SessionSource, string> = {
 	minimax: "border-muted-foreground/40 text-muted-foreground",
 };
 
-function SourceLogo(props: { source: SessionSource }) {
+export function SourceLogo(props: { source: SessionSource }) {
 	// 品牌路径内联到渲染层，保证离线会话列表也能显示 Logo，不依赖远程图片或字体资源。
 	if (props.source === "codex") {
 		return (

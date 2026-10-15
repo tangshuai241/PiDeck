@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Input } from "../../ui-shadcn/input";
 import { SettingsSection } from "./SettingsStorageTab";
 import { PromptEnhanceSettingsSection } from "./PromptEnhanceSettingsSection";
+import { SessionTitleModelSetting } from "./SessionTitleModelSetting";
 import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { VoiceTranscriptionSettingsSection } from "./VoiceTranscriptionSettingsSection";
 import { QuickTaskMenuSetting } from "./QuickTaskMenuSetting";
@@ -171,6 +172,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					</Select>
 				</SettingRow>
 				<SettingSwitchRow anchor="common-auto-session-title" title={t("settings.autoSessionTitle")} description={t("settings.autoSessionTitleDesc")} checked={draft.autoSessionTitle ?? false} dirty={isDirty("autoSessionTitle")} onChange={(checked) => updateDraft({ autoSessionTitle: checked })} />
+				<SessionTitleModelSetting value={draft.sessionTitleModel} dirty={isDirty("sessionTitleModel")} onChange={(sessionTitleModel) => updateDraft({ sessionTitleModel })} />
 				<SettingRow
 					anchor="common-tps-display-mode"
 					title={

@@ -51,3 +51,18 @@ test("上下文开关单独落盘且保留增强模型，关闭后重载仍关�
 	assert.equal((await store.update({ enhanceIncludeContext: "true" })).enhanceIncludeContext, false);
 	assert.equal(h.persisted().enhanceIncludeContext, false);
 });
+
+test("标题模型兼容旧配置，保存后重载保持选择，脏值恢复明确默认", async (t) => {
+	const h = makeStore(t);
+	const fallback = { provider: "opencode-go", modelId: "deepseek-v4.1-flash" };
+	const store = await h.load({});
+	assert.deepEqual(JSON.parse(JSON.stringify(store.get().sessionTitleModel)), fallback);
+	const custom = { provider: "title-provider", modelId: "https://model.test/a:b" };
+	await store.update({ sessionTitleModel: custom });
+	assert.deepEqual(h.persisted().sessionTitleModel, custom);
+	assert.deepEqual(JSON.parse(JSON.stringify((await h.load()).get().sessionTitleModel)), custom);
+	for (const value of [null, {}, { provider: "p", modelId: "" }, { provider: "p\nq", modelId: "m" }]) {
+		await store.update({ sessionTitleModel: value });
+		assert.deepEqual(h.persisted().sessionTitleModel, fallback);
+	}
+});

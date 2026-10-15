@@ -1,5 +1,6 @@
 import { app, dialog, shell, type BrowserWindow, Notification } from "electron";
 import { randomUUID } from "node:crypto";
+import { requestSessionTitle } from "./requestSessionTitle";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
@@ -1135,6 +1136,7 @@ export class AgentManager {
 			bridgeAvailable: bridge.ready,
 			bridgeUrl: bridge.ready ? String(bridge.listeningPort) : "",
 			autoSessionTitle: Boolean(settings.autoSessionTitle),
+			sessionTitleModel: settings.sessionTitleModel,
 			// 云端记忆身份属于「只能 spawn 时确定」的输入：账号/实例/开关变化即废弃池化进程
 			cloudMemoryIdentity: this.cloudMemoryPathsProvider?.()?.identity ?? "",
 		});
@@ -1904,6 +1906,14 @@ export class AgentManager {
 
 		this.emitState();
 		return tab;
+	}
+
+	/** Generate only; the session owner validates and persists the proposed title. */
+	async generateSessionTitle(agentId: string): Promise<string> {
+		const runtime = this.requireRuntime(agentId);
+		const generation = runtime.tab.runtimeGeneration;
+		const deckSessionId = runtime.tab.deckSessionId;
+		return requestSessionTitle(runtime.process.client, () => this.agents.get(agentId) === runtime && runtime.tab.runtimeGeneration === generation && runtime.tab.deckSessionId === deckSessionId && runtime.tab.status === "idle", this.settingsStore.get().sessionTitleModel);
 	}
 
 	async rename(agentId: string, name: string) {

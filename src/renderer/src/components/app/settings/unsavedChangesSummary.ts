@@ -54,6 +54,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "shortcuts", tab: "shortcuts", itemKey: "settings.tabs.shortcuts" },
 	{ field: "sessionTabOpenMode", tab: "common", itemKey: "settings.sessionTabOpenMode" },
 	{ field: "autoSessionTitle", tab: "common", itemKey: "settings.autoSessionTitle" },
+	{ field: "sessionTitleModel", tab: "common", itemKey: "settings.sessionTitleModel" },
 	{ field: "tpsDisplayMode", tab: "common", itemKey: "settings.tpsDisplayMode" },
 	{ field: "sendShortcut", tab: "common", itemKey: "settings.inputShortcut" },
 	{ field: "defaultAgentBackend", tab: "common", itemKey: "settings.defaultAgentBackend" },
