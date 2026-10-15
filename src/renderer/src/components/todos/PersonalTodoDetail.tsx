@@ -31,9 +31,8 @@ export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTo
 	const conflicted = view.sync.phase === "conflict" && view.confirmed !== null;
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+		<div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
 			<header className="flex shrink-0 flex-wrap items-center gap-2">
-				<span className="text-body font-medium text-foreground">{t("personalTodo.detailTitle")}</span>
 				<span className="rounded-sm border border-border/60 px-1 text-micro text-muted-foreground">{t(personalTodoStatusKey(item.status))}</span>
 				<span className={cn("rounded-sm border px-1 text-micro", badge.tone === "danger" ? "border-danger/50 text-danger" : badge.tone === "warning" ? "border-warning/50 text-warning" : "border-border/60 text-muted-foreground")}>{t(badge.key)}</span>
 				{view.sync.pendingCount > 1 && <span className="text-micro text-muted-foreground">{t("personalTodo.pendingCount", { count: view.sync.pendingCount })}</span>}
@@ -93,14 +92,14 @@ export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTo
 					</div>
 				</div>
 			) : (
-				<div className="flex shrink-0 flex-col gap-2">
-					<ReadonlyField labelKey="personalTodo.fieldTitle" value={item.title} />
-					<ReadonlyField labelKey="personalTodo.fieldNote" value={item.note} multiline />
-					<div className="flex flex-wrap gap-3">
+				<div className="flex shrink-0 flex-col gap-6">
+					<h2 className="text-2xl leading-8 font-semibold break-words text-foreground">{item.title}</h2>
+					<div className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-lg bg-muted/20 p-4">
 						<ReadonlyField labelKey="personalTodo.fieldCategory" value={item.category ?? t("personalTodo.valueUnset")} />
 						<ReadonlyField labelKey="personalTodo.fieldDeadline" value={item.deadline ?? t("personalTodo.valueUnset")} />
 						<ReadonlyField labelKey="personalTodo.fieldUrgency" value={item.urgency === null ? t("personalTodo.valueUnset") : String(item.urgency)} />
 					</div>
+					<ReadonlyField labelKey="personalTodo.fieldNote" value={item.note} multiline />
 				</div>
 			)}
 
@@ -266,9 +265,9 @@ function Field(props: { labelKey: Parameters<typeof t>[0]; className?: string; c
 
 function ReadonlyField(props: { labelKey: Parameters<typeof t>[0]; value: string; multiline?: boolean }) {
 	return (
-		<div className="flex min-w-0 flex-col gap-0.5">
-			<span className="text-micro text-muted-foreground">{t(props.labelKey)}</span>
-			{props.multiline ? <p className="text-body whitespace-pre-wrap break-words text-foreground">{props.value || t("personalTodo.valueUnset")}</p> : <p className="truncate text-body text-foreground">{props.value}</p>}
+		<div className="flex min-w-0 flex-col gap-2">
+			<span className="text-caption text-muted-foreground">{t(props.labelKey)}</span>
+			{props.multiline ? <p className="text-body leading-6 whitespace-pre-wrap break-words text-foreground">{props.value || t("personalTodo.valueUnset")}</p> : <p className="break-words text-body text-foreground">{props.value}</p>}
 		</div>
 	);
 }

@@ -2,12 +2,45 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d55bf555c41bd91e66b0bb774f1ac43b73f5469ce99f9a2ea130e556a685e1ac（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 5402eda1c7780bd79d233bf5b19bf78519daaa5945bf13f7b2958bcf7b0c25e1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
 
 export const zhTW: Record<TranslationKey, string> = {
+	"personalTodo.pageTitle": "我的待辦",
+	"personalTodo.dateSummary": "{today} 項今天截止 · {overdue} 項已逾期 · {upcoming} 項即將到來",
+	"personalTodo.viewMode": "待辦檢視",
+	"personalTodo.listView": "列表",
+	"personalTodo.calendarView": "日曆",
+	"personalTodo.filters": "篩選",
+	"personalTodo.sort": "排序",
+	"personalTodo.orderSource": "排序：原始順序",
+	"personalTodo.orderDeadline": "排序：截止日期",
+	"personalTodo.orderUrgency": "排序：緊急度",
+	"personalTodo.groupOverdue": "逾期",
+	"personalTodo.groupToday": "今天",
+	"personalTodo.groupUpcoming": "即將到來",
+	"personalTodo.groupUndated": "未設明確日期",
+	"personalTodo.groupCompleted": "已完成",
+	"personalTodo.groupCancelled": "已取消",
+	"personalTodo.toggleGroup": "展開或收起{group}",
+	"personalTodo.addToGroup": "在{group}新增待辦",
+	"personalTodo.undatedHint": "未填日期或保留日期原文的事項",
+	"personalTodo.addItem": "新增待辦",
+	"personalTodo.quickTitle": "新待辦標題",
+	"personalTodo.quickPlaceholder": "輸入待辦，按 Enter 新增，Esc 收起",
+	"personalTodo.completeItem": "完成：{title}",
+	"personalTodo.reopenItem": "重新開啟：{title}",
+	"personalTodo.expandSubtodos": "展開或收起子待辦：{title}",
+	"personalTodo.moreActions": "更多操作：{title}",
+	"personalTodo.panelHint": "檢視或編輯待辦，按 Esc 關閉。未提交的編輯保留在當前頁面。",
+	"personalTodo.loadedWindow": "當前已載入 {count} 項；分組、統計與排序僅涵蓋當前結果",
+	"personalTodo.loadedCount": "共 {count} 項待辦",
+	"personalTodo.previousMonth": "上個月",
+	"personalTodo.nextMonth": "下個月",
+	"personalTodo.addOnDate": "在 {date} 新增待辦",
+	"personalTodo.dateFormat": "YYYY-MM-DD",
 	"hostPlugins.title": "PiDeck 外掛",
 	"hostPlugins.description": "獨立於 pi 程序的工作臺外掛。只加載本地靜態頁面，無 Node 或命令執行能力；讀取當前專案會話、請求指定 HTTPS 介面或本地服務均需單獨授權。",
 	"hostPlugins.rescan": "重新掃描",
