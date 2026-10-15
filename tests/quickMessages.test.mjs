@@ -506,6 +506,15 @@ test("快捷键归属：无聚焦会话时归引导页（按钮可见却敲不�
 	assert.equal(owns(undefined, "s1"), false);
 });
 
+test("快捷键归属：个人工作台功能页呈现时输入类快捷键谁都不接管", () => {
+	// 功能页盖住会话列：输入框不可见，快捷键不得成为绕过焦点隔离的后门（插文本／开录音）
+	assert.equal(ownsQuickMessageShortcut({ focusedSessionId: "s1", sessionId: "s1", guideSessionId: GUIDE_ID, personalWorkbenchPageOpen: true }), false);
+	assert.equal(ownsQuickMessageShortcut({ focusedSessionId: undefined, sessionId: GUIDE_ID, guideSessionId: GUIDE_ID, personalWorkbenchPageOpen: true }), false);
+	// 关闭功能页（或未打开）时归属判定与原来完全一致
+	assert.equal(ownsQuickMessageShortcut({ focusedSessionId: "s1", sessionId: "s1", guideSessionId: GUIDE_ID, personalWorkbenchPageOpen: false }), true);
+	assert.equal(ownsQuickMessageShortcut({ focusedSessionId: "s1", sessionId: "s1", guideSessionId: GUIDE_ID }), true);
+});
+
 test("快捷键接线：广播 id 从主进程到浮层全程一致（任一处写错就静默失效）", () => {
 	const hook = readSource("src/renderer/src/hooks/useQuickMessagePopover.ts");
 	// 只认自己的 id，且不能误用其它快捷键 id

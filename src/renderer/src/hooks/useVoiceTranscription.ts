@@ -3,6 +3,7 @@ import { useAtomValue, useStore } from "jotai";
 import { VOICE_TRANSCRIPTION_MAX_AUDIO_BYTES, resolveVolcProtocol, type VoiceTranscriptionCloudProvider } from "../../../shared/voiceTranscriptionConfig";
 import type { VoiceTranscriptionErrorCode, VoiceTranscriptionPublicConfig, VoiceTranscriptionStreamPartial } from "../../../shared/types/voiceTranscription";
 import { currentSessionIdAtom, voiceConfigRevisionAtom } from "../atoms";
+import { personalWorkbenchPageAtom } from "../atoms/personal-workbench-atoms";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
@@ -451,10 +452,11 @@ export function useVoiceTranscription(input: { scopeKey: string; captureTarget: 
 
 	// 全局快捷键呼出录音：与快捷消息同理，须自证「本栏是聚焦栏」，否则分屏下按一次
 	// 会同时触发多栏录音。输入框聚焦时仍生效（语音正是打字现场）。
+	// 个人工作台功能页盖住会话列时不接管：录音最终落点是那个不可见的输入框。
 	useEffect(() => {
 		return desktopApi.app.onShortcutTriggered((triggered) => {
 			if (triggered !== "toggleVoiceRecording") return;
-			if (!ownsQuickMessageShortcut({ focusedSessionId: store.get(currentSessionIdAtom), sessionId: scopeKey, guideSessionId: GUIDE_BOOTSTRAP_SESSION_ID })) return;
+			if (!ownsQuickMessageShortcut({ focusedSessionId: store.get(currentSessionIdAtom), sessionId: scopeKey, guideSessionId: GUIDE_BOOTSTRAP_SESSION_ID, personalWorkbenchPageOpen: store.get(personalWorkbenchPageAtom) !== null })) return;
 			toggle();
 		});
 	}, [scopeKey, store, toggle]);

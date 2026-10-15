@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "jotai";
 import { currentSessionIdAtom } from "../atoms";
+import { personalWorkbenchPageAtom } from "../atoms/personal-workbench-atoms";
 import { desktopApi } from "../desktopApi";
 import { GUIDE_BOOTSTRAP_SESSION_ID } from "../utils/chatSessionBootstrap";
 import { ownsQuickMessageShortcut } from "../utils/quickMessageShortcut";
@@ -45,8 +46,9 @@ export function useQuickMessagePopover(options: {
 	useEffect(() => {
 		return desktopApi.app.onShortcutTriggered((triggered) => {
 			if (triggered !== "openQuickMessages") return;
-			// 只由聚焦栏（或页面唯一存在的引导页输入框）响应（判定见 ownsQuickMessageShortcut）。
-			if (!ownsQuickMessageShortcut({ focusedSessionId: store.get(currentSessionIdAtom), sessionId, guideSessionId: GUIDE_BOOTSTRAP_SESSION_ID })) return;
+			// 只由聚焦栏（或页面唯一存在的引导页输入框）响应（判定见 ownsQuickMessageShortcut）；
+			// 个人工作台功能页盖住会话列时不接管：输入框不可见，快捷键不得往被遮会话插文本。
+			if (!ownsQuickMessageShortcut({ focusedSessionId: store.get(currentSessionIdAtom), sessionId, guideSessionId: GUIDE_BOOTSTRAP_SESSION_ID, personalWorkbenchPageOpen: store.get(personalWorkbenchPageAtom) !== null })) return;
 			// 再按一次收起：呼出类快捷键的普遍预期（打开后原键关闭）。
 			setOpen(!openRef.current);
 		});
