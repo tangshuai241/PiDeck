@@ -13,7 +13,9 @@
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
-国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
+本地二次开发项目 TPA 以 [tangshuai241/PiDeck](https://github.com/tangshuai241/PiDeck) 的 `main` 为主线。原项目更新仅在明确需要时同步。
+
+原项目 AtomGit（历史参考，TPA 默认不自动镜像）：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
 <p>
   <a href="https://atomgit.com/ayuayue/PiDeck"><img alt="AtomGit G-Star" src="https://atomgit.com/ayuayue/PiDeck/star/new_badge.svg"></a>

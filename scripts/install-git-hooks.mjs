@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * 安装 / 校验 PiDeck 的仓库级 git 钩子：每次 `git push` 自动把引用镜像到 AtomGit。
+ * 安装 / 校验仓库级 git 钩子；TPA 默认关闭 AtomGit 镜像，仅在显式启用时配置镜像远端。
  *
  * 为什么需要「安装」这一步：git 不跟踪 `.git/hooks`，钩子必须放在仓库里（`.githooks/`）
  * 并把 `core.hooksPath` 指过去，**其他设备** clone 或拉取后才能有同样行为。本脚本幂等，
  * 反复执行安全：
  *   1. `git config --local core.hooksPath .githooks`（只写本仓库，不动全局配置）；
  *   2. POSIX 上给钩子补执行位（Windows 不需要，git 直接调用 sh）；
- *   3. 确保 `atomgit` 远端存在（新设备常见缺失），地址取自 scripts/atomgit-mirror.mjs；
+ *   3. 仅在 PI_DECK_ENABLE_ATOMGIT=1 时补齐 `atomgit` 远端；
  *   4. 打印可自检的命令。
  *
  * 用法：
@@ -67,7 +67,7 @@ function main() {
 	const current = git(["config", "--local", "--get", "core.hooksPath"]);
 	const installed = current.ok && current.output === HOOKS_PATH;
 	if (installed && checkOnly) {
-		log(`✅ core.hooksPath = ${HOOKS_PATH}（pre-push → AtomGit 镜像已启用）`);
+		log(`✅ core.hooksPath = ${HOOKS_PATH}（AtomGit 镜像需 PI_DECK_ENABLE_ATOMGIT=1 显式启用）`);
 	}
 
 	if (!installed) {
@@ -93,8 +93,8 @@ function main() {
 		// 忽略：权限模型的差异不该让安装失败
 	}
 
-	// 新设备自愈：没有 atomgit 远端就补一个
-	if (!git(["remote", "get-url", DEFAULT_ATOMGIT_REMOTE]).ok) {
+	// 安装依赖不代表授权发布到原作者仓库；只有显式选择镜像才配置远端。
+	if (process.env.PI_DECK_ENABLE_ATOMGIT === "1" && process.env.PI_DECK_SKIP_ATOMGIT !== "1" && !git(["remote", "get-url", DEFAULT_ATOMGIT_REMOTE]).ok) {
 		if (checkOnly) {
 			warn(`未配置远端 ${DEFAULT_ATOMGIT_REMOTE}：首次 push 时钩子会自动添加，或现在执行 git remote add ${DEFAULT_ATOMGIT_REMOTE} ${DEFAULT_ATOMGIT_URL}`);
 		} else if (git(["remote", "add", DEFAULT_ATOMGIT_REMOTE, DEFAULT_ATOMGIT_URL]).ok) {
@@ -106,9 +106,9 @@ function main() {
 
 	if (!checkOnly) {
 		log("");
-		log("每次 git push 会把本次推送的引用同步到 AtomGit（失败只提示，不阻断 push）。");
-		log("自检：PI_DECK_ATOMGIT_DRY_RUN=1 git push <remote> <branch>   # 只打印将执行的镜像命令");
-		log("开关：PI_DECK_SKIP_ATOMGIT=1 跳过；PI_DECK_ATOMGIT_STRICT=1 镜像失败即失败");
+		log("TPA 默认只推送指定远端，不自动同步到 AtomGit。");
+		log("自检：PI_DECK_ENABLE_ATOMGIT=1 PI_DECK_ATOMGIT_DRY_RUN=1 git push <remote> <branch>");
+		log("仅在确认镜像地址与权限后设置 PI_DECK_ENABLE_ATOMGIT=1；PI_DECK_SKIP_ATOMGIT=1 始终优先跳过。");
 	}
 	finish(0);
 }

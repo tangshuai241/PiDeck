@@ -1,5 +1,5 @@
 #!/bin/sh
-# PiDeck —— pre-push 钩子：把本次 push 的引用同步镜像到 AtomGit 远端。
+# TPA —— pre-push 钩子：默认不镜像；PI_DECK_ENABLE_ATOMGIT=1 时才同步到 AtomGit。
 #
 # 为什么是 pre-push：git 没有 post-push 钩子，pre-push 是唯一能在 push 流程里自动执行的位置；
 # 这里只读「本次实际要推的引用」，因此推哪个分支/标签就镜像哪个，不做全量 --mirror。
@@ -11,7 +11,7 @@
 # 行为保证：默认「尽力而为」——镜像失败只打印提示，绝不阻断本次 push；
 # 需要「镜像失败即失败」时设 PI_DECK_ATOMGIT_STRICT=1。
 #
-# 关闭/定制：PI_DECK_SKIP_ATOMGIT=1 跳过；PI_DECK_ATOMGIT_REMOTE / PI_DECK_ATOMGIT_URL
+# 启用前确认镜像地址与权限；PI_DECK_SKIP_ATOMGIT=1 优先跳过；PI_DECK_ATOMGIT_REMOTE / PI_DECK_ATOMGIT_URL
 # 改远端名与默认地址；PI_DECK_ATOMGIT_DRY_RUN=1 只打印将要执行的 push。
 #
 # 安装：node scripts/install-git-hooks.mjs（npm install 会经 prepare 自动执行；幂等）。

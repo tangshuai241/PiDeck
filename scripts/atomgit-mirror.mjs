@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把一次 `git push` 的引用镜像到 AtomGit（由 `.githooks/pre-push` 调用，可单独运行）。
+ * 显式启用后，把一次 `git push` 的引用镜像到 AtomGit；TPA 默认不向其他仓库镜像。
  *
  * 设计要点（为什么长这样）：
  * - **只镜像本次真正推的引用**：pre-push 的 stdin 给出 `<local ref> <local sha> <remote ref> <remote sha>`，
@@ -18,7 +18,7 @@
  *   不让一次 push 挂住几分钟。
  * - 判定逻辑抽成纯函数 `planAtomgitMirror`，单测直接覆盖（见 tests/atomgitPushMirror.test.mjs）。
  *
- * 环境开关：PI_DECK_SKIP_ATOMGIT / PI_DECK_ATOMGIT_STRICT / PI_DECK_ATOMGIT_REMOTE /
+ * 环境开关：PI_DECK_ENABLE_ATOMGIT=1 显式启用；PI_DECK_SKIP_ATOMGIT / PI_DECK_ATOMGIT_STRICT / PI_DECK_ATOMGIT_REMOTE /
  *          PI_DECK_ATOMGIT_URL / PI_DECK_ATOMGIT_DRY_RUN。
  */
 
@@ -64,6 +64,8 @@ export function planAtomgitMirror(options) {
 	if (env.PI_DECK_SKIP_ATOMGIT === "1") return { action: "skip", reason: "skip-env", ...empty };
 	// 目标就是 AtomGit：本次 push 本身就是镜像动作，再镜像一次会无限递归
 	if (remoteName === remote || remoteUrl.includes("atomgit.com")) return { action: "skip", reason: "target-is-atomgit", ...empty };
+	// A fork must not inherit permission to publish to the original author’s mirror.
+	if (env.PI_DECK_ENABLE_ATOMGIT !== "1") return { action: "skip", reason: "not-enabled", ...empty };
 
 	const refspecs = [];
 	const droppedDeletes = [];

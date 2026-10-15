@@ -31,8 +31,15 @@ test("pre-push ref list is parsed per git's documented contract", () => {
 	assert.deepEqual(parsePushRefLines(""), []);
 });
 
+test("TPA pushes do not mirror to another owner's repository without explicit opt-in", () => {
+	const plan = planAtomgitMirror({ remoteName: "origin", remoteUrl: "https://github.com/tangshuai241/PiDeck.git", stdin: BRANCH_LINE, env: {} });
+	assert.equal(plan.action, "skip");
+	assert.equal(plan.reason, "not-enabled");
+	assert.deepEqual(plan.refspecs, []);
+});
+
 test("mirror pushes exactly the incoming refs (branches and tags)", () => {
-	const plan = planAtomgitMirror({ remoteName: "origin", remoteUrl: "git@github.com:ayuayue/PiDeck.git", stdin: `${BRANCH_LINE}\n${TAG_LINE}`, env: {} });
+	const plan = planAtomgitMirror({ remoteName: "origin", remoteUrl: "git@github.com:ayuayue/PiDeck.git", stdin: `${BRANCH_LINE}\n${TAG_LINE}`, env: { PI_DECK_ENABLE_ATOMGIT: "1" } });
 	assert.equal(plan.action, "push");
 	assert.deepEqual(plan.refspecs, ["refs/heads/dev:refs/heads/dev", "refs/tags/v0.7.7-beta:refs/tags/v0.7.7-beta"]);
 	assert.equal(plan.remote, DEFAULT_ATOMGIT_REMOTE);
@@ -48,21 +55,21 @@ test("mirror refuses to mirror itself (no recursion)", () => {
 
 test("mirror never propagates ref deletions", () => {
 	// 本地清理分支是高频动作，跟着删会把镜像上的分支一起删掉：只跳过并记录
-	const mixed = planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: `${BRANCH_LINE}\n${DELETE_LINE}`, env: {} });
+	const mixed = planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: `${BRANCH_LINE}\n${DELETE_LINE}`, env: { PI_DECK_ENABLE_ATOMGIT: "1" } });
 	assert.equal(mixed.action, "push");
 	assert.deepEqual(mixed.refspecs, ["refs/heads/dev:refs/heads/dev"]);
 	assert.deepEqual(mixed.droppedDeletes, ["refs/heads/gone"]);
 
-	const onlyDelete = planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: DELETE_LINE, env: {} });
+	const onlyDelete = planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: DELETE_LINE, env: { PI_DECK_ENABLE_ATOMGIT: "1" } });
 	assert.equal(onlyDelete.action, "skip");
 	assert.equal(onlyDelete.reason, "only-deletions");
 	assert.deepEqual(onlyDelete.droppedDeletes, ["refs/heads/gone"]);
 
-	assert.equal(planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: "", env: {} }).reason, "nothing-to-mirror");
+	assert.equal(planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: "", env: { PI_DECK_ENABLE_ATOMGIT: "1" } }).reason, "nothing-to-mirror");
 });
 
 test("mirror respects its switches", () => {
-	assert.equal(planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: BRANCH_LINE, env: { PI_DECK_SKIP_ATOMGIT: "1" } }).reason, "skip-env");
+	assert.equal(planAtomgitMirror({ remoteName: "origin", remoteUrl: "", stdin: BRANCH_LINE, env: { PI_DECK_ENABLE_ATOMGIT: "1", PI_DECK_SKIP_ATOMGIT: "1" } }).reason, "skip-env");
 	// 自定义远端名同样要参与递归防护
 	const custom = planAtomgitMirror({ remoteName: "ag", remoteUrl: "", stdin: BRANCH_LINE, env: { PI_DECK_ATOMGIT_REMOTE: "ag" } });
 	assert.equal(custom.action, "skip");
