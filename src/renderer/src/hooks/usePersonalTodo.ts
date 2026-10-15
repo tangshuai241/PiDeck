@@ -21,6 +21,7 @@ import { clearPersonalTodoFilters, isPersonalTodoResultStale, isPersonalTodoScop
 import { createPersonalTodoDraftForm, createPersonalTodoRequestId, personalTodoDraftIsDirty, personalTodoDraftPatch, personalTodoDraftValidationKey, remapPersonalTodoDrafts, upsertPersonalTodoView, type PersonalTodoDraftFields, type PersonalTodoDraftForm } from "../utils/personalTodoDraft";
 import { personalTodoErrorKey, resolvePersonalTodoStatusDecision } from "../utils/personalTodoState";
 import type { TranslationKey } from "../i18n";
+import { createPersonalTodoInlineActions, type PersonalTodoInlinePatch } from "../utils/personalTodoInlineActions";
 
 /** 桌面待办接口（契约成员）：preload 集成前该成员暂缺，由后台交付后的集成任务收口。 */
 export type PersonalTodoClient = typeof desktopApi.personalTodo;
@@ -70,6 +71,8 @@ export type PersonalTodoController = {
 	discardDraft: () => void;
 	saveDraft: () => Promise<void>;
 	createItem: (fields: PersonalTodoDraftFields) => Promise<boolean>;
+	patchInline: (view: PersonalTodoView, patch: PersonalTodoInlinePatch) => Promise<boolean>;
+	setInlineStatus: (view: PersonalTodoView, status: PersonalTodoStatus) => Promise<boolean>;
 	toggleStatus: (view: PersonalTodoView) => Promise<void>;
 	addSubtodo: (view: PersonalTodoView, text: string) => Promise<boolean>;
 	updateSubtodo: (view: PersonalTodoView, subtodoId: string, fields: { text?: string; note?: string }) => Promise<boolean>;
@@ -106,6 +109,7 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 	const epochRef = useRef(0);
 	/** 组件是否仍然挂载（卸载后不写状态）。 */
 	const aliveRef = useRef(true);
+	const inlineActiveIdsRef = useRef(new Set<string>());
 	const [reloadToken, setReloadToken] = useState(0);
 
 	const clientRef = useRef(client);
@@ -319,6 +323,8 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 				if (!aliveRef.current) return result;
 				if (isPersonalTodoResultStale(requestScopeKey, scopeKeyRef.current)) return result;
 				if (result.ok) {
+					// 同一事项重试成功后，旧失败提示不能继续冒充当前保存结果。
+					setNotice((current) => (current?.itemId === (itemId || "create") ? null : current));
 					setSummary(result.summary);
 					setWrite(result.write);
 					mergeView(result.item);
@@ -522,7 +528,22 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 		[mergeView, setDrafts, setItems, setPageError, setSummary],
 	);
 
+	const inlineActions = useMemo(
+		() =>
+			createPersonalTodoInlineActions({
+				items: list.items,
+				hasDirtyDraft: (id) => drafts[personalTodoDraftKey(scopeKeyRef.current, id)]?.dirty ?? false,
+				activeIds: inlineActiveIdsRef.current,
+				onNotice: setNotice,
+				submit,
+				getScope: () => scopeKeyRef.current,
+				scope: scopeKeyRef.current,
+				isAlive: () => aliveRef.current,
+			}),
+		[list.items, drafts, setNotice, submit, scopeKey],
+	);
 	return {
+		...inlineActions,
 		clientAvailable: client !== null,
 		status,
 		items: list.items,

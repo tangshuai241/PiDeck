@@ -10,6 +10,8 @@ import type { PersonalTodoController } from "../../hooks/usePersonalTodo";
 import type { PersonalTodoWorkspace } from "../../hooks/usePersonalTodoWorkspace";
 import { hasPersonalTodoFilters } from "../../utils/personalTodoQuery";
 import { personalTodoStatusKey } from "../../utils/personalTodoState";
+import { PersonalTodoCategoryPicker } from "./PersonalTodoFieldPickers";
+import { PersonalTodoDatePicker } from "./PersonalTodoDatePicker";
 
 const ORDERS = ["source", "deadline", "urgency"] as const;
 const ORDER_KEYS: Record<(typeof ORDERS)[number], TranslationKey> = { source: "personalTodo.orderSource", deadline: "personalTodo.orderDeadline", urgency: "personalTodo.orderUrgency" };
@@ -53,16 +55,41 @@ export function PersonalTodoFilters({ todo, workspace }: { todo: PersonalTodoCon
 					</label>
 					<label className="flex flex-col gap-1.5 text-caption text-muted-foreground">
 						{t("personalTodo.filterCategory")}
-						<Input value={query.category ?? ""} onChange={(event) => todo.setQuery({ category: event.target.value })} />
+						<PersonalTodoCategoryPicker
+							className="h-9 w-full border border-input px-2"
+							label={t("personalTodo.filterCategory")}
+							value={query.category ?? null}
+							categories={todo.items.flatMap((entry) => (entry.item.category ? [entry.item.category] : []))}
+							onChange={(category) => {
+								todo.setQuery({ category });
+								return true;
+							}}
+						/>
 					</label>
 					<div className="grid grid-cols-2 gap-2">
 						<label className="flex flex-col gap-1.5 text-caption text-muted-foreground">
 							{t("personalTodo.filterDeadlineFrom")}
-							<Input value={query.deadlineFrom ?? ""} placeholder={t("personalTodo.dateFormat")} onChange={(event) => todo.setQuery({ deadlineFrom: event.target.value })} />
+							<PersonalTodoDatePicker
+								className="h-9 w-full border border-input px-2"
+								label={t("personalTodo.filterDeadlineFrom")}
+								value={query.deadlineFrom ?? null}
+								onChange={(deadlineFrom) => {
+									todo.setQuery({ deadlineFrom });
+									return true;
+								}}
+							/>
 						</label>
 						<label className="flex flex-col gap-1.5 text-caption text-muted-foreground">
 							{t("personalTodo.filterDeadlineTo")}
-							<Input value={query.deadlineTo ?? ""} placeholder={t("personalTodo.dateFormat")} onChange={(event) => todo.setQuery({ deadlineTo: event.target.value })} />
+							<PersonalTodoDatePicker
+								className="h-9 w-full border border-input px-2"
+								label={t("personalTodo.filterDeadlineTo")}
+								value={query.deadlineTo ?? null}
+								onChange={(deadlineTo) => {
+									todo.setQuery({ deadlineTo });
+									return true;
+								}}
+							/>
 						</label>
 					</div>
 					<p className="text-caption leading-5 text-muted-foreground">{t("personalTodo.filterDeadlineHint")}</p>

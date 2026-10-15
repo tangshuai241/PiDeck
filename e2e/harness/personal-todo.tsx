@@ -75,11 +75,11 @@ api.personalTodo = {
 				(!query.deadlineFrom || Boolean(item.deadline && item.deadline >= query.deadlineFrom)) &&
 				(!query.deadlineTo || Boolean(item.deadline && item.deadline <= query.deadlineTo)),
 		);
-		return { ok: true, scope, items, nextCursor: state.nextCursor, source: "cloud", fetchedAt: today.toISOString(), summary, write };
+		return { ok: true, scope, items: structuredClone(items), nextCursor: state.nextCursor, source: "cloud", fetchedAt: today.toISOString(), summary, write };
 	},
 	get: async (id) => {
 		const item = state.items.find((view) => view.item.id === id);
-		return item ? { ok: true, scope, item, summary, write } : { ok: false, error: { code: "invalidInput", message: "test item absent" } };
+		return item ? { ok: true, scope, item: structuredClone(item), summary, write } : { ok: false, error: { code: "invalidInput", message: "test item absent" } };
 	},
 	submit: async ({ operation, clientRequestId }) => {
 		state.submits.push(operation);
@@ -92,18 +92,21 @@ api.personalTodo = {
 		} else {
 			const existing = state.items.find((entry) => entry.item.id === operation.id);
 			if (!existing) return { ok: false, error: { code: "invalidInput", message: "test item absent" } };
+			if (operation.expectedRevision !== existing.item.revision) return { ok: false, error: { code: "conflict", message: "isolated version conflict" } };
 			const item = { ...existing.item, revision: `${existing.item.revision}-next` };
 			if (operation.kind === "status") item.status = operation.status;
 			if (operation.kind === "patch") Object.assign(item, operation.patch);
+			if (operation.kind === "subtodoAdd") item.subtodos = [...item.subtodos, { id: `new-sub-${state.submits.length}`, text: operation.text, note: operation.note ?? "", status: "open", assignee: operation.assignee ?? null, linkedTaskIds: [], sourceId: null }];
+			if (operation.kind === "subtodoPatch") item.subtodos = item.subtodos.map((subtodo) => (subtodo.id === operation.subtodoId ? { ...subtodo, text: operation.text ?? subtodo.text, note: operation.note ?? subtodo.note } : subtodo));
 			if (operation.kind === "subtodoStatus") {
 				item.subtodos = item.subtodos.map((subtodo) => (subtodo.id === operation.subtodoId ? { ...subtodo, status: operation.status } : subtodo));
-				item.subtodoProgress = { total: item.subtodos.length, done: item.subtodos.filter((subtodo) => subtodo.status === "done").length, open: item.subtodos.filter((subtodo) => subtodo.status === "open").length, cancelled: item.subtodos.filter((subtodo) => subtodo.status === "cancelled").length };
 			}
+			item.subtodoProgress = { total: item.subtodos.length, done: item.subtodos.filter((subtodo) => subtodo.status === "done").length, open: item.subtodos.filter((subtodo) => subtodo.status === "open").length, cancelled: item.subtodos.filter((subtodo) => subtodo.status === "cancelled").length };
 			view = { ...existing, item, confirmed: item };
 			state.items = state.items.map((entry) => (entry.item.id === item.id ? view : entry));
 		}
-		for (const listener of listeners) listener({ scope, reason: "cloud", items: [view], reload: false, summary, write });
-		return { ok: true, accepted: true, requestId: clientRequestId ?? "test-request", item: view, summary, write };
+		for (const listener of listeners) listener({ scope, reason: "cloud", items: [structuredClone(view)], reload: false, summary, write });
+		return { ok: true, accepted: true, requestId: clientRequestId ?? "test-request", item: structuredClone(view), summary, write };
 	},
 	retry: async () => ({ ok: true, retried: 0, summary, write }),
 	resolveConflict: async () => ({ ok: true, item: null, summary }),

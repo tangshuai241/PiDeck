@@ -1,17 +1,18 @@
 /** 对齐的待办行与可展开子待办；所有业务操作转发给原 controller。 */
 import { useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { CalendarDays, Check, ChevronRight, Circle, CloudUpload, Ellipsis, Link2, ListTree, Loader2, RotateCcw, Signal, TriangleAlert } from "lucide-react";
+import { Check, ChevronRight, Circle, CloudUpload, Ellipsis, Link2, ListTree, Loader2, Plus, RotateCcw, TriangleAlert } from "lucide-react";
 import type { PersonalTodoView } from "../../../../shared/types/personalTodo";
 import type { PersonalTodoController } from "../../hooks/usePersonalTodo";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { EASE_OUT, SPRING_PRESS } from "../../lib/ease";
-import { personalTodoCalendarDate } from "../../utils/personalTodoPresentation";
 import { personalTodoErrorInfoKey, personalTodoStatusKey, personalTodoSyncBadge } from "../../utils/personalTodoState";
 import { Button } from "../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
+import { PersonalTodoInlineFields } from "./PersonalTodoInlineFields";
+import { PersonalTodoSubtodoQuickAdd } from "./PersonalTodoSubtodoQuickAdd";
 
 export const TODO_ROW_GRID = "grid grid-cols-[36px_minmax(200px,1fr)_minmax(110px,0.42fr)_100px_90px_125px_32px] items-center gap-3 px-2";
 
@@ -26,8 +27,6 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 	const errorKey = personalTodoErrorInfoKey(view.sync.lastError);
 	const notice = todo.notice?.itemId === item.id ? todo.notice.key : errorKey;
 	const retryable = ["conflict", "unknown", "error"].includes(view.sync.phase);
-	const day = personalTodoCalendarDate(item.deadline);
-	const overdue = item.status === "open" && day !== null && day < today;
 	return (
 		<Collapsible open={expanded} onOpenChange={setExpanded} className="shrink-0 border-b border-border/50 duration-300 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1" data-todo-id={item.id}>
 			<div className={cn(TODO_ROW_GRID, "group min-h-12 transition-colors duration-150 hover:bg-muted/35 motion-reduce:transition-none", done && "bg-success-soft/15")}>
@@ -45,7 +44,7 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 					</Button>
 				</motion.div>
 				<div className="flex min-w-0 items-center gap-2">
-					{item.subtodos.length > 0 && (
+					{(item.subtodos.length > 0 || expanded) && (
 						<Button variant="ghost" size="icon" className="-ml-1 size-5 shrink-0 text-muted-foreground" aria-label={t("personalTodo.expandSubtodos", { title: item.title })} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
 							<ChevronRight className={cn("size-3.5 transition-transform motion-reduce:transition-none", expanded && "rotate-90")} />
 						</Button>
@@ -71,6 +70,9 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 							{item.subtodoProgress.done}/{item.subtodoProgress.total}
 						</span>
 					)}
+					<Button variant="ghost" size="icon" className="size-5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={t("personalTodo.addSubtodoFor", { title: item.title })} title={t("personalTodo.addSubtodoInline")} disabled={pending} onClick={() => setExpanded(true)}>
+						<Plus className="size-3" />
+					</Button>
 					{view.linkedTasks.length > 0 && <Link2 className="size-3 shrink-0 text-muted-foreground" aria-label={t("personalTodo.linkedTaskCount", { count: view.linkedTasks.length })} />}
 					{view.sync.phase !== "synced" && (
 						<span title={t(badge.key)} aria-label={t(badge.key)} className={cn("shrink-0", retryable ? "text-warning" : "text-muted-foreground")}>
@@ -78,22 +80,7 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 						</span>
 					)}
 				</div>
-				<span className="flex min-w-0 items-center gap-2 text-caption text-foreground">
-					{item.category && <span className="size-2 shrink-0 rounded-[3px] bg-primary/75" />}
-					<span className="truncate">{item.category ?? t("personalTodo.valueUnset")}</span>
-				</span>
-				<span className={cn("flex items-center gap-1.5 text-caption", done ? "text-success" : "text-muted-foreground")}>
-					<Circle className="size-3.5" />
-					{t(personalTodoStatusKey(item.status))}
-				</span>
-				<span className={cn("flex items-center gap-1.5 text-caption", item.urgency === 3 ? "text-danger" : "text-muted-foreground")}>
-					<Signal className="size-3.5" />
-					{item.urgency ?? t("personalTodo.valueUnset")}
-				</span>
-				<span className={cn("flex min-w-0 items-center gap-1.5 text-caption tabular-nums", overdue ? "text-danger" : "text-muted-foreground")} title={item.deadline ?? undefined}>
-					{item.deadline && <CalendarDays className="size-3.5 shrink-0" />}
-					<span className="truncate">{item.deadline ?? t("personalTodo.valueUnset")}</span>
-				</span>
+				<PersonalTodoInlineFields todo={todo} view={view} today={today} />
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<Button variant="ghost" size="icon" className="size-7 text-muted-foreground" aria-label={t("personalTodo.moreActions", { title: item.title })}>
@@ -102,6 +89,18 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
 						<DropdownMenuItem onSelect={() => onOpen(item.id)}>{t("personalTodo.detailTitle")}</DropdownMenuItem>
+						<DropdownMenuItem
+							onSelect={() => {
+								onOpen(item.id);
+								todo.beginEdit(view);
+							}}
+						>
+							{t("personalTodo.edit")}
+						</DropdownMenuItem>
+						<DropdownMenuItem disabled={pending} onSelect={() => setExpanded(true)}>
+							<Plus className="size-3.5" />
+							{t("personalTodo.addSubtodoInline")}
+						</DropdownMenuItem>
 						<DropdownMenuItem disabled={pending} onSelect={() => void todo.toggleStatus(view)}>
 							{t(done ? "personalTodo.toggleReopen" : "personalTodo.toggleDone")}
 						</DropdownMenuItem>
@@ -137,6 +136,7 @@ export function PersonalTodoRow({ todo, view, today, onOpen, onToggle }: { todo:
 						</button>
 					</div>
 				))}
+				<PersonalTodoSubtodoQuickAdd todo={todo} view={view} className="border-t border-border/40 py-2 pr-4 pl-14" />
 			</CollapsibleContent>
 		</Collapsible>
 	);

@@ -8,18 +8,22 @@
  * - 长备注完整读写，不在界面上截断。
  */
 import { useState } from "react";
-import { ListTree, Link2, MessagesSquare, Plus, RotateCcw, Save, Undo2 } from "lucide-react";
+import { ListTree, Link2, MessagesSquare, RotateCcw, Save, Undo2 } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 import { Textarea } from "../ui-shadcn/textarea";
 import type { PersonalTodoSubtask, PersonalTodoView } from "../../../../shared/types/personalTodo";
-import { PERSONAL_TODO_URGENCY_MAX } from "../../../../shared/types/personalTodo";
 import type { PersonalTodoController } from "../../hooks/usePersonalTodo";
 import { personalTodoErrorInfoKey, personalTodoLinkedTaskKey, personalTodoStatusKey, personalTodoSyncBadge, personalTodoWriteNoticeKey } from "../../utils/personalTodoState";
 import { PersonalTodoConflictPanel } from "./PersonalTodoConflictPanel";
 import { TodoMaterialEntry, TodoMaterialPanel } from "./TodoMaterialEntry";
+import { PersonalTodoDraftPickers } from "./PersonalTodoDraftPickers";
+import { PersonalTodoInlineFields } from "./PersonalTodoInlineFields";
+import { PersonalTodoSubtodoQuickAdd } from "./PersonalTodoSubtodoQuickAdd";
+import { usePersonalTodoSubtodoEditor } from "../../hooks/usePersonalTodoSubtodoForm";
+import { personalTodoLocalDay } from "../../utils/personalTodoPresentation";
 
 export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTodoController; view: PersonalTodoView; projectId?: string }) {
 	const item = view.item;
@@ -66,19 +70,7 @@ export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTo
 						{/* 长备注完整读写：不设 maxLength、不做截断 */}
 						<Textarea className="min-h-[96px] text-body" value={todo.draft.fields.note} onChange={(event) => todo.updateDraftField("note", event.target.value)} />
 					</Field>
-					<div className="flex flex-wrap gap-2">
-						<Field labelKey="personalTodo.fieldCategory" className="min-w-[140px] flex-1">
-							<Input className="h-8 text-body" value={todo.draft.fields.category} onChange={(event) => todo.updateDraftField("category", event.target.value)} />
-						</Field>
-						<Field labelKey="personalTodo.fieldDeadline" className="min-w-[140px] flex-1">
-							{/* 日期保留云端原字符串：不解析、不换时区、不补午夜 */}
-							<Input className="h-8 text-body" placeholder={t("personalTodo.fieldDeadlineHint")} value={todo.draft.fields.deadline} onChange={(event) => todo.updateDraftField("deadline", event.target.value)} />
-						</Field>
-						<Field labelKey="personalTodo.fieldUrgency" className="w-[120px]">
-							<Input className="h-8 text-body" inputMode="numeric" placeholder={t("personalTodo.urgencyUnset")} value={todo.draft.fields.urgency} onChange={(event) => todo.updateDraftField("urgency", event.target.value)} />
-						</Field>
-					</div>
-					<p className="text-micro text-muted-foreground">{t("personalTodo.urgencyHint", { max: PERSONAL_TODO_URGENCY_MAX })}</p>
+					<PersonalTodoDraftPickers fields={todo.draft.fields} onChange={todo.updateDraftField} categories={todo.items.flatMap((entry) => (entry.item.category ? [entry.item.category] : []))} disabled={pending} />
 					<div className="flex items-center gap-2">
 						<Button size="sm" disabled={pending || !todo.draft.dirty} onClick={() => void todo.saveDraft()}>
 							<Save className="size-3.5" aria-hidden="true" />
@@ -95,9 +87,7 @@ export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTo
 				<div className="flex shrink-0 flex-col gap-6">
 					<h2 className="text-2xl leading-8 font-semibold break-words text-foreground">{item.title}</h2>
 					<div className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-lg bg-muted/20 p-4">
-						<ReadonlyField labelKey="personalTodo.fieldCategory" value={item.category ?? t("personalTodo.valueUnset")} />
-						<ReadonlyField labelKey="personalTodo.fieldDeadline" value={item.deadline ?? t("personalTodo.valueUnset")} />
-						<ReadonlyField labelKey="personalTodo.fieldUrgency" value={item.urgency === null ? t("personalTodo.valueUnset") : String(item.urgency)} />
+						<PersonalTodoInlineFields todo={todo} view={view} today={personalTodoLocalDay(new Date())} showLabels />
 					</div>
 					<ReadonlyField labelKey="personalTodo.fieldNote" value={item.note} multiline />
 				</div>
@@ -134,10 +124,7 @@ export function PersonalTodoDetail({ todo, view, projectId }: { todo: PersonalTo
 
 /** 一层子待办：新增、编辑文本、完成/重开；子项状态不影响父项。 */
 export function PersonalTodoSubtodos({ todo, view, projectId }: { todo: PersonalTodoController; view: PersonalTodoView; projectId?: string }) {
-	const [newText, setNewText] = useState("");
-	const [adding, setAdding] = useState(false);
-	const [editingId, setEditingId] = useState<string | null>(null);
-	const [editingText, setEditingText] = useState("");
+	const editor = usePersonalTodoSubtodoEditor(todo, view);
 	/** P04：当前要从哪个子项带入材料（null=未打开）与带入结果提示。 */
 	const [materialSubtodoId, setMaterialSubtodoId] = useState<string | null>(null);
 	const [materialNotice, setMaterialNotice] = useState<"brought" | "duplicate" | null>(null);
@@ -157,19 +144,15 @@ export function PersonalTodoSubtodos({ todo, view, projectId }: { todo: Personal
 						<SubtodoRow
 							key={subtodo.id}
 							subtodo={subtodo}
-							editing={editingId === subtodo.id}
-							editingText={editingText}
-							onEditingText={setEditingText}
-							onStartEdit={() => {
-								setEditingId(subtodo.id);
-								setEditingText(subtodo.text);
-							}}
-							onCancelEdit={() => setEditingId(null)}
-							onSaveEdit={() => {
-								const text = editingText.trim();
-								if (text) void todo.updateSubtodo(view, subtodo.id, { text });
-								setEditingId(null);
-							}}
+							editing={editor.draft?.id === subtodo.id}
+							editingText={editor.draft?.text ?? ""}
+							editingNote={editor.draft?.note ?? ""}
+							saving={editor.saving}
+							onEditingText={(value) => editor.change("text", value)}
+							onEditingNote={(value) => editor.change("note", value)}
+							onStartEdit={() => editor.start(subtodo)}
+							onCancelEdit={editor.cancel}
+							onSaveEdit={() => void editor.save().catch(() => undefined)}
 							onToggle={() => void todo.toggleSubtodo(view, subtodo.id, subtodo.status === "done" ? "open" : "done")}
 							onBringToSession={() => {
 								setMaterialSubtodoId((current) => (current === subtodo.id ? null : subtodo.id));
@@ -194,45 +177,62 @@ export function PersonalTodoSubtodos({ todo, view, projectId }: { todo: Personal
 				</div>
 			)}
 			{materialNotice && <p className="text-micro text-muted-foreground">{t(materialNotice === "duplicate" ? "workbenchMaterial.noticeDuplicate" : "workbenchMaterial.noticeBrought")}</p>}
-			<div className="flex items-center gap-2">
-				<Input className="h-8 min-w-0 flex-1 text-caption" value={newText} placeholder={t("personalTodo.subtodoPlaceholder")} onChange={(event) => setNewText(event.target.value)} />
-				<Button
-					variant="outline"
-					size="sm"
-					className="shrink-0"
-					disabled={!newText.trim() || adding}
-					onClick={() => {
-						if (adding) return;
-						setAdding(true);
-						void todo
-							.addSubtodo(view, newText)
-							.then((ok) => {
-								if (ok) setNewText("");
-							})
-							.catch(() => undefined)
-							.finally(() => setAdding(false));
-					}}
-				>
-					<Plus className="size-3.5" aria-hidden="true" />
-					{t("personalTodo.subtodoAdd")}
-				</Button>
-			</div>
+			{todo.notice?.itemId === view.item.id && (
+				<p className="text-caption text-warning" role="alert">
+					{t(todo.notice.key)}
+				</p>
+			)}
+			<PersonalTodoSubtodoQuickAdd todo={todo} view={view} />
 		</section>
 	);
 }
 
-function SubtodoRow(props: { subtodo: PersonalTodoSubtask; editing: boolean; editingText: string; onEditingText: (value: string) => void; onStartEdit: () => void; onCancelEdit: () => void; onSaveEdit: () => void; onToggle: () => void; onBringToSession: () => void }) {
+function SubtodoRow(props: {
+	subtodo: PersonalTodoSubtask;
+	editing: boolean;
+	editingText: string;
+	editingNote: string;
+	saving: boolean;
+	onEditingText: (value: string) => void;
+	onEditingNote: (value: string) => void;
+	onStartEdit: () => void;
+	onCancelEdit: () => void;
+	onSaveEdit: () => void;
+	onToggle: () => void;
+	onBringToSession: () => void;
+}) {
 	const { subtodo } = props;
 	if (props.editing) {
 		return (
-			<li className="flex items-center gap-2">
-				<Input className="h-7 min-w-0 flex-1 text-caption" value={props.editingText} onChange={(event) => props.onEditingText(event.target.value)} />
-				<Button variant="ghost" size="sm" onClick={props.onSaveEdit}>
-					{t("personalTodo.save")}
-				</Button>
-				<Button variant="ghost" size="sm" onClick={props.onCancelEdit}>
-					{t("personalTodo.cancel")}
-				</Button>
+			<li className="flex flex-col gap-2 rounded-md bg-muted/20 p-2">
+				<Input
+					autoFocus
+					className="h-8 min-w-0 text-caption"
+					aria-label={t("personalTodo.subtodoEditTitle")}
+					value={props.editingText}
+					disabled={props.saving}
+					onChange={(event) => props.onEditingText(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") {
+							event.preventDefault();
+							props.onSaveEdit();
+						}
+						if (event.key === "Escape") {
+							event.preventDefault();
+							event.stopPropagation();
+							props.onCancelEdit();
+						}
+					}}
+				/>
+				<Textarea className="min-h-16 text-caption" aria-label={t("personalTodo.subtodoEditNote")} placeholder={t("personalTodo.subtodoEditNote")} value={props.editingNote} disabled={props.saving} onChange={(event) => props.onEditingNote(event.target.value)} />
+				<div className="flex gap-2">
+					<Button variant="ghost" size="sm" disabled={props.saving || !props.editingText.trim()} onClick={props.onSaveEdit}>
+						{t("personalTodo.save")}
+					</Button>
+					<Button variant="ghost" size="sm" disabled={props.saving} onClick={props.onCancelEdit}>
+						{t("personalTodo.cancel")}
+					</Button>
+				</div>
 			</li>
 		);
 	}
@@ -242,9 +242,12 @@ function SubtodoRow(props: { subtodo: PersonalTodoSubtask; editing: boolean; edi
 				<span className={cn("size-3 rounded-full border", subtodo.status === "done" ? "border-success bg-success" : "border-border-strong")} aria-hidden="true" />
 				<span className="sr-only">{t(personalTodoStatusKey(subtodo.status))}</span>
 			</Button>
-			<button type="button" className={cn("min-w-0 flex-1 truncate text-left text-caption text-foreground", subtodo.status === "cancelled" && "line-through text-muted-foreground")} onClick={props.onStartEdit}>
-				{subtodo.text}
-			</button>
+			<div className="min-w-0 flex-1">
+				<button type="button" disabled={props.saving} className={cn("max-w-full truncate text-left text-caption text-foreground", subtodo.status !== "open" && "line-through text-muted-foreground")} onClick={props.onStartEdit}>
+					{subtodo.text}
+				</button>
+				{subtodo.note && <p className="mt-1 text-caption whitespace-pre-wrap break-words text-muted-foreground">{subtodo.note}</p>}
+			</div>
 			{subtodo.assignee && <span className="shrink-0 text-micro text-muted-foreground">{subtodo.assignee}</span>}
 			<Button variant="ghost" size="icon" className="size-6 shrink-0" title={t("workbenchMaterial.bringToSession")} onClick={props.onBringToSession}>
 				<MessagesSquare className="size-3" aria-hidden="true" />

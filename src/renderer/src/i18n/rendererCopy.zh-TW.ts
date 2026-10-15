@@ -2,12 +2,39 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5402eda1c7780bd79d233bf5b19bf78519daaa5945bf13f7b2958bcf7b0c25e1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d033e4ca793fbafef5be3420936da9c7b212c523b739df191a9802493573f87f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
 
 export const zhTW: Record<TranslationKey, string> = {
+	"personalTodo.widePanel": "展開寬欄",
+	"personalTodo.narrowPanel": "恢復窄欄",
+	"personalTodo.priorityUrgent": "緊急",
+	"personalTodo.priorityHigh": "高",
+	"personalTodo.priorityMedium": "中",
+	"personalTodo.priorityLow": "低",
+	"personalTodo.priorityNone": "無緊急度",
+	"personalTodo.categoryNone": "無分類",
+	"personalTodo.categorySearch": "搜尋或輸入分類",
+	"personalTodo.categoryUse": "使用“{category}”",
+	"personalTodo.dateUnset": "設定日期",
+	"personalTodo.dateTomorrow": "明天",
+	"personalTodo.dateNextMonday": "下週一",
+	"personalTodo.dateFortnight": "兩週後",
+	"personalTodo.dateClear": "清除日期",
+	"personalTodo.dateOriginal": "日期或原文",
+	"personalTodo.apply": "應用",
+	"personalTodo.changeCategory": "更改分類：{title}",
+	"personalTodo.changeStatus": "更改狀態：{title}",
+	"personalTodo.changeUrgency": "更改緊急度：{title}",
+	"personalTodo.changeDeadline": "更改日期：{title}",
+	"personalTodo.inlineDirtyDraft": "此事項有未儲存的編輯，請先在詳情中儲存或放棄修改。",
+	"personalTodo.inlineChanged": "事項版本已變化或仍有待處理的同步問題。請先開啟詳情核對，再修改。",
+	"personalTodo.addSubtodoInline": "新增子待辦",
+	"personalTodo.addSubtodoFor": "新增子待辦：{title}",
+	"personalTodo.subtodoEditTitle": "子待辦標題",
+	"personalTodo.subtodoEditNote": "子待辦備註",
 	"personalTodo.pageTitle": "我的待辦",
 	"personalTodo.dateSummary": "{today} 項今天截止 · {overdue} 項已逾期 · {upcoming} 項即將到來",
 	"personalTodo.viewMode": "待辦檢視",

@@ -206,6 +206,98 @@ function harness(options = {}) {
 
 const tick = () => nextTask();
 
+test("行内修改只提交选中的字段与打开时版本，不先建立详情草稿", async () => {
+	const target = view("inline");
+	const h = harness({ items: [target] });
+	h.render();
+	await tick();
+	const todo = h.render();
+	assert.equal(await todo.patchInline(target, { urgency: 3 }), true);
+	assert.deepEqual(plain(h.client.calls.submit[0].operation), { kind: "patch", id: "inline", expectedRevision: "rev-inline", patch: { urgency: 3 } });
+	assert.equal(h.render().draft, null);
+});
+
+test("行内状态选择保留父子完成约束，并允许取消和重新打开", async () => {
+	const target = view("inline", { item: item("inline", { subtodos: [subtodo("sub", "open")] }) });
+	const h = harness({ items: [target] });
+	h.render();
+	await tick();
+	let todo = h.render();
+	assert.equal(await todo.setInlineStatus(target, "done"), false);
+	assert.equal(h.client.calls.submit.length, 0);
+	assert.equal(await todo.setInlineStatus(target, "cancelled"), true);
+	assert.equal(h.client.calls.submit[0].operation.status, "cancelled");
+	todo = h.render();
+	assert.equal(todo.items[0].item.subtodos[0].status, "open");
+});
+
+test("行内修改不覆盖未保存的详情草稿；版本已变化时不发送过期选择", async () => {
+	const target = view("inline");
+	const h = harness({ items: [target] });
+	h.render();
+	await tick();
+	let todo = h.render();
+	todo.select("inline");
+	todo = h.render();
+	todo.beginEdit(target);
+	todo = h.render();
+	todo.updateDraftField("note", "尚未保存的备注");
+	todo = h.render();
+	todo.select(null);
+	todo = h.render();
+	assert.equal(await todo.patchInline(target, { category: "新的分类" }), false);
+	assert.equal(h.client.calls.submit.length, 0);
+	todo.select("inline");
+	todo = h.render();
+	assert.equal(todo.draft.fields.note, "尚未保存的备注");
+	todo.discardDraft();
+	todo = h.render();
+	const newer = view("inline", { item: item("inline", { revision: "new-revision" }) });
+	h.client.emit({ scope: SCOPE_A, reason: "cloud", items: [newer], summary: SUMMARY, write: WRITE, reload: false });
+	todo = h.render();
+	assert.equal(await todo.patchInline(target, { urgency: 0 }), false);
+	assert.equal(h.client.calls.submit.length, 0);
+});
+
+test("行内重复点击只发一个请求；切账号后旧菜单不发送操作，迟到结果不算成功", async () => {
+	const target = view("inline");
+	const h = harness({ items: [target] });
+	h.render();
+	await tick();
+	const todo = h.render();
+	let release;
+	h.client.setSubmitImpl(
+		() =>
+			new Promise((resolve) => {
+				release = resolve;
+			}),
+	);
+	const first = todo.patchInline(target, { urgency: 0 });
+	assert.equal(await todo.patchInline(target, { urgency: 3 }), false);
+	assert.equal(h.client.calls.submit.length, 1);
+	h.client.setScope(SCOPE_B);
+	h.client.emit({ scope: SCOPE_B, reason: "identity", items: [], summary: SUMMARY, write: WRITE, reload: true });
+	assert.equal(await todo.patchInline(target, { category: "旧菜单" }), false);
+	assert.equal(h.client.calls.submit.length, 1);
+	release({ ok: true, item: target, summary: SUMMARY, write: WRITE, accepted: true, requestId: "inline-req" });
+	assert.equal(await first, false);
+});
+
+test("成功提交清除同一事项上次失败的提示，失败时仍保留提示", async () => {
+	const target = view("retry-sub");
+	const h = harness({ items: [target] });
+	h.render();
+	await tick();
+	let todo = h.render();
+	h.client.setSubmitImpl(async () => ({ ok: false, error: { code: "offline", message: "offline" } }));
+	assert.equal(await todo.addSubtodo(target, "保留子待办"), false);
+	todo = h.render();
+	assert.equal(todo.notice.itemId, "retry-sub");
+	h.client.setSubmitImpl(async () => ({ ok: true, item: target, summary: SUMMARY, write: WRITE, accepted: true, requestId: "success-sub" }));
+	assert.equal(await todo.addSubtodo(target, "保留子待办"), true);
+	assert.equal(h.render().notice, null);
+});
+
 test("打开页面才读取：状态与第一页到达后列表可见，选中按事项身份生效", async () => {
 	const h = harness({ items: [view("todo_1"), view("todo_2")] });
 	let todo = h.render();

@@ -11,6 +11,7 @@ import { Input } from "../ui-shadcn/input";
 import { Textarea } from "../ui-shadcn/textarea";
 import type { PersonalTodoController } from "../../hooks/usePersonalTodo";
 import type { PersonalTodoDraftFields } from "../../utils/personalTodoDraft";
+import { PersonalTodoDraftPickers } from "./PersonalTodoDraftPickers";
 
 export function PersonalTodoCreateForm({ todo, fields, onFieldsChange, submitting, onSubmit }: { todo: PersonalTodoController; fields: PersonalTodoDraftFields; onFieldsChange: (fields: PersonalTodoDraftFields) => void; submitting: boolean; onSubmit: () => Promise<void> }) {
 	const noticeKey = todo.notice?.itemId === "create" ? todo.notice.key : null;
@@ -27,11 +28,7 @@ export function PersonalTodoCreateForm({ todo, fields, onFieldsChange, submittin
 		>
 			<Input className="h-12 border-0 px-0 text-xl font-semibold shadow-none focus-visible:ring-0" value={fields.title} aria-label={t("personalTodo.fieldTitle")} placeholder={t("personalTodo.fieldTitle")} onChange={(event) => update("title", event.target.value)} />
 			<Textarea className="min-h-[160px] text-body" value={fields.note} aria-label={t("personalTodo.fieldNote")} placeholder={t("personalTodo.fieldNote")} onChange={(event) => update("note", event.target.value)} />
-			<div className="flex flex-wrap gap-2">
-				<Input className="h-9 min-w-[140px] flex-1 text-body" value={fields.category} aria-label={t("personalTodo.fieldCategory")} placeholder={t("personalTodo.fieldCategory")} onChange={(event) => update("category", event.target.value)} />
-				<Input className="h-9 min-w-[140px] flex-1 text-body" value={fields.deadline} aria-label={t("personalTodo.fieldDeadline")} placeholder={t("personalTodo.fieldDeadlineHint")} onChange={(event) => update("deadline", event.target.value)} />
-				<Input className="h-9 w-[100px] text-body" inputMode="numeric" value={fields.urgency} aria-label={t("personalTodo.fieldUrgency")} placeholder={t("personalTodo.urgencyUnset")} onChange={(event) => update("urgency", event.target.value)} />
-			</div>
+			<PersonalTodoDraftPickers fields={fields} onChange={update} categories={todo.items.flatMap((view) => (view.item.category ? [view.item.category] : []))} disabled={submitting} />
 			{noticeKey && <p className="text-micro text-danger">{t(noticeKey)}</p>}
 			<div className="flex items-center gap-2">
 				<Button type="submit" size="sm" disabled={submitting || !fields.title.trim()}>
