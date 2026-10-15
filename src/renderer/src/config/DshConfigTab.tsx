@@ -1,3 +1,5 @@
+import { motion, useReducedMotion } from "motion/react";
+import { EASE_OUT } from "../lib/ease";
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
 import { Loader2, ArchiveRestore, ChevronDown, Cpu, FileCode2, FolderOpen, LayoutDashboard, LoaderCircle, Power, PowerOff, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
@@ -158,6 +160,8 @@ export const DshConfigTab = forwardRef<
 	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
 	const runtimeInstalled = dshRuntimeStatus.state === "installed";
 	const [activeTab, setActiveTab] = useState(loadDshLastTab);
+	const highlightId = useId();
+	const reduceMotion = useReducedMotion();
 	/** 插件 tab 内部子页（对齐 dsh-web：插件配置 / 插件列表）。 */
 	const [pluginPane, setPluginPane] = useState<"config" | "list">(loadDshLastPluginPane);
 
@@ -427,26 +431,33 @@ export const DshConfigTab = forwardRef<
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
 			{/* 左侧竖排导航：常驻（loading/error 时不隐藏），与 Pi 管理 config-sidebar 同款密度 */}
-			<nav className="flex min-h-0 w-40 shrink-0 flex-col gap-2.5 overflow-y-auto border-r border-border bg-transparent p-2.5" aria-label={t("config.dsh.title")}>
-				<div className="grid gap-0.5">
+			<nav className="flex min-h-0 w-[216px] shrink-0 flex-col gap-5 overflow-y-auto border-r border-border-subtle/60 bg-[radial-gradient(ellipse_at_top_left,var(--color-accent-soft),transparent_70%)] px-3 py-4 max-[820px]:w-[176px] [[data-bg-image=on]_&]:bg-none" aria-label={t("config.dsh.title")}>
+				<div className="flex shrink-0 flex-col gap-0.5">
+					<h3 className="mb-1 px-2.5 py-1.5 text-caption font-medium text-muted-foreground">{t("config.dsh.title")}</h3>
 					{NAV_ITEMS.map((item) => (
-						<button
+						<Button
+							variant="ghost"
+							aria-current={activeTab === item.id ? "page" : undefined}
 							key={item.id}
 							type="button"
-							className={`config-nav-btn flex h-8 items-center justify-start gap-1.5 rounded-md px-2.5 text-control font-medium ${activeTab === item.id ? "bg-accent/50 text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+							className={`config-nav-btn relative isolate h-9 w-full shrink-0 justify-start gap-2 rounded-lg px-2.5 text-control font-medium hover:bg-bg-hover ${activeTab === item.id ? "text-foreground" : "text-muted-foreground"}`}
 							onClick={() => selectTab(item.id)}
 						>
-							<span className="config-nav-icon">{item.icon}</span>
+							{activeTab === item.id && <motion.span aria-hidden="true" layoutId={reduceMotion ? undefined : highlightId} initial={false} transition={{ duration: reduceMotion ? 0 : 0.24, ease: EASE_OUT }} className="pointer-events-none absolute inset-0 -z-10 rounded-lg bg-bg-active" />}
+							<span className={`grid size-4 shrink-0 place-items-center ${activeTab === item.id ? "text-primary" : "text-muted-foreground"}`}>{item.icon}</span>
 							{t(item.labelKey)}
 							{/* 未保存标记：与 Pi 管理侧栏黄点同款，提醒用户该分区有草稿 */}
 							{props.dirtyNavIds?.has(`dsh:${item.id}`) ? <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-						</button>
+						</Button>
 					))}
 				</div>
 			</nav>
 
 			{/* 右侧内容区：loading/error 只影响内容，导航与概览保持可用 */}
-			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-settings-canvas px-4 py-7 max-[820px]:px-0 [[data-bg-image=on]_&]:bg-transparent [&_[data-slot=select-trigger]]:border-transparent [&_[data-slot=select-trigger]]:bg-settings-control [&_[data-slot=select-trigger]]:shadow-none">
+				<h2 key={activeTab} className="mb-2 shrink-0 px-4 text-heading font-semibold tracking-tight motion-safe:animate-[settings-content-enter_220ms_cubic-bezier(0.16,1,0.3,1)]">
+					{t(NAV_ITEMS.find((item) => item.id === activeTab)?.labelKey ?? "config.dsh.title")}
+				</h2>
 				{loading && (
 					<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
 						<LoaderCircle className="size-4 animate-pideck-spin" aria-hidden="true" />

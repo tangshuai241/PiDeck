@@ -734,7 +734,7 @@ export const McpTab = forwardRef<
 					/>
 				</div>
 
-				<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
+				<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-2xl bg-settings-surface p-4">
 					{selectedTemplateDefinition?.id === "pideck" ? (
 						<PiDeckMcpPanel key={projectId ?? "global"} existingNames={new Set(displayServers.map((item) => item.name))} disabled={saving || loading} onAdd={handlePiDeckAdd} />
 					) : selectedTemplateDefinition ? (

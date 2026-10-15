@@ -16,8 +16,8 @@
  * 未保存的工具动作（allow/ask/deny）静默消失。
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState, useId } from "react";
+import { ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { createDefaultSecurityConfig, type SecurityAction, type SecurityConfig, type SecurityLevelConfig, type SecurityPathPolicy, type SecurityToolName } from "../../../../shared/types";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -187,50 +187,52 @@ export const SecuritySection = forwardRef<SecuritySectionHandle, SecuritySection
 	return (
 		<div className="security-section flex flex-col gap-4">
 			{/* 总开关 */}
-			<div className="security-header flex items-start justify-between gap-3 rounded-md border border-border/60 bg-muted/30 p-3.5">
-				<div className="min-w-0">
-					<div className="flex items-center gap-2 text-control font-semibold">{t("security.enabledTitle")}</div>
-					<p className="mt-1 text-micro leading-relaxed text-muted-foreground">{t("security.enabledHint")}</p>
+			<section className="rounded-2xl bg-settings-surface px-5 py-5">
+				<div className="security-header flex items-start justify-between gap-5 pb-5">
+					<div className="min-w-0">
+						<div className="flex items-center gap-2 text-control font-semibold">{t("security.enabledTitle")}</div>
+						<p className="mt-1 text-micro leading-relaxed text-muted-foreground">{t("security.enabledHint")}</p>
+					</div>
+					<Switch
+						checked={config.enabled}
+						onCheckedChange={(checked) => {
+							setConfig((current) => ({ ...current, enabled: checked }));
+							setDirty(true);
+						}}
+						aria-label={t("security.enabledTitle")}
+					/>
 				</div>
-				<Switch
-					checked={config.enabled}
-					onCheckedChange={(checked) => {
-						setConfig((current) => ({ ...current, enabled: checked }));
-						setDirty(true);
-					}}
-					aria-label={t("security.enabledTitle")}
-				/>
-			</div>
 
-			{/* 全局默认等级 */}
-			<div className="security-default flex items-center justify-between gap-3">
-				<label className="text-control font-medium" htmlFor="security-default-level">
-					{t("security.defaultLevelTitle")}
-				</label>
-				<Select
-					value={config.defaultLevelId}
-					onValueChange={(value) => {
-						setConfig((current) => ({ ...current, defaultLevelId: value }));
-						setDirty(true);
-					}}
-				>
-					<SelectTrigger id="security-default-level" className="w-52">
-						<SelectValue placeholder={t("security.selectLevel")} />
-					</SelectTrigger>
-					<SelectContent>
-						{config.levels.map((level) => (
-							<SelectItem key={level.id} value={level.id}>
-								{level.name}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
+				{/* 全局默认等级 */}
+				<div className="security-default flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle/60 pt-4">
+					<label className="text-control font-medium" htmlFor="security-default-level">
+						{t("security.defaultLevelTitle")}
+					</label>
+					<Select
+						value={config.defaultLevelId}
+						onValueChange={(value) => {
+							setConfig((current) => ({ ...current, defaultLevelId: value }));
+							setDirty(true);
+						}}
+					>
+						<SelectTrigger id="security-default-level" className="w-52">
+							<SelectValue placeholder={t("security.selectLevel")} />
+						</SelectTrigger>
+						<SelectContent>
+							{config.levels.map((level) => (
+								<SelectItem key={level.id} value={level.id}>
+									{level.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+			</section>
 
 			{/* 等级列表 */}
-			<div className="security-levels flex flex-col gap-2">
-				<div className="flex items-center justify-between">
-					<span className="text-micro font-semibold text-muted-foreground">{t("security.levelsTitle")}</span>
+			<div className="security-levels flex flex-col gap-1 rounded-2xl bg-settings-surface px-5 py-5">
+				<div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+					<h3 className="text-control font-semibold">{t("security.levelsTitle")}</h3>
 					<div className="flex gap-1.5">
 						<Button variant="outline" size="sm" onClick={handleReset} disabled={saving}>
 							{t("security.reset")}
@@ -269,19 +271,25 @@ function SecurityLevelCard(props: {
 	isOnlyBuiltin: boolean;
 }) {
 	const { level, expanded, onToggle, onChange } = props;
+	const detailsId = useId();
 	const toolSummary = TOOL_ORDER.map((tool) => {
 		const action = level.toolActions[tool] ?? level.defaultAction;
 		return `${tool}:${action}`;
 	}).join(" · ");
 
 	return (
-		<div className="security-level-card rounded-md border border-border/60 bg-card">
-			<div className="flex items-center gap-2 px-3 py-2">
-				<button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={onToggle}>
-					<span className="truncate text-control font-semibold">{level.name}</span>
-					{level.builtin && <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{t("security.builtinBadge")}</span>}
-					{!expanded && <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{level.description || toolSummary}</span>}
-				</button>
+		<div className="security-level-card rounded-xl bg-settings-control/50 transition-colors motion-reduce:transition-none">
+			<div className="flex items-center gap-2 px-1 py-1">
+				<Button type="button" variant="ghost" aria-expanded={expanded} aria-controls={expanded ? detailsId : undefined} className="h-auto min-h-14 min-w-0 flex-1 justify-start gap-3 whitespace-normal rounded-lg px-3 py-3 text-left hover:bg-bg-hover" onClick={onToggle}>
+					<ChevronRight aria-hidden="true" className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`} />
+					<span className="flex min-w-0 flex-1 flex-col gap-1">
+						<span className="flex items-center gap-2">
+							<span className="truncate text-control font-semibold">{level.name}</span>
+							{level.builtin && <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{t("security.builtinBadge")}</span>}
+						</span>
+						<span className="text-caption font-normal leading-relaxed text-muted-foreground">{level.description || toolSummary}</span>
+					</span>
+				</Button>
 				{!level.builtin && (
 					<Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground hover:text-danger" aria-label={t("common.delete")} title={t("common.delete")} disabled={props.isOnlyBuiltin} onClick={props.onDelete}>
 						<Trash2 size={13} aria-hidden="true" />
@@ -290,27 +298,27 @@ function SecurityLevelCard(props: {
 			</div>
 
 			{expanded && (
-				<div className="flex flex-col gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
-					<div className="grid grid-cols-2 gap-3">
+				<div id={detailsId} className="flex flex-col gap-5 border-t border-border-subtle/60 px-4 py-5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+					<div className="grid grid-cols-2 gap-3 max-[820px]:grid-cols-1">
 						<div className="flex flex-col gap-1">
 							<label className="text-micro text-muted-foreground">{t("security.levelName")}</label>
-							<Input value={level.name} onChange={(e) => onChange({ name: e.target.value })} disabled={level.builtin} />
+							<Input aria-label={t("security.levelName")} value={level.name} onChange={(e) => onChange({ name: e.target.value })} disabled={level.builtin} />
 						</div>
 						<div className="flex flex-col gap-1">
 							<label className="text-micro text-muted-foreground">{t("security.levelDescription")}</label>
-							<Input value={level.description} onChange={(e) => onChange({ description: e.target.value })} />
+							<Input aria-label={t("security.levelDescription")} value={level.description} onChange={(e) => onChange({ description: e.target.value })} />
 						</div>
 					</div>
 
 					{/* 工具动作表 */}
 					<div className="flex flex-col gap-1">
 						<span className="text-micro text-muted-foreground">{t("security.toolActionsTitle")}</span>
-						<div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+						<div className="grid grid-cols-2 gap-x-6 gap-y-3 max-[820px]:grid-cols-1">
 							{TOOL_ORDER.map((tool) => (
 								<div key={tool} className="flex items-center justify-between gap-2">
 									<span className="text-control text-muted-foreground">{t(`security.tool.${tool}`)}</span>
 									<Select value={level.toolActions[tool] ?? level.defaultAction} onValueChange={(value) => onChange({ toolActions: { ...level.toolActions, [tool]: value as SecurityAction } })}>
-										<SelectTrigger className="h-7 w-24">
+										<SelectTrigger aria-label={t(`security.tool.${tool}`)} className="h-8 w-28">
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
@@ -351,7 +359,7 @@ function SecurityLevelCard(props: {
 					</div>
 
 					{/* 目录边界 */}
-					<div className="grid grid-cols-2 gap-3">
+					<div className="grid grid-cols-2 gap-3 max-[820px]:grid-cols-1">
 						<div className="flex flex-col gap-1">
 							<label className="text-micro text-muted-foreground">{t("security.pathPolicyTitle")}</label>
 							<Select value={level.pathPolicy} onValueChange={(value) => onChange({ pathPolicy: value as SecurityPathPolicy })}>

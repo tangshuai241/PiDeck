@@ -345,7 +345,7 @@ export function PromptsTab(props: {
 						</CreateResourceField>
 					</CreateResourceCard>
 
-					<section className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+					<section className="overflow-hidden rounded-2xl bg-settings-surface">
 						{visibleTemplateCount === 0 ? (
 							<div className="py-12 text-center text-control text-text-tertiary">{t("config.noPrompts")}</div>
 						) : (

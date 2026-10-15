@@ -883,16 +883,6 @@
   font-size: var(--font-size-control);
 }
 @media (max-width: 820px) {
-  .config-sidebar {
-    flex-direction: row;
-    gap: var(--space-3);
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border-subtle);
-    overflow-x: auto;
-  }
-  .config-sidebar-group {
-    min-width: 180px;
-  }
   /* 小窗口也保留弹框外边距，避免设置与 Pi 管理页面贴满工作区。 */
   .settings-modal,
   .config-modal {
@@ -960,77 +950,6 @@
   min-height: var(--control-height-sm);
   height: var(--control-height-sm);
 }
-.config-modal .config-content,
-.config-pane .config-content {
-  padding: var(--space-4);
-}
-
-.config-layout {
-  min-height: 0;
-  min-width: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  /* 与 Dialog 顶栏同底：默认浅色为面板白，不再叠一层 muted 灰 */
-  background: var(--color-bg-panel);
-}
-
-.config-sidebar {
-  /* 布局由 ConfigModal Tailwind 承担；背景与内容区统一为 panel */
-  min-height: 0;
-  overflow: auto;
-  background: var(--color-bg-panel);
-}
-
-/* Pi 管理导航与设置页保持同一垂直节奏：组间有明确分隔，组内按钮不互相粘连。 */
-.config-sidebar-group {
-  gap: 4px;
-}
-.config-sidebar-group + .config-sidebar-group {
-  margin-top: 6px;
-  /* 分组之间用分割线隔开（同设置页右侧的边框质感） */
-  padding-top: 6px;
-  border-top: 1px solid var(--color-border-subtle);
-}
-
-/* 左侧导航图标：与设置页 settings-tab-icon 同风格，选中态转 accent */
-.config-nav-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  color: var(--color-text-tertiary);
-  transition: color 120ms ease;
-}
-.config-sidebar [data-state="active"] .config-nav-icon {
-  color: var(--color-accent);
-}
-
-.config-sidebar-group > span {
-  /* 分组标题由 Tailwind 承担 */
-}
-
-/* Pi 管理导航是高频小字号中文：14px 比 13px 更容易落在清晰的像素栅格上。
-   !important 用于压过按钮上的通用 text-control utility，避免组件改 class 后又退回 13px。 */
-.config-nav-btn {
-  min-height: 2rem; /* 32px = h-8 */
-  height: 2rem;
-  font-family: var(--font-family-sans, ui-sans-serif, system-ui, sans-serif) !important;
-  font-size: 14px !important;
-  line-height: var(--line-height-control);
-  letter-spacing: 0;
-  font-weight: 500;
-  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
-}
-
-/* 选中态由 TabsTrigger 的 data-[state=active] utility 承担（bg-bg-panel + shadow-sm），
-   旧 .config-nav-btn.active 规则已随 Vertical Tabs 迁移删除 */
-.config-nav-btn:hover:not(.active) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
 .config-main {
   min-width: 0;
   min-height: 0;
@@ -1039,7 +958,7 @@
   background: var(--color-bg-panel);
 }
 
-.config-content {
+.config-content:not([data-config-page]) {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-5);
@@ -1131,12 +1050,7 @@
   }
 }
 
-@media (max-width: 820px) {
-  .config-layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-}:root[data-theme="dark"] .search-box, :root[data-theme="dark"] .composer-box, :root[data-theme="dark"] .config-provider-card, :root[data-theme="dark"] .config-provider-form, :root[data-theme="dark"] .config-field input, :root[data-theme="dark"] .config-field select, :root[data-theme="dark"] .config-field textarea, :root[data-theme="dark"] .session-card, :root[data-theme="dark"] .codex-session-row, :root[data-theme="dark"] .codex-import-toolbar, :root[data-theme="dark"] .config-provider-body{
+:root[data-theme="dark"] .search-box, :root[data-theme="dark"] .composer-box, :root[data-theme="dark"] .config-provider-card, :root[data-theme="dark"] .config-provider-form, :root[data-theme="dark"] .config-field input, :root[data-theme="dark"] .config-field select, :root[data-theme="dark"] .config-field textarea, :root[data-theme="dark"] .session-card, :root[data-theme="dark"] .codex-session-row, :root[data-theme="dark"] .codex-import-toolbar, :root[data-theme="dark"] .config-provider-body{
   background: var(--color-bg-muted);
   color: var(--color-text-primary);
 }:root[data-theme="dark"] .setting-proxy-panel, :root[data-theme="dark"] .codex-import-modal, :root[data-theme="dark"] .context-menu{
