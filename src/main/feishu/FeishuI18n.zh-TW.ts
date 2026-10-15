@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 9f60058489f05df0531921901ebfd43830857ad6dfefbbe710054f178f173527（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: f1eaab86d186bde01f0dceffb74a858393917e4740c60c626c209dde38638f05（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { FeishuTranslationKey } from "./FeishuI18n";
 
@@ -23,12 +23,12 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"attachment.filesReceived": "已收到檔案: {names}，請告訴我需要做什麼",
 	"attachment.imageReceived": "已收到圖片，請告訴我需要做什麼",
 	"command.sendFileUsage": "用法: `/sendfile <檔案路徑>`",
-	"command.whoami": "你的 open_id: `{openId}`\n\n📋 你可以將此 ID 填入 PiDeck 飛書配置中的「你的 Open ID」欄位，以便新建會話時自動拉你進群。",
+	"command.whoami": "你的 open_id: `{openId}`\n\n📋 你可以將此 ID 填入 TPA 飛書配置中的「你的 Open ID」欄位，以便新建會話時自動拉你進群。",
 	"command.bindingsRefreshed": "✅ 已重新整理繫結 ({count} 個活躍)",
 	"command.unknown": "未知命令: {command}。輸入 /help 檢視幫助。",
 	"session.restoreFailed": "⚠️ 會話恢復失敗，請嘗試 /new 建立新會話",
 	"session.unbound": "當前會話未繫結飛書聊天",
-	"session.projectRequired": "❌ 請先在 PiDeck 中新增專案（工作區），然後重試。",
+	"session.projectRequired": "❌ 請先在 TPA 中新增專案（工作區），然後重試。",
 	"session.created": "✅ 已建立會話 ({id})",
 	"session.askDisabled": "ℹ️ 本會話已連線飛書：互動式提問（ask）已停用。Agent 需要確認/選擇時會直接把問題寫進訊息，請直接回復訊息回答。",
 	"session.createFailed": "❌ 建立會話失敗，請重試。",
@@ -54,7 +54,7 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"status.connected": "已連線",
 	"status.error": "錯誤",
 	"model.none": "無",
-	"model.unavailable": "沒有可用模型。請先在 PiDeck 中配置模型。",
+	"model.unavailable": "沒有可用模型。請先在 TPA 中配置模型。",
 	"model.notAvailable": "❌ 模型不可用: {model}",
 	"model.switched": "✅ 已切換模型為: {model}",
 	"model.switchFailed": "❌ 切換模型失敗，請重試。",
@@ -125,5 +125,5 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"ask.cancelled": "已取消該提問",
 	"ask.expired": "⚠️ 該提問已超時或已被處理，無需再操作。",
 	"ask.confirmHint": "⚠️ 當前有待確認的問題，請點選上方卡片中的按鈕完成確認。",
-	"ask.batchUnsupportedHint": "⚠️ 批次問題請在 PiDeck 桌面端回答，或點選上方卡片中的取消按鈕。",
+	"ask.batchUnsupportedHint": "⚠️ 批次問題請在 TPA 桌面端回答，或點選上方卡片中的取消按鈕。",
 };

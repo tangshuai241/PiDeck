@@ -5,7 +5,7 @@
  */
 
 /** 应用显示名称（品牌区/关于弹层同源值）。 */
-export const BOOT_APP_NAME_STORAGE_KEY = "pideck:app-name:v1";
+export const BOOT_APP_NAME_STORAGE_KEY = "pideck:app-name:v2";
 /** 自定义 logo 图（data URL）；仅在 logo 风格为 custom 时写入。 */
 export const BOOT_CUSTOM_LOGO_STORAGE_KEY = "pideck:custom-logo:v1";
 

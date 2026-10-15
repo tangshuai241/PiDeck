@@ -33,12 +33,12 @@ export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
 }
 
 /** 应用显示名称的出厂值（品牌区、关于弹层同源）。 */
-export const APP_DISPLAY_NAME_DEFAULT = "PiDeck";
+export const APP_DISPLAY_NAME_DEFAULT = "TPA";
 /** 显示名称长度上限：品牌区是 18px 单行字标，再长会把项目分支名挤掉。 */
 export const APP_DISPLAY_NAME_MAX_LENGTH = 24;
 
 /**
- * 解析应用显示名称：留空/纯空白/超长一律回落默认 PiDeck。
+ * 解析应用显示名称：留空/纯空白/超长一律回落默认 TPA。
  *
  * 越界值回落而不是截断：名称是纯展示项，截断会产生「用户没写过的半截名字」这种更难理解的状态。
  */

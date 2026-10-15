@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5a3ca6d9bf22cb20c9330120cdff1f9faab03605ec9c45d6c1d0311ec4eb1bff（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2cdc8b14034a69f098b7de7dd2cb20a32b2a30483256c86e3d26f8e203725ca8（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -51,17 +51,17 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"git.commitMessageEmptyDiff": "沒有暫存的更改，請先暫存更改後再生成提交摘要。",
 	"git.commitMessageNoRepo": "未找到可用的 Git 倉庫目錄，請先開啟或初始化倉庫後重試。",
 	"tray.showWindow": "顯示視窗",
-	"tray.version": "PiDeck v{version}",
+	"tray.version": "TPA v{version}",
 	"tray.checkUpdate": "檢查更新…",
 	"tray.noProjects": "暫無專案",
 	"tray.openDataDir": "開啟資料目錄",
 	"tray.openLogsDir": "開啟日誌目錄",
 	"tray.updateAvailableTitle": "發現新版本",
 	"tray.updateAvailableBody": "v{version} 已釋出，點選檢視",
-	"tray.upToDateTitle": "PiDeck",
+	"tray.upToDateTitle": "TPA",
 	"tray.upToDateBody": "已是最新版本（v{version}）",
-	"tray.restart": "重啟 PiDeck",
-	"tray.quit": "退出 PiDeck",
+	"tray.restart": "重啟 TPA",
+	"tray.quit": "退出 TPA",
 	"tray.floatingBall": "懸浮球",
 	"tray.floatingBallToggle": "切換懸浮球顯示",
 
@@ -107,18 +107,18 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"session.newTitle": "新會話",
 	"session.dshUntitled": "DSH 會話",
 	"session.dshRuntimeNotInstalled": "DSH 後端執行時未安裝，無法新建 DSH 會話。請在配置管理頁安裝後再試；Pi 後端不受影響。",
-	"session.dshRuntimeOutdated": "DSH 後端執行時與本版本 PiDeck 不配套，已停止使用。請在配置管理頁重新安裝配套版本後再試；Pi 後端不受影響。",
+	"session.dshRuntimeOutdated": "DSH 後端執行時與本版本 TPA 不配套，已停止使用。請在配置管理頁重新安裝配套版本後再試；Pi 後端不受影響。",
 	"dsh.runtime.invalidArchivePath": "所選路徑不是有效的 runtime（.tgz 歸檔或已解壓目錄），請重新選擇。",
 	"dsh.runtime.pickArchiveTitle": "選擇 DSH runtime 歸檔（.tgz）",
 	"dsh.runtime.pickDirectoryTitle": "選擇已解壓的 DSH runtime 目錄",
 	"dsh.runtime.errors.manifestMissing": "所選目錄缺少 manifest.json，不是完整的 DSH runtime。請選擇包含 manifest.json 與 node_modules 的 runtime 根目錄（或 .tgz 歸檔）。",
 	"dsh.runtime.errors.manifestUnreadable": "所選目錄的 manifest.json 無法解析（可能已損壞），請重新下載或選擇有效目錄。",
-	"dsh.runtime.errors.schemaUnsupported": "所選 runtime 的 manifest schema 版本過高，當前應用不支援，請升級 PiDeck 或換用匹配的 runtime。",
+	"dsh.runtime.errors.schemaUnsupported": "所選 runtime 的 manifest schema 版本過高，當前應用不支援，請升級 TPA 或換用匹配的 runtime。",
 	"dsh.runtime.errors.appIncompatible": "所選 runtime 與當前應用版本不相容（版本區間不匹配），請換用匹配的 runtime。",
 	"dsh.runtime.errors.nodeModulesMissing": "所選目錄缺少 node_modules，不是完整的 DSH runtime，請重新選擇。",
 	"dsh.runtime.errors.requiredPackageMissing": "所選 runtime 缺少關鍵包 {pkg}，檔案可能不完整，請重新下載。",
 	"dsh.runtime.errors.directoryNotFound": "所選路徑不存在或不是目錄，請重新選擇。",
-	"dsh.runtime.errors.runtimeVersionUnavailable": "下載源裡沒有與本版本 PiDeck 配套的 runtime（需要 {required}；源內可用：{available}）。請用「匯入本地 runtime 歸檔」選擇配套版本，或升級到已釋出配套 runtime 的 PiDeck 版本。",
+	"dsh.runtime.errors.runtimeVersionUnavailable": "下載源裡沒有與本版本 TPA 配套的 runtime（需要 {required}；源內可用：{available}）。請用「匯入本地 runtime 歸檔」選擇配套版本，或升級到已釋出配套 runtime 的 TPA 版本。",
 	"session.anonymousTitle": "匿名聊天 - {project}",
 	"session.untitled": "未命名會話",
 	"session.emptyPreview": "空會話",
@@ -175,7 +175,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainConfig.fetchUnreachable": "連線不上該地址（超時 / 被拒絕 / 域名解析失敗）。請檢查網路與代理開關，並確認 baseUrl 可訪問。",
 	"mainConfig.providerTestFailed": "Provider 連線測試失敗，請檢查配置後重試。",
 	"mainConfig.providerTestTimeout": "Provider 連線測試超時。這不一定表示相容模式不受支援；請稍後重試，或使用更輕量的模型測試。",
-	"mainConfig.importFilesRequired": "匯入檔案缺少 files 欄位，請確認它是 PiDeck 匯出的配置包。",
+	"mainConfig.importFilesRequired": "匯入檔案缺少 files 欄位，請確認它是 TPA 匯出的配置包。",
 	"mainConfig.providerUsageUnsupported": "當前 provider 暫不支援用量查詢。",
 	"mainConfig.providerUsageNoKey": "當前 provider 未配置 API key，無法查詢用量。",
 	"mainConfig.providerUsageDisabled": "用量查詢未開啟。",
@@ -228,7 +228,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainProjectResource.warningNameCharacters": "name 只能包含小寫字母、數字和單個連字元",
 	"mainExtension.invalidPath": "擴充套件路徑無效。",
 	"mainExtension.sourceRequired": "擴充套件來源不能為空。",
-	"mainExtension.builtInCannotUninstall": "PiDeck 內建擴充套件不可解除安裝。",
+	"mainExtension.builtInCannotUninstall": "TPA 內建擴充套件不可解除安裝。",
 	"mainExtension.nameRequired": "副檔名稱不能為空。",
 	"mainExtension.piNotInstalled": "未檢測到 Pi CLI。",
 	"mainExtension.noUpdate": "當前版本 {current}，最新版本 {latest}，無需更新。",
@@ -236,7 +236,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainExtension.versionCheckFailed": "檢查擴充套件版本失敗。",
 	"mainExtension.commandFailed": "Pi 擴充套件命令執行失敗，請重試。",
 	"mainExtension.commandTimedOut": "Pi 命令在 {seconds} 秒內未完成，已停止等待。請檢查網路、代理或安裝權限後重試。",
-	"mainExtension.piSelfUpdateUnsupported": "當前 Pi 版本（{version}）不支援自更新，需要 Pi ≥ {minimum}。請使用安裝該 Pi 的包管理器或安裝器升級，再重新檢測；PiDeck 不會自動改用其他安裝方式。",
+	"mainExtension.piSelfUpdateUnsupported": "當前 Pi 版本（{version}）不支援自更新，需要 Pi ≥ {minimum}。請使用安裝該 Pi 的包管理器或安裝器升級，再重新檢測；TPA 不會自動改用其他安裝方式。",
 	"mainExtension.piVersionUnknown": "無法確定當前 Pi 版本，請重新檢測 Pi 後再更新擴充套件，避免誤更新 Pi 本體。",
 	"mainExtension.piUpdateNotApplied": "更新命令已結束，但所選 Pi 仍未達到目標版本（當前 {current}，目標 {latest}）。請檢查是否更新了其他安裝，以及包管理器或安裝權限。",
 	"mainExtension.piVersionTooOldForDisable": "當前 Pi 版本過低（{version}），停用擴充套件需要 Pi ≥ 0.60，請先升級 Pi。",
@@ -285,6 +285,6 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainNotification.askQuestion": "「{title}」正在詢問：{question}",
 	"mainNotification.automationDone": "定時任務「{name}」執行完成",
 	"mainNotification.automationFailed": "定時任務「{name}」執行失敗：{error}",
-	"shellMenu.openWithPiDeck": "用 PiDeck 開啟",
-	"shellMenu.quickTask": "使用 PiDeck 發起任務",
+	"shellMenu.openWithPiDeck": "用 TPA 開啟",
+	"shellMenu.quickTask": "使用 TPA 發起任務",
 };

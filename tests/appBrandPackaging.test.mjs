@@ -11,12 +11,12 @@ import { Arch, DebugLogger } from "builder-util";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 
-test("三平台打包元数据统一 PiDeck，npm 与锁文件不再派生旧名", () => {
+test("三平台用户可见名称统一 TPA，保留原有 npm 和更新身份", () => {
 	assert.equal(pkg.name, "pideck");
 	assert.equal(lock.name, pkg.name);
 	assert.equal(lock.packages[""].name, pkg.name);
-	assert.equal(pkg.build.productName, "PiDeck");
-	assert.equal(pkg.build.extraMetadata.productName, "PiDeck");
+	assert.equal(pkg.build.productName, "TPA");
+	assert.equal(pkg.build.extraMetadata.productName, "TPA");
 	for (const config of [pkg.build.win, pkg.build.nsis, pkg.build.portable, pkg.build.mac, pkg.build.linux, pkg.build.deb, pkg.build.appImage]) {
 		assert.ok(config.artifactName.startsWith("${productName}"), config.artifactName);
 	}
@@ -31,13 +31,13 @@ test("Linux deb 与可执行文件使用新品牌，声明替代历史 Debian �
 	assert.equal(pkg.build.appId, "com.ayuayue.pi-desktop", "保留 Windows/macOS 的升级身份，不因改品牌成为另一应用");
 });
 
-test("electron-builder 实际解析生成 PiDeck Debian 文件名和品牌更新缓存，无需全量构建", async () => {
+test("electron-builder 实际解析生成 TPA Debian 文件名，保留原更新缓存", async () => {
 	for (const config of [pkg.build, buildDevConfig()]) {
 		await validateConfiguration(config, new DebugLogger(false));
 		const packager = new LinuxPackager({ metadata: { ...pkg, ...config.extraMetadata }, config });
 		assert.equal(packager.executableName, config.linux.executableName);
 		assert.equal(packager.appInfo.updaterCacheDirName, "pideck-updater");
-		const prefix = config.productName === "PiDeck" ? "PiDeck_" : "PiDeck-Dev-";
+		const prefix = config.productName === "TPA" ? "TPA_" : "TPA-Dev-";
 		for (const [arch, debArch] of [
 			[Arch.x64, "amd64"],
 			[Arch.arm64, "arm64"],
@@ -52,12 +52,12 @@ test("electron-builder 实际解析生成 PiDeck Debian 文件名和品牌更新
 
 test("Dev 的 deb/AppImage 不继承稳定版名称或替代关系，可与稳定版并存", () => {
 	const config = buildDevConfig();
-	assert.equal(config.extraMetadata.productName, "PiDeck Dev");
+	assert.equal(config.extraMetadata.productName, "TPA Dev");
 	assert.equal(config.linux.executableName, "pideck-dev");
 	assert.equal(config.deb.packageName, "pideck-dev");
 	assert.deepEqual(config.deb.fpm, []);
 	for (const target of [config.linux, config.deb, config.appImage]) {
-		assert.match(target.artifactName, /^PiDeck-Dev-/);
+		assert.match(target.artifactName, /^TPA-Dev-/);
 		assert.ok(target.artifactName.includes("${arch}"));
 		assert.ok(!target.artifactName.includes(" "));
 	}

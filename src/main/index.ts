@@ -70,7 +70,7 @@ declare const __PIDECK_DEV_BUILD__: boolean;
 // 未打包的 npm run dev 仍隔离到 PiDeck-dev(±分支后缀)，避免开发调试误写坏真实数据。
 const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 // ready 前只为密钥环保留历史身份，窗口创建前恢复用户可见品牌，避免改 npm 名后旧密文失效。
-initializeAppBrand(app, app.isPackaged && __PIDECK_DEV_BUILD__ ? "PiDeck Dev" : APP_DISPLAY_NAME);
+initializeAppBrand(app, app.isPackaged && __PIDECK_DEV_BUILD__ ? "TPA Dev" : APP_DISPLAY_NAME);
 
 // E2E（Playwright 驱动）静默运行：窗口显示但不抢焦点、不最大化铺满屏，
 // 避免打断用户在其他软件的输入。fixture 通过 env PIDECK_E2E=1 标识。
@@ -1654,7 +1654,7 @@ function setupTray() {
 	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
 	const createTrayInstance = (): Tray => {
 		const instance = new Tray(icon.resize({ width: 16, height: 16 }));
-		instance.setToolTip("PiDeck");
+		instance.setToolTip(APP_DISPLAY_NAME);
 		// 双击托盘图标恢复窗口（Windows 常见交互）
 		instance.on("double-click", () => {
 			if (mainWindow && !mainWindow.isDestroyed()) {

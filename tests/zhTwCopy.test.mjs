@@ -62,9 +62,9 @@ test("主进程词典：normalizeMainProcessLocale 认繁体，mainProcessT 取�
 	assert.equal(normalizeMainProcessLocale(undefined), "zh-CN");
 	assert.equal(normalizeMainProcessLocale(42), "zh-CN");
 
-	assert.equal(mainProcessT("zh-TW", "shellMenu.quickTask"), "使用 PiDeck 發起任務");
-	assert.equal(mainProcessT("zh-CN", "shellMenu.quickTask"), "使用 PiDeck 发起任务");
-	assert.equal(mainProcessT("en-US", "shellMenu.quickTask"), "Start a task with PiDeck");
+	assert.equal(mainProcessT("zh-TW", "shellMenu.quickTask"), "使用 TPA 發起任務");
+	assert.equal(mainProcessT("zh-CN", "shellMenu.quickTask"), "使用 TPA 发起任务");
+	assert.equal(mainProcessT("en-US", "shellMenu.quickTask"), "Start a task with TPA");
 });
 
 /** 飞书的 zhCN 是模块内局部常量（未导出），从 `const zhCN = {` 到键类型声明之间提取键。 */

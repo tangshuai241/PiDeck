@@ -9,7 +9,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
  */
 export const PACKAGED_USER_DATA_NAME = "pi-desktop";
 
-/** 正式包 userData 新目录名（与 productName 一致）。 */
+/** 既有正式数据目录：TPA 更名后仍保留，避免产生空数据目录或改变凭据身份。 */
 export const PACKAGED_USER_DATA_NAME_NEW = "PiDeck";
 
 /** 便携版把数据放在 exe 同级 data/，与安装版隔离。 */

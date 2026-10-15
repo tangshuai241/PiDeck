@@ -6,7 +6,7 @@
   "engines": {
     "npm": "^11.6.2"
   },
-  "description": "PiDeck is an open-source desktop workbench to manage multiple pi AI coding agents across local project folders with session history, Git integration, terminal, and config management.",
+  "description": "TPA is an open-source desktop workbench to manage multiple pi AI coding agents across local project folders with session history, Git integration, terminal, and config management.",
   "private": true,
   "license": "MIT",
   "author": {
@@ -131,10 +131,10 @@
   },
   "build": {
     "appId": "com.ayuayue.pi-desktop",
-    "productName": "PiDeck",
+    "productName": "TPA",
     "protocols": [
       {
-        "name": "PiDeck Agent Link",
+        "name": "TPA Agent Link",
         "schemes": [
           "pideck"
         ]
@@ -262,7 +262,7 @@
     ],
     "extraMetadata": {
       "main": "out/main/index.js",
-      "productName": "PiDeck"
+      "productName": "TPA"
     },
     "win": {
       "icon": "build/icon.ico",
