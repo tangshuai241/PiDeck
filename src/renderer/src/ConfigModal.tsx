@@ -1,9 +1,12 @@
+import { ConfigNavigation } from "./config/ConfigNavigation";
+import { ConfigPage } from "./config/ConfigPage";
+import { preventSettingsSearchDismiss } from "./components/app/settings/SettingsNavigation";
 import { Button, buttonVariants } from "./components/ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "./components/ui-shadcn/dialog";
 import { ConfirmDialog } from "./components/ui-shadcn/ConfirmDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./components/ui-shadcn/alert-dialog";
-import { X, Blocks, Cpu, FileCode2, FileText, KeyRound, Loader2, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
+import { X, Loader2, FolderOpen } from "lucide-react";
 import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
@@ -314,7 +317,7 @@ class ConfigModalErrorBoundary extends Component<{ open: boolean; onClose: () =>
 		// #115：错误兜底直接走 shadcn Dialog（components/ui/Modal 薄包装已退役）
 		return (
 			<Dialog open={this.props.open} onOpenChange={(next) => !next && this.props.onClose()}>
-				<DialogContent showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal")}>
+				<DialogContent onEscapeKeyDown={preventSettingsSearchDismiss} showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal")}>
 					<DialogHeader className="flex-row items-center justify-between px-4 py-3">
 						<DialogTitle>{t("config.loadFailed")}</DialogTitle>
 						<DialogClose asChild>
@@ -2628,15 +2631,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		props.onClose();
 	};
 
-	const configNavItems: Array<{ id: ConfigTab; label: string; icon: ReactNode }> = [
-		{ id: "models", label: t("config.nav.models"), icon: <Cpu size={14} aria-hidden="true" /> },
-		{ id: "auth", label: t("config.nav.auth"), icon: <KeyRound size={14} aria-hidden="true" /> },
-		{ id: "settings", label: t("config.nav.settings"), icon: <Settings2 size={14} aria-hidden="true" /> },
-		{ id: "trust", label: t("config.nav.trust"), icon: <ShieldCheck size={14} aria-hidden="true" /> },
-		{ id: "mcp", label: t("config.nav.mcp"), icon: <PlugZap size={14} aria-hidden="true" /> },
-		{ id: "raw", label: t("config.nav.raw"), icon: <FileCode2 size={14} aria-hidden="true" /> },
-	];
-
 	// 加载态/错误提示：每个 TabsContent 顶部共用（Tabs 会卸载非激活内容，不能只挂一处）。
 	// 同一 JSX element 可在多处渲染，不会造成重复副作用。
 	const statusBlock = (
@@ -2692,9 +2686,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					) : null}
 				</TabsContent>
 				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
-					{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。
-			  左侧导航 = shadcn Vertical Tabs：TabsList 竖排（orientation=vertical），
-			  组标题是非 trigger 的普通 div；窄屏（<820px）回退为横向导航。 */}
+					{/* Vertical navigation shares the app settings dimensions; scope and drafts remain in this owner. */}
 					<Tabs
 						orientation="vertical"
 						value={sectionTabValue(section, tab)}
@@ -2712,75 +2704,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								/* localStorage 不可用（隐私模式等）时静默失败，仅本次会话内不记忆 */
 							}
 						}}
-						className="config-layout grid min-h-0 flex-1 gap-0 bg-transparent"
+						className="config-layout grid min-h-0 min-w-0 flex-1 grid-cols-[216px_minmax(0,1fr)] gap-0 bg-transparent max-[820px]:grid-cols-[176px_minmax(0,1fr)]"
 					>
-						<TabsList
-							className="config-sidebar flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[160px] max-[820px]:flex-row max-[820px]:gap-3 max-[820px]:overflow-x-auto max-[820px]:overflow-y-hidden max-[820px]:border-r-0 max-[820px]:border-b"
-							aria-label={t("config.title")}
-						>
-							{!resourceOnly && (
-								<div className="config-sidebar-group grid gap-0.5">
-									<span className="px-2 pb-1 text-micro font-semibold text-muted-foreground">{t("config.group.config")}</span>
-									{configNavItems.map((item) => (
-										<TabsTrigger key={item.id} value={`config:${item.id}`} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-											<span className="config-nav-icon">{item.icon}</span>
-											{item.label}
-											{/* 未保存黄点：与 DSH 导航同款 */}
-											{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-										</TabsTrigger>
-									))}
-								</div>
-							)}
-							<div className="config-sidebar-group grid gap-0.5">
-								<span className="px-2 pb-1 text-micro font-semibold text-muted-foreground">{t("config.group.agent")}</span>
-								{!resourceOnly && (
-									<TabsTrigger value="security" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-										<span className="config-nav-icon">
-											<Shield size={14} aria-hidden="true" />
-										</span>
-										{t("config.nav.security")}
-									</TabsTrigger>
-								)}
-								<TabsTrigger value="extensions" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-									<span className="config-nav-icon">
-										<Puzzle size={14} aria-hidden="true" />
-									</span>
-									{t("config.nav.extensions")}
-								</TabsTrigger>
-								{/* MCP 在配置管理弹窗里由「配置文件」组的 config:mcp 承担（全局作用域 + 导入扫描源）；
-								    这里只在项目资源管理器（resourceOnly）提供项目作用域入口，避免同名双入口用户无法选择。 */}
-								{resourceOnly && (
-									<TabsTrigger value="mcp" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-										<span className="config-nav-icon">
-											<PlugZap size={14} aria-hidden="true" />
-										</span>
-										{t("config.nav.mcp")}
-									</TabsTrigger>
-								)}
-								<TabsTrigger value="skills" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-									<span className="config-nav-icon">
-										<Sparkles size={14} aria-hidden="true" />
-									</span>
-									{t("config.nav.skills")}
-								</TabsTrigger>
-								<TabsTrigger value="prompts" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-									<span className="config-nav-icon">
-										<FileText size={14} aria-hidden="true" />
-									</span>
-									{t("config.nav.prompts")}
-								</TabsTrigger>
-								{/* 桥贡献的独立配置页（落点 `config.page`）：标题取贡献自己的 slot.title，
-								    缺省用 key；排序已在 useGuiContributions 里按 order + key 做好。 */}
-								{configPages.map((page) => (
-									<TabsTrigger key={page.targetId} value={guiPageSectionId(page.targetId)} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-										<span className="config-nav-icon">
-											<Blocks size={14} aria-hidden="true" />
-										</span>
-										{page.node.slot?.title ?? page.key}
-									</TabsTrigger>
-								))}
-							</div>
-						</TabsList>
+						<ConfigNavigation activeValue={sectionTabValue(section, tab)} resourceOnly={resourceOnly} dirtyTabs={dirtyTabs} pages={configPages.map((page) => ({ value: guiPageSectionId(page.targetId), label: page.node.slot?.title ?? page.key }))} />
 
 						{/* 桥贡献的独立配置页内容：一项一个 Tab，按完整落点 id 精确取项。 */}
 						{configPages.map((page) => (
@@ -2788,13 +2714,13 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								{/* 与原生 tab 同构：TabsContent > .config-content（滚动容器）> 内容。
 								    少了 .config-content 这层，页面内容既不滚、也会被 .config-main 裁掉；
 								    页面内的 sticky/absolute 还会挂到弹窗的滚动视口上（页脚悬到列表中间）。 */}
-								<div className="config-content">
+								<ConfigPage title={page.node.slot?.title ?? page.key}>
 									<BridgeGuiSingleSlot sessionId={bridgeSessionId} slot="config.page" targetId={page.targetId} />
-								</div>
+								</ConfigPage>
 							</TabsContent>
 						))}
 						<TabsContent value="config:models" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.models")}>
 								{statusBlock}
 								{configDiagnosticBlock}
 								{!loading && (
@@ -2880,11 +2806,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										/>
 									</>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="config:auth" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.auth")}>
 								{statusBlock}
 								{configDiagnosticBlock}
 								{!loading && (
@@ -2917,11 +2843,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "pi")}
 									/>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="config:settings" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.settings")}>
 								{statusBlock}
 								{configDiagnosticBlock}
 								{!loading && (
@@ -2938,11 +2864,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										onSave={handleSaveSettings}
 									/>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="skills" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.skills")}>
 								{statusBlock}
 								{!loading &&
 									(editingGlobalSkill ? (
@@ -3019,11 +2945,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 											onRename={handleRenameGlobalSkill}
 										/>
 									))}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="prompts" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.prompts")}>
 								{statusBlock}
 								{!loading && (
 									<PromptsTab
@@ -3065,11 +2991,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										onSaveEdit={handleSaveEditPrompt}
 									/>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="extensions" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.extensions")}>
 								{statusBlock}
 								<ExtensionsTab
 									scope={resourceScope}
@@ -3090,20 +3016,20 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 									onShowDiscoveredInFolder={(item) => void handleOpenDiscoveredLocation(item)}
 									onShowInFolder={(extension) => void handleOpenExtensionLocation(extension)}
 								/>
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						{/* forceMount：面板自管草稿（工具动作 allow/ask/deny、目录边界等只在组件 state 里），
 						    切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						<TabsContent value="security" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.security")}>
 								<SecuritySection ref={securitySectionRef} onDirtyChange={handleSecurityDirtyChange} />
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
-							<div className="config-content flex min-h-0 flex-col">
+							<ConfigPage title={t("config.nav.mcp")} className="flex min-h-0 flex-col">
 								{/* 全局作用域：activeProjectId 只作导入扫描的项目来源，配置仍写全局 mcp.json。 */}
 								<McpTab
 									ref={mcpTabRef}
@@ -3114,21 +3040,21 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 									}}
 									onDirtyChange={handleMcpDirtyChange}
 								/>
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						{/* 只有项目资源管理器会走到这里（见左侧导航同名开关）；forceMount：面板自管草稿，
 						    切走再回来不能丢未保存编辑，inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						{resourceOnly ? (
 							<TabsContent value="mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
-								<div className="config-content flex min-h-0 flex-col">
+								<ConfigPage title={t("config.nav.mcp")} className="flex min-h-0 flex-col">
 									<McpTab ref={resourceMcpTabRef} projectId={resourceOnly && projectKind !== "chat" ? effectiveProjectId : undefined} projectName={resourceOnly ? projectName : undefined} onGoToExtensions={() => setSection("extensions")} onDirtyChange={handleResourceMcpDirtyChange} />
-								</div>
+								</ConfigPage>
 							</TabsContent>
 						) : null}
 
 						<TabsContent value="config:trust" className="config-main min-w-0">
-							<div className="config-content">
+							<ConfigPage title={t("config.nav.trust")}>
 								{statusBlock}
 								{configDiagnosticBlock}
 								{!loading && (
@@ -3142,11 +3068,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										onSave={handleSaveTrust}
 									/>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 
 						<TabsContent value="config:raw" className="config-main min-w-0">
-							<div className="config-content flex min-h-0 flex-col">
+							<ConfigPage title={t("config.nav.raw")} className="flex min-h-0 flex-col">
 								{statusBlock}
 								{configDiagnosticBlock}
 								{!loading && (
@@ -3163,7 +3089,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										onSave={handleSaveRaw}
 									/>
 								)}
-							</div>
+							</ConfigPage>
 						</TabsContent>
 					</Tabs>
 				</TabsContent>
@@ -3262,7 +3188,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	// 独立模式：完整 Dialog（标题栏含保存/导出/导入/关闭；内容与嵌入模式完全一致）
 	return (
 		<Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
-			<DialogContent showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal")}>
+			<DialogContent onEscapeKeyDown={preventSettingsSearchDismiss} showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal")}>
 				{/* 顶栏/侧栏控件与设置弹窗、会话顶栏统一到 sm / text-sm 密度 */}
 				<DialogHeader className="flex-row items-center justify-between px-4 py-2.5">
 					<DialogTitle className="text-sm font-semibold tracking-tight">{t("config.title")}</DialogTitle>

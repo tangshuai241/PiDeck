@@ -13,6 +13,7 @@ const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonT
 const projectResources = readFileSync("src/renderer/src/components/app/ProjectResourcesModal.tsx", "utf8");
 const zhCopy = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enCopy = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+const navigation = readFileSync("src/renderer/src/config/ConfigNavigation.tsx", "utf8");
 const tabs = readFileSync("src/renderer/src/components/ui-shadcn/tabs.tsx", "utf8");
 const skillTableRow = skills.slice(skills.indexOf("function SkillTableRow"));
 
@@ -23,7 +24,7 @@ test("config shell defines compact density and crisp system typography", () => {
 	assert.match(surfaces, /\.config-modal \{[\s\S]*-webkit-font-smoothing: subpixel-antialiased/);
 	assert.match(surfaces, /\.config-modal \{[\s\S]*text-rendering: auto/);
 	assert.doesNotMatch(surfaces, /\.config-modal \{[\s\S]*-webkit-font-smoothing: antialiased;/);
-	assert.match(surfaces, /\.config-nav-btn \{[\s\S]*font-size:\s*14px/);
+	assert.match(navigation, /text-control\s+font-medium/);
 	// 选中态随 Vertical Tabs 迁移：由 TabsTrigger data-[state=active] utility 承担
 	assert.match(tabs, /data-\[state=active\]:bg-bg-panel/);
 	assert.doesNotMatch(surfaces, /\.config-nav-btn\.active \{/);
@@ -45,11 +46,11 @@ test("config shell defines compact density and crisp system typography", () => {
 	assert.match(configModal, /max-w-\[80vw\]/);
 	assert.match(configModal, /h-\[80vh\]/);
 	assert.match(configModal, /sm:max-w-\[min\(1300px,80vw\)\]/);
-	// 容器布局交给 .config-layout 的 CSS grid 承担：utility 的 flex 会盖掉 CSS 的 display:grid，
-	// 820px 下的纵向堆叠改由 surfaces.css 媒体查询定义（不再用 max-[820px]:flex-col）。
-	assert.match(configModal, /config-layout grid min-h-0 flex-1/);
-	assert.match(configModal, /max-\[820px\]:flex-row/);
-	assert.match(surfaces, /@media \(max-width: 820px\) \{[\s\S]*?\.config-layout \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);/);
+	// Keep the same navigation width on both settings panes, including narrow windows.
+	assert.match(configModal, /grid-cols-\[216px_minmax\(0,1fr\)\]/);
+	assert.match(configModal, /max-\[820px\]:grid-cols-\[176px_minmax\(0,1fr\)\]/);
+	assert.doesNotMatch(surfaces, /\.config-layout\s*\{/);
+
 	assert.match(settingsModal, /settingsModalSizeClass/);
 	assert.match(settingsModal, /w-\[80vw\]/);
 	assert.match(surfaces, /\.settings-modal \{[\s\S]*width: min\(1300px, 80vw\);[\s\S]*height: min\(850px, 80vh\);/);
@@ -71,7 +72,7 @@ test("project resource menu reuses the settings resource views with a fixed proj
 	assert.match(configModal, /resourceOnly\s*\?/);
 	assert.match(configModal, /resourceScopeSelector = resourceOnly \?/);
 	assert.match(configModal, /projectName\?\.trim\(\) \|\| t\("config\.resourceScope\.projectFallback"\)/);
-	assert.match(configModal, /!resourceOnly && \(/);
+	assert.match(navigation, /!resourceOnly\s*\?\s*\[\{\s*label:\s*t\("config\.group\.config"\)/);
 });
 
 test("skills and prompts use compact tab rails aligned with the extensions page", () => {

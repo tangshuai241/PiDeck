@@ -124,7 +124,7 @@ export function AuthTab(props: {
 
 	return (
 		<div className="config-auth-tab">
-			<div className="mb-3 flex items-center justify-between gap-3">
+			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
 				<span className="font-mono text-xs tabular-nums text-text-tertiary">{t("config.count.auth", { count: allProviders.length })}</span>
 				<div className="flex min-w-0 items-center gap-1.5">
 					<Button
@@ -218,7 +218,7 @@ export function AuthTab(props: {
 
 			{/* 选择供应商弹窗 */}
 			{selectingProvider && (
-				<div className="mb-4 rounded-lg border border-border-default bg-bg-panel p-4 shadow-[0_4px_12px_color-mix(in_srgb,var(--color-text-primary)_8%,transparent)]">
+				<div className="mb-4 rounded-2xl bg-settings-surface p-5">
 					<div className="mb-3 flex items-center justify-between border-b border-border-subtle pb-2.5">
 						<strong className="text-sm text-text-primary">{t("config.authSelectProvider")}</strong>
 						<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setSelectingProvider(false)}>
@@ -357,7 +357,7 @@ export function AuthTab(props: {
 						<div
 							key={name}
 							ref={(element) => providerReorder.registerCard(name, element)}
-							className={`relative rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color,opacity] duration-150${providerReorder.draggingName === name ? " opacity-50" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)]" : ""}`}
+							className={`relative rounded-2xl border border-transparent bg-settings-surface transition-[border-color,box-shadow,background-color,opacity] duration-150 motion-reduce:transition-none${providerReorder.draggingName === name ? " opacity-50" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)]" : ""}`}
 							{...providerReorder.cardProps(name)}
 						>
 							{/* 插入指示线：拖拽落点在上下哪侧就画在卡片哪侧 */}
@@ -452,7 +452,7 @@ export function AuthTab(props: {
 								</div>
 							</div>
 							{isExpanded && (
-								<div className="mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+								<div className="mx-4 my-4 grid gap-3 rounded-xl bg-settings-control/60 p-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 									<div className="grid grid-cols-[90px_1fr] items-center gap-2.5">
 										<Label className="pl-0.5 text-left text-xs font-medium text-text-secondary">{t("config.field.type")}</Label>
 										<ConfigSelect value={auth.type ?? "api_key"} options={AUTH_TYPE_OPTIONS} onChange={(v) => props.onUpdate(name, "type", v)} />
@@ -469,7 +469,7 @@ export function AuthTab(props: {
 
 				{/* 已隐藏的认证供应商折叠区：眼睛按钮隐藏后移入此折叠区，可随时点击恢复显示 */}
 				{hiddenProviderNames.length > 0 && (
-					<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+					<div className="overflow-hidden rounded-2xl bg-settings-surface">
 						<button type="button" className="flex w-full cursor-pointer items-center gap-2 px-3.5 py-2 text-left transition-colors duration-150 hover:bg-bg-hover" onClick={() => setHiddenSectionOpen((prev) => !prev)}>
 							{hiddenSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 							<EyeOff size={14} className="text-muted-foreground" aria-hidden="true" />

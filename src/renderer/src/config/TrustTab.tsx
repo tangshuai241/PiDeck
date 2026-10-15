@@ -35,11 +35,10 @@ export function TrustTab(props: { data: TrustFile; saving: boolean; onChange: (d
 	};
 
 	return (
-		<div className="config-trust-tab">
+		<div className="config-trust-tab rounded-2xl bg-settings-surface p-5">
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<div>
-					<strong>{t("config.nav.trust")}</strong>
-					<p>{t("config.trust.hint")}</p>
+					<p className="text-caption leading-relaxed text-muted-foreground">{t("config.trust.hint")}</p>
 				</div>
 			</div>
 

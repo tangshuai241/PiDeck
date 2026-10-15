@@ -185,7 +185,7 @@ export function SkillsTab(props: {
 						</CreateResourceField>
 					</CreateResourceCard>
 
-					<div className="overflow-x-auto rounded-lg border border-border-subtle bg-bg-panel">
+					<div className="overflow-x-auto rounded-2xl bg-settings-surface">
 						{visibleSkills.length === 0 ? (
 							<div className="py-12 text-center text-control text-text-tertiary">{t("config.emptySkills")}</div>
 						) : (
