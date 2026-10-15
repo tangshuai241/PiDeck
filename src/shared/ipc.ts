@@ -4,6 +4,9 @@ export const ipcChannels = {
 	accountUsageRemove: "account-usage:remove",
 	accountUsageRefresh: "account-usage:refresh",
 	sessionsGenerateTitle: "sessions:generate-title",
+	remoteCompanionStatus: "remote-companion:status",
+	remoteCompanionPair: "remote-companion:pair",
+	remoteCompanionRevoke: "remote-companion:revoke",
 	projectsList: "projects:list",
 	projectsAdd: "projects:add",
 	// 文件夹右键菜单直达：按路径添加项目（渲染层确认后调用；projectsAdd 走系统目录选择框）

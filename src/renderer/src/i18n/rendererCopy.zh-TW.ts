@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 88d56bd072aa2eadf9520f958ab2baa693e3d4f8cc63fc07d6444a5056144a6d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 204800f72f4326a36577ffced04c6c8fe48710bc32297f582eb56e6c8ff6a329（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -66,6 +66,22 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.titleErrorTimeout": "標題請求超時，請稍後重試或更換標題模型。原有標題已保留。",
 	"session.titleErrorResult": "模型沒有返回有效的中文標題，請重試或更換標題模型。原有標題已保留。",
 	"session.titleErrorChanged": "生成期間會話或標題已變更，本次結果已取消。",
+	"remoteCompanion.title": "Android 隨身助理",
+	"remoteCompanion.description": "通過網際網路繼續這臺電腦上的對話。手機可檢視進度、傳送要求和回答確認。",
+	"remoteCompanion.notConfigured": "中繼尚未配置",
+	"remoteCompanion.paired": "已配對：{name}",
+	"remoteCompanion.phone": "Android 手機",
+	"remoteCompanion.waiting": "中繼已連線，等待配對",
+	"remoteCompanion.disconnected": "尚未連線中繼",
+	"remoteCompanion.error": "暫時無法完成操作，請檢查連線後重試。",
+	"remoteCompanion.pair": "配對手機",
+	"remoteCompanion.revoke": "撤銷手機訪問",
+	"remoteCompanion.qrAlt": "手機配對二維碼",
+	"remoteCompanion.qrHint": "在 TPA Android 中掃描二維碼，隨後在這臺電腦確認。二維碼十分鐘內有效，請勿分享。",
+	"remoteCompanion.copy": "複製配對資訊",
+	"remoteCompanion.security": "對話在手機與電腦之間加密，中繼不讀取正文。撤銷後，手機無法繼續讀取或執行。",
+	"remoteCompanion.revokeTitle": "撤銷手機訪問？",
+	"remoteCompanion.revokeDescription": "現有連線會關閉。再次使用需要重新掃碼並在電腦確認。",
 	"personalTodo.widePanel": "展開寬欄",
 	"personalTodo.narrowPanel": "恢復窄欄",
 	"personalTodo.priorityUrgent": "緊急",
@@ -4351,7 +4367,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tabs.editors": "外部編輯器",
 	"settings.tabs.git": "Git",
 	"settings.tabs.dev": "開發選項",
-	"settings.tabs.im": "飛書機器人",
+	"settings.tabs.im": "外部連線",
 	"settings.tabs.devDesc": "環境、版本和除錯",
 	"settings.tabs.pet": "桌面寵物",
 	"settings.tabs.petDesc": "在桌面懸浮顯示 Agent 狀態",

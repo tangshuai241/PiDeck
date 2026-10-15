@@ -41,6 +41,7 @@ const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.
 const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.PetTab })));
 const NotificationTab = lazy(() => import("./settings/NotificationTab").then((m) => ({ default: m.NotificationTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
+const RemoteCompanionSettings = lazy(() => import("./settings/RemoteCompanionSettings").then((m) => ({ default: m.RemoteCompanionSettings })));
 const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) => ({ default: m.StorageTab })));
 const BackupTab = lazy(() => import("./settings/SettingsBackupTab").then((m) => ({ default: m.BackupTab })));
 const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then((m) => ({ default: m.ProcessMetricsTab })));
@@ -821,6 +822,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							{activeTab === "im" && (
 								<SettingsPage value="im">
 									<Suspense fallback={<SettingsTabLoading />}>
+										<RemoteCompanionSettings />
 										<ImTab />
 									</Suspense>
 								</SettingsPage>

@@ -1,0 +1,5 @@
+@layer theme, base, components, vendor, legacy, utilities;
+@import "../../../src/renderer/src/styles/foundation.css" layer(legacy);
+@import "../../../src/renderer/src/styles/t3-themes.css" layer(legacy);
+@import "../../../src/renderer/src/styles/tailwind.css";
+@source "./*.tsx";

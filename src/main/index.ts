@@ -414,6 +414,7 @@ import { WhisperTranscriber } from "./voice/WhisperTranscriber";
 import { WhisperServerPool } from "./voice/WhisperServerPool";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
+import { installRemoteCompanion } from "./remote/installRemoteCompanion";
 
 import { registerSystemIpc } from "./ipc/systemIpc";
 import { registerResourceImportIpc } from "./ipc/resourceImportIpc";
@@ -4784,6 +4785,22 @@ app
 
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		const remoteCompanion = installRemoteCompanion({
+			catalog: sessionCatalog,
+			sessionForkCommands,
+			runtime: sessionRuntimeCoordinator,
+			agents: agentManager,
+			projects: projectStore,
+			getDocuments: () => documentWorkDomain,
+			getAutomations: () => automationStore,
+			userDataPath: app.getPath("userData"),
+			getWindow: () => mainWindow,
+			copy: mainCopy,
+			log: (event) => {
+				void appLogger.info("remote-companion", event);
+			},
+		});
+		quitCleanup.register("remote-companion", () => remoteCompanion.dispose());
 		// 终态惰性解绑（getAgentId → unbindTerminalAgent）发生在查询路径里，必须把解绑推给渲染层：
 		// 否则渲染层快照停在 error，红点常亮且「关闭 Agent」永远对不上存在的运行实例。
 		sessionRuntimeCoordinator.setDetachedNotifier((binding) => emitSessionRuntimeDetach(binding));

@@ -645,6 +645,19 @@ export class SessionHistoryReader {
 	 * 不启动 pi 进程，直接从 JSONL 构造与运行态相同的时间线数据。
 	 * Viewer 必须复用 AgentManager 的压缩归档与消息转换规则，避免维护第二套显示模型。
 	 */
+	/** Read one visible active-branch row, including reasoning, without scanning the entire history into memory. */
+	async readDisplayMessagesForEntry(sessionPath: string, messageId: string, entryId?: string): Promise<ChatMessage[]> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const syntheticId = syntheticHistoryEntryId(messageId);
+		const entry = index.activeMessageEntries.find((item) => (entryId ? item.id === entryId : item.messageId === messageId || item.id === messageId || item.id === syntheticId));
+		if (!entry || index.contextEdits.excludedEntryIds.includes(entry.id)) return [];
+		const raw = await this.readIndexedSessionMessages(index.hostPath, [entry]);
+		const rows = this.applyContextEdits(this.deps.convertMessages("_remote", raw, [entry.id]), index.contextEdits);
+		// Tool delivery rows intentionally shorten large results. Reuse the existing
+		// raw-result extractor only after visibility and branch checks have passed.
+		return rows.filter((item) => !item.meta?.hidden && !item.meta?.deleted && item.role !== "system").map((row) => (row.role === "tool" ? { ...row, text: extractEntryResultText(raw[0]) } : row));
+	}
+
 	async readMessageFullText(sessionPath: string, messageId: string, entryId?: string): Promise<{ text: string }> {
 		const cacheKey = `${sessionPath}#${messageId}`;
 		const cached = this.fullTextCache.get(cacheKey);

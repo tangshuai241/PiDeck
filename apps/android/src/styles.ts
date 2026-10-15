@@ -1,0 +1,45 @@
+import { StyleSheet } from "react-native";
+import type { Palette } from "./theme";
+
+/** Maps desktop semantic colors to native touch layouts. */
+export function createStyles(p: Palette) {
+	return StyleSheet.create({
+		root: { flex: 1, backgroundColor: p.background },
+		header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 22, paddingTop: 10, paddingBottom: 16, gap: 8 },
+		brand: { color: p.text, fontSize: 27, fontWeight: "500", flex: 1 },
+		icon: { minWidth: 48, minHeight: 48, alignItems: "center", justifyContent: "center" },
+		connection: { flexDirection: "row", gap: 7, minHeight: 48, alignItems: "center" },
+		dot: { width: 7, height: 7, borderRadius: 4 },
+		caption: { fontSize: 12, color: p.secondary, lineHeight: 21 },
+		title: { color: p.text, fontSize: 27, lineHeight: 39, fontWeight: "500", marginVertical: 12 },
+		body: { color: p.text, fontSize: 16, lineHeight: 27 },
+		secondary: { color: p.secondary, fontSize: 14, lineHeight: 24 },
+		description: { color: p.secondary, fontSize: 14, lineHeight: 26, marginVertical: 12 },
+		content: { paddingHorizontal: 25, paddingBottom: 28, flexGrow: 1 },
+		primary: { minHeight: 52, backgroundColor: p.primary, borderRadius: 17, paddingHorizontal: 18, paddingVertical: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginTop: 12 },
+		primaryLabel: { color: p.onPrimary, fontSize: 15, lineHeight: 24, fontWeight: "500" },
+		secondaryButton: { minHeight: 50, padding: 12, justifyContent: "center", alignItems: "center", flexDirection: "row", gap: 9, marginTop: 6, borderRadius: 16 },
+		empty: { paddingHorizontal: 28, paddingVertical: 40, justifyContent: "center", flex: 1, gap: 12 },
+		hero: { marginTop: 20, marginBottom: 23, backgroundColor: p.muted, borderRadius: 25, padding: 23 },
+		heroTitle: { color: p.text, fontSize: 20, lineHeight: 30, fontWeight: "500" },
+		sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
+		session: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: 94, paddingVertical: 19, borderBottomColor: p.border, borderBottomWidth: StyleSheet.hairlineWidth },
+		sessionTitle: { fontSize: 16, lineHeight: 26, color: p.text, fontWeight: "500" },
+		meta: { color: p.secondary, fontSize: 13, lineHeight: 23, marginTop: 5 },
+		chatHeader: { flexDirection: "row", gap: 8, alignItems: "center", paddingHorizontal: 12, paddingBottom: 15 },
+		messages: { paddingHorizontal: 24, paddingTop: 10, paddingBottom: 12 },
+		composer: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 },
+		inputBox: { backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, borderRadius: 25, padding: 9 },
+		input: { minHeight: 52, maxHeight: 140, color: p.text, fontSize: 16, lineHeight: 26, paddingHorizontal: 10, paddingVertical: 12, textAlignVertical: "top" },
+		send: { width: 48, height: 48, borderRadius: 24, backgroundColor: p.primary, justifyContent: "center", alignItems: "center" },
+		stop: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", gap: 8, alignItems: "center", borderRadius: 24, backgroundColor: p.muted },
+		busy: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+		nav: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.border, paddingTop: 8, paddingBottom: 7, backgroundColor: p.surface },
+		navItem: { flex: 1, alignItems: "center", gap: 4, minHeight: 60, justifyContent: "center" },
+		navIcon: { width: 58, height: 29, alignItems: "center", justifyContent: "center", borderRadius: 20 },
+		question: { backgroundColor: p.muted, padding: 18, borderRadius: 20, marginVertical: 8 },
+		file: { backgroundColor: p.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: p.border, borderRadius: 24, padding: 24, marginTop: 20, gap: 10 },
+		privacy: { flexDirection: "row", gap: 13, marginTop: 30, marginBottom: 20 },
+		error: { paddingHorizontal: 23, paddingBottom: 10 },
+	});
+}

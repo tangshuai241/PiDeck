@@ -66,7 +66,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	editors: ["外部编辑器", "vscode", "编辑器", "editor", "ide"],
 	git: ["git", "版本控制", "提交", "commit", "分支", "branch"],
 	dev: ["开发者", "调试", "dev", "developer", "debug"],
-	im: ["飞书", "机器人", "im", "feishu", "lark", "消息"],
+	im: ["手机", "安卓", "远程", "配对", "Android", "remote", "companion", "飞书", "机器人", "im", "feishu", "lark", "消息"],
 	pet: ["桌面宠物", "宠物", "pet", "桌宠"],
 	notification: ["通知", "提醒", "消息提示", "notification", "toast"],
 	storage: ["缓存", "日志", "存储", "清理", "cache", "log", "storage"],

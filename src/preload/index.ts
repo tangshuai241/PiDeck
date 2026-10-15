@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { QuotaAccountInput, QuotaSnapshot } from "../shared/types/accountUsage";
+import type { RemoteCompanionResult } from "../shared/types/remoteCompanion";
 import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
 import type { HostPluginContext, HostPluginDesktopApi } from "../shared/types/hostPlugin";
 import type { PiDeckMcpDesktopApi } from "../shared/types/piDeckMcp";
@@ -1712,6 +1713,11 @@ const api = {
 		setState: (patch: { enabled?: boolean; sessionOverride?: { sessionId: string; enabled: boolean | null } }) => ipcRenderer.invoke(ipcChannels.cuaSetState, patch) as Promise<{ enabled: boolean; sessionOverrides: Record<string, boolean> }>,
 	},
 	// ── 云端记忆（N04）：只暴露连接/状态/开关，绝不回传凭据 ──
+	remoteCompanion: {
+		getStatus: (): Promise<RemoteCompanionResult> => ipcRenderer.invoke(ipcChannels.remoteCompanionStatus),
+		createPairing: (): Promise<RemoteCompanionResult> => ipcRenderer.invoke(ipcChannels.remoteCompanionPair),
+		revoke: (): Promise<RemoteCompanionResult> => ipcRenderer.invoke(ipcChannels.remoteCompanionRevoke),
+	},
 	cloudMemory: {
 		/** 连接与人格缓存状态（离线时 persona.stale = true）。 */
 		getStatus: () => ipcRenderer.invoke(ipcChannels.cloudMemoryGetStatus) as Promise<CloudMemoryStatusResult>,

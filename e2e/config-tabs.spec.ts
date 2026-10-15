@@ -81,7 +81,7 @@ test("config modal: feishu bot section renders connect form (UI smoke)", async (
 
 	const modal = await openSettingsDialog(window);
 
-	await modal.getByRole("tab", { name: "飞书机器人", exact: true }).click();
+	await modal.getByRole("tab", { name: "外部连接", exact: true }).click();
 	// 空态先渲染（无 Bot 配置），再点「添加 Bot」展开表单
 	await expect(modal.getByText("暂无 Bot 配置")).toBeVisible({ timeout: 10_000 });
 	await modal.getByRole("button", { name: "添加 Bot" }).click();

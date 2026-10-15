@@ -2,11 +2,16 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2cdc8b14034a69f098b7de7dd2cb20a32b2a30483256c86e3d26f8e203725ca8（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 9f280c8cece1a8974b367fce56d49cf95004b773cc6fe55bd931c3e367f9f0bf（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
 export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
+	"remoteCompanion.pairTitle": "連線 Android 手機",
+	"remoteCompanion.pairMessage": "允許“{name}”遠端使用這臺電腦的 TPA？",
+	"remoteCompanion.pairDetail": "手機可以檢視會話、傳送指令、回答確認和停止當前執行。你可以在外部連線設定中撤銷訪問。",
+	"remoteCompanion.deny": "不允許",
+	"remoteCompanion.allow": "允許連線",
 	"diagnostic.historyLoadFailed": "歷史會話載入失敗，可繼續使用當前 Agent 或重新開啟會話重試。",
 	"diagnostic.compactReconnected": "會話壓縮完成，Agent 已自動重連",
 	"diagnostic.compactionFailed": "會話壓縮失敗，上下文可能已接近上限；可稍後手動重試壓縮，或重啟會話。",

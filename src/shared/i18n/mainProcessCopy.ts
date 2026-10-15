@@ -2,6 +2,11 @@ import { isTraditionalChineseLanguageTag } from "../types/settings";
 import { mainProcessZhTW } from "./mainProcessCopy.zh-TW";
 
 export const mainProcessZhCN = {
+	"remoteCompanion.pairTitle": "连接 Android 手机",
+	"remoteCompanion.pairMessage": "允许“{name}”远程使用这台电脑的 TPA？",
+	"remoteCompanion.pairDetail": "手机可以查看会话、发送指令、回答确认和停止当前执行。你可以在外部连接设置中撤销访问。",
+	"remoteCompanion.deny": "不允许",
+	"remoteCompanion.allow": "允许连接",
 	"diagnostic.historyLoadFailed": "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。",
 	"diagnostic.compactReconnected": "会话压缩完成，Agent 已自动重连",
 	"diagnostic.compactionFailed": "会话压缩失败，上下文可能已接近上限；可稍后手动重试压缩，或重启会话。",
@@ -287,6 +292,11 @@ export const mainProcessZhCN = {
 export type MainProcessTranslationKey = keyof typeof mainProcessZhCN;
 
 export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
+	"remoteCompanion.pairTitle": "Connect Android phone",
+	"remoteCompanion.pairMessage": "Allow “{name}” to remotely use TPA on this computer?",
+	"remoteCompanion.pairDetail": "The phone can read sessions, send instructions, answer confirmations, and stop the current run. You can revoke access in connection settings.",
+	"remoteCompanion.deny": "Deny",
+	"remoteCompanion.allow": "Allow connection",
 	"diagnostic.historyLoadFailed": "Failed to load session history. You can keep using this Agent or reopen the session to retry.",
 	"diagnostic.compactReconnected": "Session compacted and the Agent reconnected automatically",
 	"diagnostic.compactionFailed": "Session compaction failed and the context may be near its limit. Retry compaction later or restart the session.",

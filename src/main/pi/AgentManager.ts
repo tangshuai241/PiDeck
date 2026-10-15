@@ -48,6 +48,7 @@ import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compact
 import { mergeSubagentSources } from "./derivedSubagents";
 import { INTERNAL_CONTROL, type InternalPromptDelivery } from "../sessions/internalPromptDelivery";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
+import { projectLiveMessageView } from "./liveMessageView";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
 import { piVersionAtLeast } from "../extensions/extensionVersionGate";
@@ -1157,6 +1158,11 @@ export class AgentManager {
 		return this.messages.get(agentId) ?? [];
 	}
 
+	/** Read the same live body/thinking as desktop without mutating persisted history. */
+	getDisplayMessages(agentId: string): ChatMessage[] {
+		return projectLiveMessageView(this.getMessages(agentId), this.activeAssistantMessageIds.get(agentId), this.liveStream.getText(agentId), this.liveStream.getThinking(agentId), this.liveStream.getSegment(agentId));
+	}
+
 	/**
 	 * 枚举正在运行的 pi agent 子进程（agentId → pid）。
 	 * 供进程监控面板使用：仅返回存活进程，退出/未启动的不计入。
@@ -1235,6 +1241,10 @@ export class AgentManager {
 	 */
 	async readMessageFullTextFromFile(sessionPath: string, messageId: string, entryId?: string): Promise<{ text: string }> {
 		return this.sessionHistoryReader.readMessageFullText(sessionPath, messageId, entryId);
+	}
+	/** Read one existing display row through the history owner, without activating a Pi process. */
+	async readDisplayMessagesForEntryFromFile(sessionPath: string, messageId: string, entryId?: string): Promise<ChatMessage[]> {
+		return this.sessionHistoryReader.readDisplayMessagesForEntry(sessionPath, messageId, entryId);
 	}
 
 	/**

@@ -1,0 +1,48 @@
+// Project-scoped mirrors for the Android build; no machine-wide Gradle changes.
+gradle.beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        gradlePluginPortal()
+    }
+}
+allprojects {
+    plugins.withId('com.facebook.react') {
+        // Metro has its own worker pool; Gradle's max-workers does not constrain it.
+        afterEvaluate { appProject ->
+            appProject.extensions.getByName('react').extraPackagerArgs.addAll(['--max-workers', '1'])
+        }
+    }
+    plugins.withId('com.android.application') {
+        // Ninja otherwise starts one C++ compiler per CPU, independently of Gradle workers.
+        android.defaultConfig.externalNativeBuild.cmake {
+            arguments '-DCMAKE_JOB_POOLS=tpa_compile=1;tpa_link=1', '-DCMAKE_JOB_POOL_COMPILE=tpa_compile', '-DCMAKE_JOB_POOL_LINK=tpa_link'
+        }
+        androidComponents.finalizeDsl { extension ->
+            // Keep local builds aligned with Expo config without editing generated native files.
+            def appConfig = new groovy.json.JsonSlurper().parse(new File(rootProject.projectDir, '../app.json')).expo
+            extension.defaultConfig.versionName = appConfig.version
+            extension.defaultConfig.versionCode = appConfig.android.versionCode ?: 1
+            def keyPath = System.getenv('TPA_ANDROID_KEYSTORE')
+            def passwordPath = System.getenv('TPA_ANDROID_KEY_PASSWORD_FILE')
+            if (keyPath && passwordPath) {
+                def password = new File(passwordPath).text.trim()
+                def signing = extension.signingConfigs.create('tpaPrivateRelease')
+                signing.storeFile = new File(keyPath)
+                signing.storePassword = password
+                signing.keyAlias = 'tpa-companion'
+                signing.keyPassword = password
+                extension.buildTypes.release.signingConfig = signing
+            }
+        }
+    }
+    buildscript.repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+    }
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+    }
+}

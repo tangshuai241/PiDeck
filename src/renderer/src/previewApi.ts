@@ -1928,6 +1928,11 @@ export function createPreviewApi(): PiDesktopApi {
 			setState: async () => ({ enabled: false, sessionOverrides: {} }),
 		},
 		// 预览/演示态没有主进程连接域：状态报告「未配置」而不是伪造已连接
+		remoteCompanion: {
+			getStatus: async () => ({ ok: true, status: { configured: false, enabled: false, connected: false, paired: false } }),
+			createPairing: async () => ({ ok: false, error: "NOT_CONFIGURED" }),
+			revoke: async () => ({ ok: false, error: "NOT_CONFIGURED" }),
+		},
 		cloudMemory: {
 			getStatus: async () => ({ ok: true as const, status: previewCloudMemoryStatus() }),
 			connect: async () => ({ ok: false as const, error: { code: "featureDisabled" as const, message: "desktop-only" } }),

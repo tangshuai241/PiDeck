@@ -21,7 +21,7 @@ test("retired services have no desktop API or settings entry and retained integr
 	const modal = await openSettings(window);
 	await expect(modal.getByRole("tab", { name: "Web 服务", exact: true })).toHaveCount(0);
 	await expect(modal.getByRole("tab", { name: "ACP 工具", exact: true })).toHaveCount(0);
-	for (const name of ["飞书机器人", "桌面宠物", "图片生成", "视频生成"]) await expect(modal.getByRole("tab", { name, exact: true })).toBeVisible();
+	for (const name of ["外部连接", "桌面宠物", "图片生成", "视频生成"]) await expect(modal.getByRole("tab", { name, exact: true })).toBeVisible();
 	await modal.getByRole("tab", { name: "开发选项", exact: true }).click();
 	await expect(modal.getByText("TPA 应用更新来自自己的发布仓库。资源更新仍可使用上游镜像。", { exact: true })).toBeVisible();
 	await expect(modal.getByText("遥测", { exact: true })).toHaveCount(0);
