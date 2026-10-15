@@ -283,7 +283,7 @@ export function ModelsTab(props: {
 			{/* 列表态：顶部按钮 + 指南 + 卡片列表；新增/编辑时整区切换为配置表单页（非弹窗） */}
 			{!props.addingProvider && !props.editingProvider && !transferView && (
 				<>
-					<div className="mb-3 flex items-center justify-between gap-3">
+					<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
 						<span className="font-mono text-xs tabular-nums text-text-tertiary">{t("config.count.providers", { count: visibleProviderNames.length })}</span>
 						<div className="flex min-w-0 items-center gap-1.5">
 							{!batchMode && (
@@ -447,7 +447,7 @@ export function ModelsTab(props: {
 										providerCardRefs.current[name] = element;
 										providerReorder.registerCard(name, element);
 									}}
-									className={`config-provider-card relative overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color,opacity] duration-150${providerReorder.draggingName === name ? " opacity-50" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
+									className={`config-provider-card relative overflow-hidden rounded-2xl border border-transparent bg-settings-surface transition-[border-color,box-shadow,background-color,opacity] duration-150 motion-reduce:transition-none${providerReorder.draggingName === name ? " opacity-50" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
 									{...providerReorder.cardProps(name)}
 								>
 									{/* 拖拽插入指示线：贴卡片内缘（卡片是 overflow-hidden，放到卡片外会被剪掉） */}
@@ -582,8 +582,8 @@ export function ModelsTab(props: {
 									</div>
 
 									{isExpanded && (
-										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
-											<div className="config-provider-form mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5">
+										<div className="config-provider-body border-t border-border-subtle/60 bg-settings-surface pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+											<div className="config-provider-form mx-4 my-4 grid gap-3 rounded-xl bg-settings-control/60 p-4">
 												<ProviderConnectionForm
 													baseUrl={provider.baseUrl ?? ""}
 													api={provider.api ?? ""}
@@ -806,7 +806,7 @@ export function ModelsTab(props: {
 						})}
 						{/* 已隐藏的供应商折叠区：眼睛按钮隐藏后移到这里，可展开恢复显示 */}
 						{hiddenProviderNames.length > 0 && (
-							<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+							<div className="overflow-hidden rounded-2xl bg-settings-surface">
 								<button type="button" className="flex w-full cursor-pointer items-center gap-2 px-3.5 py-2 text-left transition-colors duration-150 hover:bg-bg-hover" onClick={() => setHiddenSectionOpen((prev) => !prev)}>
 									{hiddenSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 									<EyeOff size={14} className="text-muted-foreground" aria-hidden="true" />

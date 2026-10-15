@@ -5,7 +5,8 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 test("ConfigModal wires an MCP tab without bloating loadConfig into MCP CRUD", () => {
 	const modal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
-	assert.match(modal, /id: "mcp"/);
+	const navigation = readFileSync("src/renderer/src/config/ConfigNavigation.tsx", "utf8");
+	assert.match(navigation, /value:\s*"config:mcp"/);
 	assert.match(modal, /CONFIG_TABS: readonly ConfigTab\[] = \["models", "auth", "settings", "trust", "mcp", "raw"\]/);
 	// MCP 页固定全局作用域：父层只传导入扫描的项目来源 + 脏回调，不再下发项目列表/作用域
 	assert.match(modal, /<McpTab[\s\S]{0,160}?activeProjectId=\{projectId\}[\s\S]{0,160}?onDirtyChange=\{handleMcpDirtyChange\}/);
@@ -29,8 +30,9 @@ test("McpTab 的 load 依赖必须稳定，且同名 MCP 入口只保留一个",
 	assert.doesNotMatch(modal, /onDirtyChange=\{\(dirty\) => \{/);
 	// 双入口收敛：配置管理弹窗里 MCP 归「配置文件」组的 config:mcp；
 	// 同名入口只在项目资源管理器（resourceOnly）出现，且保住自管草稿的 forceMount。
-	assert.equal(modal.match(/<TabsTrigger value="mcp"/g)?.length, 1);
-	assert.match(modal, /\{resourceOnly && \(\s*<TabsTrigger value="mcp"/);
+	const navigation = readFileSync("src/renderer/src/config/ConfigNavigation.tsx", "utf8");
+	assert.equal(navigation.match(/value:\s*"mcp"/g)?.length, 1);
+	assert.match(navigation, /resourceOnly\s*\?\s*\[\{\s*value:\s*"mcp"/);
 	assert.match(modal, /\{resourceOnly \? \(\s*<TabsContent value="mcp" forceMount/);
 });
 

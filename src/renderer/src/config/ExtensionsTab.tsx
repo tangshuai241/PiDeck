@@ -364,7 +364,7 @@ export function ExtensionsTab(props: {
 						    浏览器随即把 .config-content 的 scrollTop 夹到 0，用户每次操作都要从头滚回原区间，
 						    聚焦的开关按钮也会随行卸载而失焦（与 ModelsTab 的 silent 回读同一类问题）。
 						    仅当还没有任何数据可显示时才让位给加载占位；刷新中沿用旧表格，行高不变、视口与焦点都留在原处。 */}
-						<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+						<div className="overflow-hidden rounded-2xl bg-settings-surface">
 							{props.loading && visibleExtensions.length === 0 ? (
 								<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
 									<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
