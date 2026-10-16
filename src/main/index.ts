@@ -2567,7 +2567,6 @@ function registerIpc() {
 		},
 		log: cloudMemoryLog,
 	});
-	void cloudMemoryService.initialize().catch(() => undefined);
 	registerCloudMemoryIpc({ ipc: ipcMain, service: cloudMemoryService, log: cloudMemoryLog });
 
 	// 个人待办（P02）：账号与已连接凭据复用云端记忆（记忆总开关关闭不影响待办），
@@ -2586,6 +2585,12 @@ function registerIpc() {
 		},
 	});
 	registerPersonalTodoIpc({ ipc: ipcMain, service: personalTodoService, log: personalTodoLog });
+	// 云端身份装载完成后恢复一次待办队列：启动时已登录但队列里仍有离线操作时立即补发。
+	// 只调用 Service，不在这里写业务；失败静默（后续页面读取/退避仍会重试）。
+	void cloudMemoryService
+		.initialize()
+		.then(() => personalTodoService?.resumePending())
+		.catch(() => undefined);
 
 	// 阅读（P03）：只访问回环 DeepRead；密码经 safeStorage 保护，cookie 不出主进程。
 	// 按需启动：构造不探测、不扫书库（页面调用才触达），dispose 中止在飞请求。

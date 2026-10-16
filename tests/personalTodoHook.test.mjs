@@ -6,6 +6,7 @@
  * 发了什么操作」上，不做源码字符串扫描。
  */
 import assert from "node:assert/strict";
+import { afterEach } from "node:test";
 import { setImmediate as nextTask } from "node:timers/promises";
 import test from "node:test";
 import { atom, createStore } from "jotai/vanilla";
@@ -180,8 +181,32 @@ function createHost(store) {
 			for (const effect of effects) effect();
 			return result;
 		},
+		// 模拟卸载/离页：执行所有 effect 清理函数；之后不再有任何副作用。
+		unmount() {
+			for (const slot of slots) {
+				if (slot && typeof slot.cleanup === "function") slot.cleanup();
+			}
+			pendingEffects = [];
+		},
 	};
 }
+
+/** 待办 hook 现在会在页面可见期间挂一个低频刷新计时器；测试替身要能看见并收尾清理，
+ * 否则 Node 进程会因为残留 interval 不退出。 */
+const activeTimers = new Set();
+function trackedSetInterval(handler, ms) {
+	const id = setInterval(handler, ms);
+	activeTimers.add(id);
+	return id;
+}
+function trackedClearInterval(id) {
+	activeTimers.delete(id);
+	clearInterval(id);
+}
+afterEach(() => {
+	for (const id of activeTimers) clearInterval(id);
+	activeTimers.clear();
+});
 
 function harness(options = {}) {
 	const store = createStore();
@@ -189,15 +214,24 @@ function harness(options = {}) {
 	const host = createHost(store);
 	const { usePersonalTodo } = loadTsCommonJs("src/renderer/src/hooks/usePersonalTodo.ts", {
 		stubs: { react: host.react, jotai: host.jotai, "../desktopApi": { desktopApi: { personalTodo: client } } },
+		globals: { setInterval: trackedSetInterval, clearInterval: trackedClearInterval },
 	});
 	let controller = null;
 	return {
 		store,
 		client,
-		render: () => {
-			controller = host.render(() => usePersonalTodo({ client }));
+		render: (overrides = {}) => {
+			controller = host.render(() =>
+				usePersonalTodo({
+					client,
+					...(options.refreshIntervalMs === undefined ? {} : { refreshIntervalMs: options.refreshIntervalMs }),
+					...(options.foreground === undefined ? {} : { foreground: options.foreground }),
+					...overrides,
+				}),
+			);
 			return controller;
 		},
+		unmount: () => host.unmount(),
 		get controller() {
 			return controller;
 		},
@@ -205,6 +239,49 @@ function harness(options = {}) {
 }
 
 const tick = () => nextTask();
+const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function deferred() {
+	let resolve;
+	const promise = new Promise((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
+async function waitUntil(predicate, timeoutMs = 1500) {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (predicate()) return true;
+		await waitMs(5);
+	}
+	return false;
+}
+
+/** 前台信号替身：可见性由测试控制，订阅/退订可观察（离页清理断言用）。 */
+function createForeground() {
+	let visible = true;
+	const listeners = new Set();
+	return {
+		source: {
+			isVisible: () => visible,
+			subscribe: (listener) => {
+				listeners.add(listener);
+				return () => listeners.delete(listener);
+			},
+		},
+		setVisible: (next) => {
+			visible = next;
+			for (const listener of [...listeners]) listener();
+		},
+		listenerCount: () => listeners.size,
+	};
+}
+
+/** 注入 list 实现时的完整契约回执（默认与 createClient 内建一致）。 */
+function listResult(items, overrides = {}) {
+	return { ok: true, scope: overrides.scope ?? SCOPE_A, items, nextCursor: overrides.nextCursor ?? null, source: overrides.source ?? "cloud", fetchedAt: overrides.fetchedAt ?? "2026-10-14T06:00:00Z", summary: SUMMARY, write: WRITE };
+}
 
 test("行内修改只提交选中的字段与打开时版本，不先建立详情草稿", async () => {
 	const target = view("inline");
@@ -596,4 +673,114 @@ test("身份迁移保留 dirty 草稿：目标键已有更新输入时不覆盖�
 	assert.equal(kept["s::todo_srv_1"].fields.title, "更新的输入", "目标键已有更新输入时不得被旧 dirty 覆盖");
 	assert.equal("s::todo_local_1" in kept, false);
 	assert.deepEqual(plain(drafts.remapPersonalTodoDrafts({}, "s", [{ from: "a", to: "b" }])), {}, "没有草稿时原样返回");
+});
+
+test("可见期间低频刷新：隐藏停止、回到前台立即刷新并重启计时", async () => {
+	const foreground = createForeground();
+	const h = harness({ items: [view("a")], refreshIntervalMs: 20, foreground: foreground.source });
+	h.render();
+	await tick();
+	const opened = h.client.calls.list.length;
+	assert.equal(opened, 1, "打开页面只取一次");
+	assert.equal(await waitUntil(() => h.client.calls.list.length >= opened + 2), true, "可见时应按间隔刷新");
+	foreground.setVisible(false);
+	await tick();
+	const hidden = h.client.calls.list.length;
+	await waitMs(80);
+	assert.equal(h.client.calls.list.length, hidden, "隐藏后不得继续刷新");
+	foreground.setVisible(true);
+	await tick();
+	assert.equal(h.client.calls.list.length, hidden + 1, "回到前台立即刷新一次");
+	assert.equal(await waitUntil(() => h.client.calls.list.length >= hidden + 3), true, "回到前台后计时器继续");
+	h.unmount();
+});
+
+test("离页清理：卸载后退订前台信号且不再刷新", async () => {
+	const foreground = createForeground();
+	const h = harness({ items: [view("a")], refreshIntervalMs: 20, foreground: foreground.source });
+	h.render();
+	await tick();
+	assert.equal(foreground.listenerCount(), 1, "页面挂载期间订阅前台信号");
+	h.unmount();
+	assert.equal(foreground.listenerCount(), 0, "离页必须退订");
+	const settled = h.client.calls.list.length;
+	await waitMs(80);
+	assert.equal(h.client.calls.list.length, settled, "卸载后不得再刷新");
+});
+
+test("周期刷新不覆盖未确认本地行与编辑草稿", async () => {
+	const confirmed = item("a", { note: "" });
+	const pending = view("a", {
+		confirmed,
+		item: item("a", { note: "本地未确认" }),
+		sync: { phase: "pending", pendingCount: 1, lastError: null, cloudRevision: null, lastAttemptAt: null },
+	});
+	const staleSnapshot = view("a", { confirmed, item: confirmed });
+	const foreground = createForeground();
+	const h = harness({ items: [pending], refreshIntervalMs: 20, foreground: foreground.source });
+	h.render();
+	await tick();
+	h.client.setListImpl(async () => listResult([staleSnapshot]));
+	assert.equal(await waitUntil(() => h.client.calls.list.length >= 2), true, "周期刷新应发出");
+	await tick();
+	await tick();
+	let todo = h.render();
+	const row = todo.items.find((entry) => entry.item.id === "a");
+	assert.equal(row.item.note, "本地未确认", "同一 confirmed 版本的旧快照不得把未确认行回滚");
+	todo.select("a");
+	todo = h.render();
+	todo.beginEdit(row);
+	todo = h.render();
+	todo.updateDraftField("note", "正在编辑");
+	todo = h.render();
+	assert.equal(await waitUntil(() => h.client.calls.list.length >= 3), true);
+	await tick();
+	todo = h.render();
+	assert.equal(todo.draft.fields.note, "正在编辑", "刷新不得清掉编辑缓冲");
+	assert.equal(todo.draft.baseRevision, "rev-a", "刷新不得改写草稿的 CAS 基准");
+	h.unmount();
+});
+
+test("刷新去重与迟到响应：在飞请求不叠加，旧响应不覆盖较新结果", async () => {
+	const foreground = createForeground();
+	const gate = deferred();
+	let call = 0;
+	const h = harness({ items: [view("a", { item: item("a", { title: "初始" }) })], refreshIntervalMs: 20, foreground: foreground.source });
+	h.client.setListImpl(async () => {
+		call += 1;
+		if (call === 2) return gate.promise;
+		return listResult([view("a", { item: item("a", { title: "较新" }) })]);
+	});
+	h.render();
+	await tick();
+	assert.equal(await waitUntil(() => h.client.calls.list.length >= 2), true, "周期刷新应发出");
+	const inFlight = h.client.calls.list.length;
+	await waitMs(60);
+	assert.equal(h.client.calls.list.length, inFlight, "在飞请求期间不得叠加刷新");
+	h.render().refresh();
+	h.render();
+	await tick();
+	await tick();
+	let todo = h.render();
+	assert.equal(todo.items[0].item.title, "较新", "手动刷新立刻拿到较新结果");
+	gate.resolve(listResult([view("a", { item: item("a", { title: "旧的迟到响应" }) })]));
+	await tick();
+	await tick();
+	todo = h.render();
+	assert.equal(todo.items[0].item.title, "较新", "迟到的旧响应不得覆盖较新结果");
+	h.unmount();
+});
+
+test("周期刷新失败如实记录，恢复后自动清除", async () => {
+	const foreground = createForeground();
+	let failing = false;
+	const h = harness({ items: [view("a")], refreshIntervalMs: 20, foreground: foreground.source });
+	h.client.setListImpl(async () => (failing ? { ok: false, error: { code: "offline", message: "云端不可达" } } : listResult([view("a")])));
+	h.render();
+	await tick();
+	failing = true;
+	assert.equal(await waitUntil(() => h.render().pageError?.code === "offline"), true, "刷新失败要如实记录");
+	failing = false;
+	assert.equal(await waitUntil(() => h.render().pageError === null), true, "刷新恢复后自动清除错误");
+	h.unmount();
 });

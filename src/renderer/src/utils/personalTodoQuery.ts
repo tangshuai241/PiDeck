@@ -98,6 +98,58 @@ export type PersonalTodoListMerge = {
 };
 
 /**
+ * 本地是否仍有未确认工作：提交中、同步阶段非 synced、或该事项存在编辑缓冲。
+ * 刷新合并据此保护本地行不被旧快照回滚；挂在 reactive 状态上的读取由调用方用 ref 提供。
+ */
+export function personalTodoViewHasLocalWork(view: PersonalTodoView, isPending: (itemId: string) => boolean, hasDraft: (itemId: string) => boolean): boolean {
+	if (isPending(view.item.id)) return true;
+	if (view.sync.phase !== "synced") return true;
+	return hasDraft(view.item.id);
+}
+
+/**
+ * 未确认本地行是否应挡住这次快照：防止提交与刷新竞态把草稿行回滚到旧确认版本。
+ *
+ * 规则：本地有未确认工作（提交中/待确认/冲突/失败/编辑草稿）且响应声称已同步时，
+ * 只有响应带来「不同的云端确认版本」才说明它确实更新；revision 相同的一律视为旧快照。
+ * 响应自身也未同步（主进程知道有排队操作）时以响应为准：它已叠加主进程队列，信息不少于本地。
+ */
+function keepLocalSnapshot(local: PersonalTodoView, incoming: PersonalTodoView, hasLocalWork: (view: PersonalTodoView) => boolean): boolean {
+	if (!hasLocalWork(local)) return false;
+	if (incoming.sync.phase !== "synced") return false;
+	return (incoming.confirmed?.revision ?? null) === (local.confirmed?.revision ?? null);
+}
+
+/**
+ * 替换式加载的合并：响应是这一次查询的权威结果（筛选/排序按它），但同一事项的未确认本地行
+ * 不能被同一 confirmed 版本的旧快照回滚。响应里没有的本地行仍按替换语义移除（重新筛选时
+ * 不应保留不匹配的行）——需要「一条也不丢」的场景走周期刷新合并。
+ */
+export function replacePersonalTodoListPage(current: readonly PersonalTodoView[], incoming: readonly PersonalTodoView[], hasLocalWork: (view: PersonalTodoView) => boolean): PersonalTodoView[] {
+	const localById = new Map(current.map((view) => [view.item.id, view]));
+	return incoming.map((view) => {
+		const local = localById.get(view.item.id);
+		return local && keepLocalSnapshot(local, view, hasLocalWork) ? local : view;
+	});
+}
+
+/**
+ * 周期刷新的合并：只合并（同 id 覆盖/新增追加），不删除本地已有行——v1 没有删除，窗口只增不减；
+ * 快照早于本地提交时也不得让刚入队的行消失。同 id 仍按 keepLocalSnapshot 保护未确认本地行。
+ */
+export function mergePersonalTodoRefreshPage(current: readonly PersonalTodoView[], incoming: readonly PersonalTodoView[], hasLocalWork: (view: PersonalTodoView) => boolean): PersonalTodoView[] {
+	const incomingById = new Map(incoming.map((view) => [view.item.id, view]));
+	const merged = current.map((view) => {
+		const next = incomingById.get(view.item.id);
+		if (!next) return view;
+		return keepLocalSnapshot(view, next, hasLocalWork) ? view : next;
+	});
+	const seen = new Set(merged.map((view) => view.item.id));
+	for (const view of incoming) if (!seen.has(view.item.id)) merged.push(view);
+	return merged;
+}
+
+/**
  * 应用 `onChanged` 推送：`reload=true` 时列表内容不可信，只回传标记；否则按 id 覆盖/追加。
  * 推送条目可能已经不在当前筛选结果里（例如筛选 status=open 时某条被改成 done），这里不据此删除行：
  * 删除的唯一依据是重新取列表，避免界面凭一条推送就丢掉用户正在看的行。

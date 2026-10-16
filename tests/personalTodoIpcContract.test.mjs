@@ -48,6 +48,13 @@ test("main 薄装配：注册 IPC、退出清理、账号变化联动，不把�
 	assert.doesNotMatch(mainSource, /personal-todo:get-status/, "通道不得在 main/index.ts 里写字符串字面量");
 });
 
+test("启动恢复装配：云端身份装载完成后恢复待办队列，且发送语义仍在 Service", () => {
+	assert.match(mainSource, /cloudMemoryService\s*\.\s*initialize\(\)/, "main 缺云端记忆初始化");
+	assert.match(mainSource, /personalTodoService\?\.resumePending\(\)/, "初始化完成后未恢复待传队列");
+	assert.match(serviceSource, /async\s+resumePending\s*\(/, "Service 缺 resumePending");
+	assert.match(serviceSource, /runner\.kick\(\)/, "resumePending 必须复用既有发送器");
+});
+
 test("desktopApi.personalTodo 暴露约定方法，且不暴露账号/凭据入参", () => {
 	const block = preloadSource.slice(preloadSource.indexOf("\tpersonalTodo: {"), preloadSource.indexOf("\t},\n};\n\nfunction subscribe"));
 	assert.ok(block.length > 0, "preload 未定义 personalTodo API");

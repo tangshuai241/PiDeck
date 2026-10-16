@@ -106,6 +106,22 @@ export class PersonalTodoService {
 		void this.ensureRuntime().catch(() => undefined);
 	}
 
+	/**
+	 * 启动/回到前台时恢复待传队列：装载「当前身份」运行时后，有可发操作就立即尝试一次。
+	 *
+	 * 与普通 kick 的区别：重置退避并强制尝试，用于「条件已变化」的显式信号（应用启动、
+	 * 云端身份装载完成、页面回到前台、网络恢复）。发送仍走 runner 的既有链路：同 request_id、
+	 * 未知先查回执、CAS 冲突留稿，不新造第二条发送路径；身份不是当前账号时 ensureRuntime
+	 * 装载的是当前账号运行时，旧账号队列留在旧目录不会被发出。
+	 */
+	async resumePending(): Promise<void> {
+		const runtime = await this.ensureRuntime();
+		if (!runtime || this.disposed) return;
+		if (!hasQueuedOperations(runtime.outbox.operations)) return;
+		this.runner.resetBackoff();
+		this.runner.kick();
+	}
+
 	/** 退出清理：停定时器并让在飞结果作废（不阻塞退出）。 */
 	dispose(): void {
 		this.disposed = true;
@@ -125,6 +141,14 @@ export class PersonalTodoService {
 	async list(query: PersonalTodoQuery): Promise<PersonalTodoListResult> {
 		const runtime = await this.ensureRuntime();
 		if (!runtime) return { ok: false, error: notConnectedError() };
+		const result = await this.buildListResult(runtime, query);
+		// 页面读取是「用户正在看」的信号：有排队操作时立即试发一次（不重置退避、不新增定时器）。
+		// 放在结果快照之后：本次响应仍如实反映调用时的队列状态，不因唤醒而抖动。
+		this.wakeQueue(runtime);
+		return result;
+	}
+
+	private async buildListResult(runtime: PersonalTodoAccountRuntime, query: PersonalTodoQuery): Promise<PersonalTodoListResult> {
 		const order = query.order ?? "created_desc";
 		const limit = clampLimit(query.limit, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT);
 		if (query.cursor) {
@@ -324,6 +348,12 @@ export class PersonalTodoService {
 	}
 
 	// ── 云端读取 ────────────────────────────────────────────────────────────────
+
+	/** 有可发操作时立即尝试一次（不重置退避）：发送语义由 runner 收口，幂等由在飞 pumping 保证。 */
+	private wakeQueue(runtime: PersonalTodoAccountRuntime): void {
+		if (this.disposed || !hasQueuedOperations(runtime.outbox.operations)) return;
+		this.runner.kick();
+	}
 
 	private async acquire(runtime: PersonalTodoAccountRuntime): Promise<PersonalTodoAcquireResult> {
 		const current = this.deps.auth.getSnapshot();

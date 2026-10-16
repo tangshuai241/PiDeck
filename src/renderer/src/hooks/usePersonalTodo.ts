@@ -17,7 +17,8 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { desktopApi } from "../desktopApi";
 import type { PersonalTodoErrorInfo, PersonalTodoListSource, PersonalTodoOperation, PersonalTodoQuery, PersonalTodoStatus, PersonalTodoStatusView, PersonalTodoSyncSummary, PersonalTodoView, PersonalTodoWriteStatus } from "../../../shared/types/personalTodo";
 import { personalTodoDraftsAtom, personalTodoItemNoticeAtom, personalTodoListAtom, personalTodoPageErrorAtom, personalTodoPendingIdsAtom, personalTodoQueryAtom, personalTodoSelectedIdAtom, personalTodoStatusAtom, personalTodoSummaryAtom, personalTodoWriteAtom } from "../atoms/personal-todo-atoms";
-import { clearPersonalTodoFilters, isPersonalTodoResultStale, isPersonalTodoScopeMismatch, mergePersonalTodoListPage, normalizePersonalTodoQuery, personalTodoDraftKey, personalTodoScopeKey } from "../utils/personalTodoQuery";
+import { clearPersonalTodoFilters, isPersonalTodoResultStale, isPersonalTodoScopeMismatch, mergePersonalTodoListPage, mergePersonalTodoRefreshPage, normalizePersonalTodoQuery, personalTodoDraftKey, personalTodoScopeKey, personalTodoViewHasLocalWork, replacePersonalTodoListPage } from "../utils/personalTodoQuery";
+import { startPersonalTodoForegroundRefresh, type PersonalTodoForegroundSource } from "../utils/personalTodoForeground";
 import { createPersonalTodoDraftForm, createPersonalTodoRequestId, personalTodoDraftIsDirty, personalTodoDraftPatch, personalTodoDraftValidationKey, remapPersonalTodoDrafts, upsertPersonalTodoView, type PersonalTodoDraftFields, type PersonalTodoDraftForm } from "../utils/personalTodoDraft";
 import { personalTodoErrorKey, resolvePersonalTodoStatusDecision } from "../utils/personalTodoState";
 import type { TranslationKey } from "../i18n";
@@ -27,7 +28,13 @@ import { createPersonalTodoInlineActions, type PersonalTodoInlinePatch } from ".
 export type PersonalTodoClient = typeof desktopApi.personalTodo;
 
 /** 注入点：生产用 desktopApi.personalTodo，逻辑测试注入契约替身。 */
-export type PersonalTodoOptions = { client?: PersonalTodoClient | null };
+export type PersonalTodoOptions = {
+	client?: PersonalTodoClient | null;
+	/** 页面可见时的低频刷新间隔（毫秒）；缺省用 `PERSONAL_TODO_FOREGROUND_REFRESH_MS`。测试注入小值。 */
+	refreshIntervalMs?: number;
+	/** 前台信号源（可见性/焦点/网络恢复）；缺省读 document/window，测试注入替身。 */
+	foreground?: PersonalTodoForegroundSource;
+};
 
 /** 运行期兜底：preload 尚未集成时该成员不存在，页面显示「服务版本不支持」而不是白屏崩溃。 */
 function resolveClient(options: PersonalTodoOptions): PersonalTodoClient | null {
@@ -109,6 +116,16 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 	const epochRef = useRef(0);
 	/** 组件是否仍然挂载（卸载后不写状态）。 */
 	const aliveRef = useRef(true);
+	/** 在飞列表请求数：周期刷新不叠加请求（用户显式刷新不受限）。 */
+	const listInFlightRef = useRef(0);
+	/** 当前查询快照：计时器/前台信号读它，避免搜索输入每次变化都重建计时器。 */
+	const queryRef = useRef(query);
+	queryRef.current = query;
+	/** 未确认工作判定的输入用 ref 保持 load 引用稳定（避免计时器随编辑反复重启）。 */
+	const pendingIdsRef = useRef(pendingIds);
+	pendingIdsRef.current = pendingIds;
+	const draftsRef = useRef(drafts);
+	draftsRef.current = drafts;
 	const inlineActiveIdsRef = useRef(new Set<string>());
 	const [reloadToken, setReloadToken] = useState(0);
 
@@ -120,13 +137,35 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 
 	const setItems = useCallback((updater: (items: PersonalTodoView[]) => PersonalTodoView[]) => setList((current) => ({ ...current, items: updater(current.items) })), [setList]);
 
+	/** 本地是否仍有未确认工作：提交中、未同步阶段、或存在编辑缓冲。刷新合并据此保护本地行。 */
+	const hasLocalWork = useCallback(
+		(view: PersonalTodoView) =>
+			personalTodoViewHasLocalWork(
+				view,
+				(itemId) => pendingIdsRef.current.includes(itemId),
+				(itemId) => Boolean(draftsRef.current[personalTodoDraftKey(scopeKeyRef.current, itemId)]),
+			),
+		[],
+	);
+
+	/**
+	 * 已退场的本地 id（local → server 身份替换）一律不得再进入列表：迟到列表响应、迟到推送与
+	 * 周期合并共用这一条过滤，避免只堵一个入口。按 id 精确过滤（来自主进程已证实的 identityRemap），
+	 * 不做标题去重，也不影响同名但不同 id 的真实事项。
+	 */
+	const dropRetiredViews = useCallback((views: readonly PersonalTodoView[]): PersonalTodoView[] => {
+		const retired = retiredIdsRef.current;
+		if (retired.size === 0) return views.slice();
+		return views.filter((view) => !retired.has(view.item.id));
+	}, []);
+
 	/** 合并单条视图：已被身份替换掉的老 id 直接丢弃（迟到的本地占位不得复活）。 */
 	const mergeView = useCallback(
 		(view: PersonalTodoView) => {
 			if (retiredIdsRef.current.has(view.item.id)) return;
-			setItems((items) => upsertPersonalTodoView(items, view));
+			setItems((items) => upsertPersonalTodoView(dropRetiredViews(items), view));
 		},
-		[setItems],
+		[dropRetiredViews, setItems],
 	);
 
 	/** 读取状态：只在这一页打开时执行；失败不阻塞列表（列表可能仍能读缓存）。 */
@@ -164,56 +203,67 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 		})();
 	}, [setList, setPageError, setSelectedId, setStatus, setSummary, setWrite]);
 
-	/** 读取列表：打开页面、筛选变化、显式刷新走同一条路径。 */
+	/** 读取列表：打开页面/筛选变化/显式刷新（replace）、加载更多（append）、周期与回到前台（refresh）走同一条路径。 */
 	const load = useCallback(
-		(targetQuery: PersonalTodoQuery, mode: "replace" | "append") => {
+		(targetQuery: PersonalTodoQuery, mode: "replace" | "append" | "refresh") => {
 			const active = clientRef.current;
 			if (!active) return;
 			const epoch = ++epochRef.current;
 			const requestScopeKey = scopeKeyRef.current;
 			const isCurrent = () => aliveRef.current && epoch === epochRef.current;
 
-			setList((current) => (mode === "replace" ? { ...current, loading: true, error: null } : { ...current, loadingMore: true }));
+			// 周期刷新是静默的：不亮整页 loading；结果仍按同一套作用域/序号守卫丢弃过期响应。
+			setList((current) => (mode === "refresh" ? current : mode === "replace" ? { ...current, loading: true, error: null } : { ...current, loadingMore: true }));
+			listInFlightRef.current += 1;
 
 			void (async () => {
-				let result: Awaited<ReturnType<PersonalTodoClient["list"]>>;
 				try {
-					result = await active.list(targetQuery);
-				} catch {
+					let result: Awaited<ReturnType<PersonalTodoClient["list"]>>;
+					try {
+						result = await active.list(targetQuery);
+					} catch {
+						if (!isCurrent()) return;
+						const error = { code: "internalError" as const, message: "待办列表读取失败" };
+						setList((current) => (mode === "refresh" ? { ...current, error } : { ...current, loading: false, loadingMore: false, error }));
+						setPageError(error);
+						return;
+					}
 					if (!isCurrent()) return;
-					const error = { code: "internalError" as const, message: "待办列表读取失败" };
-					setList((current) => ({ ...current, loading: false, loadingMore: false, error }));
-					setPageError(error);
-					return;
+					if (!result.ok) {
+						setList((current) => (mode === "refresh" ? { ...current, error: result.error } : { ...current, loading: false, loadingMore: false, error: result.error }));
+						setPageError(result.error);
+						return;
+					}
+					// 账号作用域已变化 → 结果属于上一个会话（登录/登出/换账号），整体丢弃
+					if (isPersonalTodoResultStale(requestScopeKey, scopeKeyRef.current)) return;
+					const resultScopeKey = personalTodoScopeKey(result.scope);
+					// 首次加载在 getStatus 之前发出（请求键为空）：按结果自带的作用域与当前作用域比对
+					if (isPersonalTodoScopeMismatch(resultScopeKey, scopeKeyRef.current)) return;
+					if (resultScopeKey) scopeKeyRef.current = resultScopeKey;
+					// 已退场 id 不进列表：迟到的旧快照可能仍带着被替换掉的本地占位（R1）。
+					const incoming = dropRetiredViews(result.items);
+					setList((current) => {
+						const existing = dropRetiredViews(current.items);
+						return {
+							items: mode === "append" ? mergePersonalTodoListPage(existing, incoming) : mode === "refresh" ? mergePersonalTodoRefreshPage(existing, incoming, hasLocalWork) : replacePersonalTodoListPage(existing, incoming, hasLocalWork),
+							nextCursor: mode === "append" ? result.nextCursor : mode === "refresh" ? current.nextCursor : result.nextCursor,
+							source: result.source,
+							fetchedAt: result.fetchedAt,
+							loadedPages: mode === "append" ? current.loadedPages + 1 : mode === "refresh" ? current.loadedPages : 1,
+							loading: false,
+							loadingMore: false,
+							error: null,
+						};
+					});
+					setSummary(result.summary);
+					setWrite(result.write);
+					setPageError(null);
+				} finally {
+					listInFlightRef.current = Math.max(0, listInFlightRef.current - 1);
 				}
-				if (!isCurrent()) return;
-				if (!result.ok) {
-					setList((current) => ({ ...current, loading: false, loadingMore: false, error: result.error }));
-					setPageError(result.error);
-					return;
-				}
-				// 账号作用域已变化 → 结果属于上一个会话（登录/登出/换账号），整体丢弃
-				if (isPersonalTodoResultStale(requestScopeKey, scopeKeyRef.current)) return;
-				const resultScopeKey = personalTodoScopeKey(result.scope);
-				// 首次加载在 getStatus 之前发出（请求键为空）：按结果自带的作用域与当前作用域比对
-				if (isPersonalTodoScopeMismatch(resultScopeKey, scopeKeyRef.current)) return;
-				if (resultScopeKey) scopeKeyRef.current = resultScopeKey;
-				setList((current) => ({
-					items: mode === "append" ? mergePersonalTodoListPage(current.items, result.items) : [...result.items],
-					nextCursor: result.nextCursor,
-					source: result.source,
-					fetchedAt: result.fetchedAt,
-					loadedPages: mode === "append" ? current.loadedPages + 1 : 1,
-					loading: false,
-					loadingMore: false,
-					error: null,
-				}));
-				setSummary(result.summary);
-				setWrite(result.write);
-				setPageError(null);
 			})();
 		},
-		[setList, setPageError, setSummary, setWrite],
+		[setList, setPageError, setSummary, setWrite, hasLocalWork, dropRetiredViews],
 	);
 
 	// 打开页面 / 筛选变化 / 刷新：状态 + 第一页
@@ -223,6 +273,19 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 		loadStatus();
 		load(query, "replace");
 	}, [client, load, loadStatus, query, queryKey, reloadToken]);
+
+	// 待办页可见期间的低频刷新：云端 v1 没有事件流，只有轮询能感知别处（微信/另一台电脑）改动；
+	// 主进程读到列表后会做一次带去重的后台刷新，变化经 personal-todo:changed 推送回来。
+	// 计时器/隐藏停表/回前台立即刷新/在飞不叠加的策略在 personalTodoForeground 里，可离开 React 单测。
+	useEffect(() => {
+		if (!client) return;
+		return startPersonalTodoForegroundRefresh({
+			source: options.foreground,
+			intervalMs: options.refreshIntervalMs,
+			isBusy: () => listInFlightRef.current > 0,
+			refresh: () => load(queryRef.current, "refresh"),
+		});
+	}, [client, options.foreground, options.refreshIntervalMs, load]);
 
 	// 订阅推送：reload 由主进程显式要求（超出上界或身份变化），其余按条目合并
 	useEffect(() => {
@@ -260,13 +323,14 @@ export function usePersonalTodo(options: PersonalTodoOptions = {}): PersonalTodo
 				if (event.reload) setReloadToken((token) => token + 1);
 				return;
 			}
-			setItems((items) => event.items.reduce((next, view) => upsertPersonalTodoView(next, view), items));
+			// 推送与列表共用同一条退场过滤：迟到的推送（快照早于身份替换）同样不得复活旧占位。
+			setItems((items) => dropRetiredViews(event.items).reduce((next, view) => upsertPersonalTodoView(next, view), dropRetiredViews(items)));
 		});
 		return () => {
 			aliveRef.current = false;
 			unsubscribe();
 		};
-	}, [client, setItems, setSelectedId, setSummary, setWrite]);
+	}, [client, setItems, setSelectedId, setSummary, setWrite, dropRetiredViews]);
 
 	const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 	const loadMore = useCallback(() => {
