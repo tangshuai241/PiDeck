@@ -170,3 +170,156 @@ test("列表窗口状态：未加载不等于不存在（本页无匹配但还�
 	assert.equal(state.resolvePersonalTodoWindowState({ itemCount: 0, hasMore: true, loading: false }), "empty-window", "还有下一页时不能当成没有匹配");
 	assert.equal(state.resolvePersonalTodoWindowState({ itemCount: 0, hasMore: false, loading: false }), "empty");
 });
+
+test("替换合并：未确认本地行不被同一 confirmed 版本的旧快照回滚，新确认版本可覆盖", () => {
+	const confirmed = view("a");
+	const hasLocalWork = (entry) => entry.sync.phase !== "synced";
+	const localPending = { item: { ...confirmed.item, note: "本地未确认" }, confirmed: { ...confirmed.item }, draft: null, sync: { phase: "pending", pendingCount: 1, lastError: null, cloudRevision: null, lastAttemptAt: null }, linkedTasks: [] };
+	const staleIncoming = { item: { ...confirmed.item }, confirmed: { ...confirmed.item }, draft: null, sync: { phase: "synced", pendingCount: 0, lastError: null, cloudRevision: null, lastAttemptAt: null }, linkedTasks: [] };
+	const merged = query.replacePersonalTodoListPage([localPending], [staleIncoming], hasLocalWork);
+	assert.equal(merged.length, 1);
+	assert.equal(merged[0].item.note, "本地未确认", "同一 confirmed revision 的旧快照不得回滚未确认行");
+	const newerConfirmed = { ...confirmed.item, revision: "rev-a2", note: "云端已改" };
+	const newerIncoming = { item: newerConfirmed, confirmed: newerConfirmed, draft: null, sync: staleIncoming.sync, linkedTasks: [] };
+	const replaced = query.replacePersonalTodoListPage([localPending], [newerIncoming], hasLocalWork);
+	assert.equal(replaced[0].item.note, "云端已改", "带来新确认版本的响应必须覆盖本地");
+});
+
+test("刷新合并：不删除已加载行，未确认本地行优先，新行追加在末尾", () => {
+	const incomingA = view("a", { item: { title: "云端新标题" } });
+	const localB = view("b");
+	localB.sync = { phase: "pending", pendingCount: 1, lastError: null, cloudRevision: null, lastAttemptAt: null };
+	localB.item = { ...localB.item, note: "本地未确认" };
+	const localOnly = view("d");
+	const hasLocalWork = (entry) => entry.sync.phase !== "synced";
+	const merged = query.mergePersonalTodoRefreshPage([view("a"), localB, localOnly], [incomingA, view("b"), view("c")], hasLocalWork);
+	assert.deepEqual(plain(merged.map((entry) => entry.item.id)), ["a", "b", "d", "c"]);
+	assert.equal(merged[0].item.title, "云端新标题", "已确认行接受云端新值");
+	assert.equal(merged[1].item.note, "本地未确认", "响应里的旧快照不得回滚未确认行");
+	assert.equal(merged[2].item.id, "d", "刷新快照没有的行不删除");
+	assert.equal(merged[3].item.id, "c", "新行追加在末尾");
+});
+
+test("浏览器前台适配器：订阅可见性/焦点/网络恢复，退订注销全部监听", () => {
+	const listeners = new Map();
+	const fakeWindow = {
+		addEventListener: (type, listener) => {
+			listeners.set(type, listener);
+		},
+		removeEventListener: (type, listener) => {
+			if (listeners.get(type) === listener) listeners.delete(type);
+		},
+	};
+	const fakeDocument = { hidden: false };
+	const foreground = loadTsCommonJs("src/renderer/src/utils/personalTodoForeground.ts", { globals: { window: fakeWindow, document: fakeDocument } });
+	const source = foreground.createBrowserPersonalTodoForeground();
+	assert.equal(source.isVisible(), true);
+	fakeDocument.hidden = true;
+	assert.equal(source.isVisible(), false);
+	let calls = 0;
+	const unsubscribe = source.subscribe(() => {
+		calls += 1;
+	});
+	for (const type of ["visibilitychange", "focus", "online"]) {
+		assert.equal(typeof listeners.get(type), "function", `未订阅 ${type}`);
+		listeners.get(type)();
+	}
+	assert.equal(calls, 3);
+	unsubscribe();
+	assert.equal(listeners.size, 0, "退订必须注销全部监听");
+});
+
+test("本地未确认工作判定：提交中/未同步/存在编辑缓冲都算，三者皆无才不算", () => {
+	const synced = view("a");
+	assert.equal(
+		query.personalTodoViewHasLocalWork(
+			synced,
+			() => false,
+			() => false,
+		),
+		false,
+	);
+	assert.equal(
+		query.personalTodoViewHasLocalWork(
+			synced,
+			(id) => id === "a",
+			() => false,
+		),
+		true,
+		"提交中算未确认",
+	);
+	assert.equal(
+		query.personalTodoViewHasLocalWork(
+			synced,
+			() => false,
+			(id) => id === "a",
+		),
+		true,
+		"有编辑缓冲也算",
+	);
+	const pending = view("b");
+	pending.sync = { phase: "pending", pendingCount: 1, lastError: null, cloudRevision: null, lastAttemptAt: null };
+	assert.equal(
+		query.personalTodoViewHasLocalWork(
+			pending,
+			() => false,
+			() => false,
+		),
+		true,
+		"未同步阶段算未确认",
+	);
+});
+
+test("前台刷新生命周期：按间隔触发、在飞跳过、隐藏停表、回前台立即刷新、停止幂等", () => {
+	const timers = new Map();
+	let timerSeq = 0;
+	const foreground = loadTsCommonJs("src/renderer/src/utils/personalTodoForeground.ts", {
+		globals: {
+			setInterval: (handler, ms) => {
+				const id = ++timerSeq;
+				timers.set(id, { handler, ms });
+				return id;
+			},
+			clearInterval: (id) => {
+				timers.delete(id);
+			},
+		},
+	});
+	const listeners = new Set();
+	let visible = true;
+	let refreshes = 0;
+	let busy = false;
+	const stop = foreground.startPersonalTodoForegroundRefresh({
+		source: {
+			isVisible: () => visible,
+			subscribe: (listener) => {
+				listeners.add(listener);
+				return () => listeners.delete(listener);
+			},
+		},
+		intervalMs: 1000,
+		isBusy: () => busy,
+		refresh: () => {
+			refreshes += 1;
+		},
+	});
+	assert.equal(timers.size, 1, "可见时应有且只有一个计时器");
+	for (const entry of timers.values()) entry.handler();
+	assert.equal(refreshes, 1, "间隔到点触发刷新");
+	busy = true;
+	for (const entry of timers.values()) entry.handler();
+	assert.equal(refreshes, 1, "在飞请求期间不叠加刷新");
+	busy = false;
+	visible = false;
+	for (const listener of [...listeners]) listener();
+	assert.equal(timers.size, 0, "隐藏立即停表");
+	visible = true;
+	for (const listener of [...listeners]) listener();
+	assert.equal(refreshes, 2, "回到前台立即刷新一次");
+	assert.equal(timers.size, 1, "回到前台重启计时器");
+	stop();
+	assert.equal(timers.size, 0, "停止清计时器");
+	assert.equal(listeners.size, 0, "停止退订");
+	stop();
+	assert.equal(timers.size, 0, "停止幂等");
+});

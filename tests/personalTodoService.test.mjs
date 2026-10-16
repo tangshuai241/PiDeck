@@ -118,7 +118,7 @@ function createHarness(script, options = {}) {
 	};
 	// 允许注入真实 transport（wire 级回归需要真实解析路径）；默认用脚本化假 transport
 	const transport = options.transport ?? scriptedTransport;
-	let identity = options.identity ?? { origin: "https://cloud.example", account: "admin", cloudInstanceId: "inst1", configEpoch: 1 };
+	let identity = "identity" in options ? options.identity : { origin: "https://cloud.example", account: "admin", cloudInstanceId: "inst1", configEpoch: 1 };
 	let idSeq = 0;
 	const events = [];
 	const service = new PersonalTodoService({
@@ -938,4 +938,155 @@ test("离线 create 链走真实 IPC 校验：空 expectedRevision 受理，但�
 		false,
 		"本地 id 不外发",
 	);
+});
+
+test("启动恢复：resumePending 装载当前身份并补发离线队列，复用同一 request_id 与 client_ref", async (t) => {
+	const first = createHarness({ list: () => okList([]), mutate: () => offlineFailure() });
+	t.after(() => rmSync(first.dir, { recursive: true, force: true }));
+	const submitted = await first.service.submit({ operation: { kind: "create", title: "启动待补发" } });
+	assert.equal(submitted.ok, true);
+	assert.equal(await waitFor(() => first.readOutbox().operations[0]?.phase === "unknown"), true, "离线发送后保留 unknown");
+	const queued = first.readOutbox().operations[0];
+	assert.equal(queued.requestId, submitted.requestId);
+	first.service.dispose();
+
+	const sent = [];
+	const second = createHarness(
+		{
+			list: () => okList([]),
+			receipt: () => failure("cloudRejected", { wireCode: "REQUEST_NOT_FOUND", httpStatus: 404 }),
+			mutate: (request) => {
+				sent.push(request.body);
+				const item = wireItem({ id: "todo_resumed", title: "启动待补发", root_revision: "r-resume" });
+				return okMutate(item, item, { kind: "create", id: "todo_resumed" });
+			},
+		},
+		{ userDataDir: first.dir },
+	);
+	t.after(() => second.dispose());
+	await second.service.resumePending();
+	assert.equal(await waitFor(() => sent.length === 1), true, "启动恢复必须补发");
+	assert.equal(await waitFor(() => second.readLedger().entries.length === 1), true, "确认后写入台账");
+	assert.equal(second.readOutbox().operations.length, 0, "确认后队列清空");
+	assert.equal(sent[0].request_id, queued.requestId, "补发必须复用原 request_id");
+	assert.equal(sent[0].client_ref, queued.clientRef, "补发必须复用原 client_ref");
+	assert.equal(second.readLedger().entries.length, 1);
+	assert.equal(second.readCache().items[0].id, "todo_resumed");
+});
+
+test("启动竞态：身份未就绪时 resumePending 不发送也不报错，身份就绪后只发当前账号队列", async (t) => {
+	const first = createHarness({ list: () => okList([]), mutate: () => offlineFailure() });
+	t.after(() => rmSync(first.dir, { recursive: true, force: true }));
+	await first.service.submit({ operation: { kind: "create", title: "等身份" } });
+	assert.equal(await waitFor(() => first.readOutbox().operations[0]?.phase === "unknown"), true);
+	first.service.dispose();
+
+	const sent = [];
+	const second = createHarness(
+		{
+			list: () => okList([]),
+			receipt: () => failure("cloudRejected", { wireCode: "REQUEST_NOT_FOUND", httpStatus: 404 }),
+			mutate: (request) => {
+				sent.push(request.body);
+				const item = wireItem({ id: "todo_after_identity", title: "等身份", root_revision: "r-id" });
+				return okMutate(item, item, { kind: "create", id: "todo_after_identity" });
+			},
+		},
+		{ userDataDir: first.dir, identity: null },
+	);
+	t.after(() => second.dispose());
+	await second.service.resumePending();
+	assert.equal(sent.length, 0, "身份未就绪不得发送");
+	assert.equal((await second.service.getStatus()).ok, false, "未连接时状态如实返回 notConnected");
+	second.setIdentity({ origin: "https://cloud.example", account: "admin", cloudInstanceId: "inst1", configEpoch: 2 });
+	await second.service.resumePending();
+	assert.equal(await waitFor(() => sent.length === 1), true, "身份就绪后补发当前账号队列");
+	assert.equal(await waitFor(() => second.readLedger().entries.length === 1), true, "确认后写入台账");
+});
+
+test("身份隔离：resumePending 不会把旧账号队列发到新账号，旧队列原样留在旧目录", async (t) => {
+	const accountA = { origin: "https://cloud.example", account: "admin", cloudInstanceId: "inst1", configEpoch: 1 };
+	const accountB = { origin: "https://cloud.example", account: "other", cloudInstanceId: "inst1", configEpoch: 2 };
+	const first = createHarness({ list: () => okList([]), mutate: () => offlineFailure() }, { identity: accountA });
+	t.after(() => rmSync(first.dir, { recursive: true, force: true }));
+	await first.service.submit({ operation: { kind: "create", title: "A 的离线事项" } });
+	assert.equal(await waitFor(() => first.readOutbox(accountA).operations[0]?.phase === "unknown"), true);
+	first.service.dispose();
+
+	const sent = [];
+	const second = createHarness(
+		{
+			list: () => okList([]),
+			mutate: (request) => {
+				sent.push(request.body);
+				return offlineFailure();
+			},
+		},
+		{ userDataDir: first.dir, identity: accountB },
+	);
+	t.after(() => second.dispose());
+	await second.service.resumePending();
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(sent.length, 0, "B 身份不得触发 A 的队列");
+	assert.equal(second.readOutbox(accountA).operations.length, 1, "A 的队列必须原样保留");
+	assert.equal(second.readOutbox(accountB).operations.length, 0);
+});
+
+test("重复触发：并发 resumePending 只发一次，队列清空后不再发", async (t) => {
+	const first = createHarness({ list: () => okList([]), mutate: () => offlineFailure() });
+	t.after(() => rmSync(first.dir, { recursive: true, force: true }));
+	const submitted = await first.service.submit({ operation: { kind: "create", title: "只发一次" } });
+	assert.equal(await waitFor(() => first.readOutbox().operations[0]?.phase === "unknown"), true);
+	const queued = first.readOutbox().operations[0];
+	assert.equal(queued.requestId, submitted.requestId);
+	first.service.dispose();
+
+	const gate = deferred();
+	let sent = 0;
+	const second = createHarness(
+		{
+			list: () => okList([]),
+			receipt: () => failure("cloudRejected", { wireCode: "REQUEST_NOT_FOUND", httpStatus: 404 }),
+			mutate: async () => {
+				sent += 1;
+				await gate.promise;
+				const item = wireItem({ id: "todo_once", title: "只发一次", root_revision: "r-once" });
+				return okMutate(item, item, { kind: "create", id: "todo_once" });
+			},
+		},
+		{ userDataDir: first.dir },
+	);
+	t.after(() => second.dispose());
+	await Promise.all([second.service.resumePending(), second.service.resumePending()]);
+	assert.equal(await waitFor(() => sent === 1), true, "并发恢复只允许一个在飞发送");
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(sent, 1, "重复触发不得产生第二次发送");
+	gate.resolve();
+	assert.equal(await waitFor(() => second.readLedger().entries.length === 1), true, "确认后写入台账");
+	assert.equal(second.readOutbox().operations.length, 0);
+	await second.service.resumePending();
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(sent, 1, "队列清空后恢复不得再发");
+});
+
+test("页面读取唤起待传队列：list 让 unknown 操作立即重试，不新造 request_id", async (t) => {
+	let online = false;
+	const harness = createHarness({
+		list: () => okList([]),
+		receipt: () => failure("cloudRejected", { wireCode: "REQUEST_NOT_FOUND", httpStatus: 404 }),
+		mutate: (request) => {
+			if (!online) return offlineFailure();
+			const item = wireItem({ id: "todo_wake", title: "网络恢复", root_revision: "r-wake" });
+			return okMutate(item, item, { kind: "create", id: "todo_wake" });
+		},
+	});
+	t.after(() => harness.dispose());
+	const submitted = await harness.service.submit({ operation: { kind: "create", title: "网络恢复" } });
+	assert.equal(await waitFor(() => harness.readOutbox().operations[0]?.phase === "unknown"), true);
+	const attemptsBefore = harness.calls.mutate.length;
+	online = true;
+	await harness.service.list({});
+	assert.equal(await waitFor(() => harness.calls.mutate.length === attemptsBefore + 1), true, "页面读取应唤起待传队列");
+	assert.equal(await waitFor(() => harness.readLedger().entries.length === 1), true, "确认后写入台账");
+	assert.equal(harness.calls.mutate.at(-1).body.request_id, submitted.requestId, "唤起不得新造 request_id");
 });
