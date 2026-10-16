@@ -30,13 +30,6 @@ export * from "./types/modelSpecs";
 export * from "./types/fetchedModel";
 export * from "./types/trajectory";
 export * from "./types/todo";
-export * from "./types/dshPlugin";
-export * from "./types/dshLlm";
-export * from "./types/dshRuntime";
-export * from "./types/dshHome";
-export * from "./types/dshRuntimeManifest";
-export * from "./types/dshRunnerNode";
-export * from "./types/dshRunnerNodeRelease";
 export * from "./types/piRuntimeNode";
 export * from "./types/providerMigration";
 

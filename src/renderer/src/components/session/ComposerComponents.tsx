@@ -1,7 +1,7 @@
 import { isActiveAgentBackend } from "../../../../shared/activeAgentBackends";
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
-import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, composerModesHiddenAtom } from "../../atoms";
+import { imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, composerModesHiddenAtom } from "../../atoms";
 import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
@@ -21,10 +21,10 @@ import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import type { VideoGenConfigFile } from "../../../../shared/videoGenConfig";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
-import { DshLogo, PiLogo } from "./SessionSourceBadge";
+import { PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
-import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
+import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
@@ -142,17 +142,14 @@ export function ExtensionWidgetCard(props: {
 	);
 }
 
-/** 输入框底栏的后端选择下拉（pi / dsh / 生图）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
+/** 输入框底栏的后端选择下拉（pi / 生图 / 生视频）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
  * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。
- * 用户在设置里隐藏了 DSH / 生图模块时不列对应选项；但当前草稿已选中该后端时仍保留，
- * 否则 Select 的当前值在列表里没有对应项，用户也无法看清自己选了什么。 */
+ * 用户在设置里隐藏了生图/生视频模块时不列对应选项；但当前草稿已选中该后端时仍保留。 */
 
 export function ComposerBackendPicker(props: { backend: AgentBackend; disabled?: boolean; onChangeBackend: (backend: AgentBackend) => void }) {
-	const dshHidden = useAtomValue(dshModuleHiddenAtom);
 	const imageGenHidden = useAtomValue(imageGenModuleHiddenAtom);
 	const videoGenHidden = useAtomValue(videoGenModuleHiddenAtom);
 
-	const showDsh = !dshHidden || props.backend === "dsh";
 	const showImageGen = !imageGenHidden || props.backend === "imagegen";
 	const showVideoGen = !videoGenHidden || props.backend === "videogen";
 	return (
@@ -172,9 +169,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; disabled?:
 				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
 				    否则 logo 与 chevron 并排（justify-between）→ 图标偏左不居中、
 				    16px chevron 与 14px logo 混排导致上下不齐。 */}
-				{props.backend === "dsh" ? (
-					<DshLogo className="size-[15px] shrink-0" />
-				) : props.backend === "imagegen" ? (
+				{props.backend === "imagegen" ? (
 					<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
 				) : props.backend === "videogen" ? (
 					<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
@@ -189,12 +184,6 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; disabled?:
 					<PiLogo className="size-3.5 shrink-0" />
 					{t("sessionSource.pi")}
 				</SelectItem>
-				{showDsh ? (
-					<SelectItem value="dsh">
-						<DshLogo className="size-3.5 shrink-0" />
-						{t("sessionBackend.dsh")}
-					</SelectItem>
-				) : null}
 				{showVideoGen ? (
 					<SelectItem value="videogen">
 						<Clapperboard className="size-3.5 shrink-0 text-muted-foreground" />
@@ -361,16 +350,12 @@ export function ComposerBottomBar(props: {
 	// 引导页（无 record）模型目录：后端各自的目录都要加载，才能对各自的点选做存在性
 	// 校验（pi 读 models.json 列表，DSH 读 host catalog）。目录命中主进程全局缓存
 	//（模型选择器同源），通常不会额外 fork pi。
-	const isDsh = props.backend === "dsh";
 	const needsWelcomeCatalog = !props.record;
 	const { models: welcomeCatalogModels, report: welcomeCatalogReport } = useBackendModelCatalog({
 		sessionId: props.sessionId,
-		backend: isDsh ? "dsh" : "pi",
 		enabled: needsWelcomeCatalog,
 	});
-	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
-	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 model 去校验 DSH 目录（必然「失效」）。
-	const welcomeModel = needsWelcomeCatalog ? (isDsh ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model) : undefined;
+	const welcomeModel = needsWelcomeCatalog ? readWelcomeModelPreference()?.model : undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
 	// 删除不可逆，走保守判定：只有「一次成功的完整加载」才具备判死资格。
 	// 本组件不传 projectId → 目录恒为全局范围，与全局偏好的作用域一致。
@@ -384,17 +369,16 @@ export function ComposerBottomBar(props: {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
 		if (clearWelcomePreference) {
 			try {
-				localStorage.removeItem(isDsh ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY);
+				localStorage.removeItem(WELCOME_MODEL_KEY);
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [clearWelcomePreference, isDsh]);
+	}, [clearWelcomePreference]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
 	// 引导页（无 record）默认模型展示：与各后端创建时的真实套用同序（点选 > 默认）。
 	// 规则收拢到 resolveGuideDisplayModel，与 ComposerPickerHost 共用一份，避免两侧各自演化。
 	const guideDefaultModel = resolveGuideDisplayModel({
-		isDsh,
 		welcomeModel: effectiveWelcomeModel,
 		defaultModel: props.defaultModel,
 	});
@@ -403,8 +387,6 @@ export function ComposerBottomBar(props: {
 		record: props.record?.model,
 		fallback: guideDefaultModel,
 	});
-	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
-	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isVideoGenMode = props.composerAgentMode === "videogen";
@@ -468,9 +450,7 @@ export function ComposerBottomBar(props: {
 							aria-label={t("session.backendLockedHint")}
 							onClick={() => showNotice(t("session.backendLockedNotice"), 5000)}
 						>
-							{props.backend === "dsh" ? (
-								<DshLogo className="size-[15px] shrink-0" />
-							) : props.backend === "imagegen" ? (
+							{props.backend === "imagegen" ? (
 								<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
 							) : props.backend === "videogen" ? (
 								<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
@@ -717,7 +697,6 @@ const MODEL_LIST_FAILURE_REASON_TEXT: Record<ModelListFailReason, TranslationKey
 	"config-invalid": "app.modelListFailConfigInvalid",
 	"cli-failed": "app.modelListFailCliFailed",
 	"waf-blocked": "app.modelListFailWafBlocked",
-	"dsh-host-stopped": "app.modelListFailDshStopped",
 	empty: "app.modelListFailEmpty",
 };
 
@@ -789,7 +768,7 @@ export function ModelPicker(props: {
 	recentProviders?: string[];
 	/** 供应商自定义顺序（模型页排序结果，后端对应数组由宿主选择）：列出的严格按此展示且不再被最近使用覆盖。 */
 	providerOrder?: string[];
-	/** 用户隐藏的供应商 key 列表（Pi 模型页眼睛开关）；Pi 后端按 provider 过滤，DSH 不生效。 */
+	/** 用户隐藏的供应商 key 列表（模型页眼睛开关）。 */
 	hiddenProviders?: string[];
 	/** 用户隐藏的模型列表（格式："provider/modelId"）；Pi 后端过滤单个模型。 */
 	hiddenModels?: string[];
@@ -798,10 +777,9 @@ export function ModelPicker(props: {
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId ? `${props.current.provider}/${props.current.modelId}` : undefined;
 	const favoritesSet = new Set(props.favoriteModels ?? []);
-	// 隐藏开关：Pi 后端按 provider 与 model 过滤（DSH 的 route 名不参与隐藏列表）；
-	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商与隐藏模型不出现在主选择区。
-	const hiddenProviderSet = new Set(props.backend === "dsh" ? [] : (props.hiddenProviders ?? []));
-	const hiddenModelSet = new Set(props.backend === "dsh" ? [] : (props.hiddenModels ?? []));
+	// 隐藏开关：按 provider 与 model 过滤；过滤后收藏/分组/搜索都基于可见模型。
+	const hiddenProviderSet = new Set(props.hiddenProviders ?? []);
+	const hiddenModelSet = new Set(props.hiddenModels ?? []);
 	const visibleModels: AvailableModel[] = [];
 	const hiddenModelList: AvailableModel[] = [];
 	for (const model of props.models) {
@@ -849,12 +827,11 @@ export function ModelPicker(props: {
 
 	// 供应商用量行（cc-switch inline）：打开选择器时批量 TTL 去重查询，供应商标题行右侧
 	// 显示彩色剩余/百分比；查不到（未启用/不支持/失败/查询中）的分组保持干净不渲染。
-	// backend 按会话后端透传（DSH 目录的 provider 是 route 名，配置/凭据在 dsh 链路）。
 	const batchRefreshUsage = useProviderUsageBatchRefresh();
 	const providerKey = sortedProviders.join("\n");
 	useEffect(() => {
-		if (providerKey) batchRefreshUsage(providerKey.split("\n"), props.backend);
-	}, [providerKey, batchRefreshUsage, props.backend]);
+		if (providerKey) batchRefreshUsage(providerKey.split("\n"));
+	}, [providerKey, batchRefreshUsage]);
 
 	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;

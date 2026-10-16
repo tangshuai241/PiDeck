@@ -209,35 +209,6 @@ test("final line without trailing newline is still parsed", async () => {
 	}
 });
 
-test("custom parseLine is used instead of the pi-tracker array parser", async () => {
-	const dir = await makeDir();
-	try {
-		const path = join(dir, "records.jsonl");
-		const row = JSON.stringify({
-			time: 1710000000000,
-			sessionId: "dsh-1",
-			provider: "deepseek",
-			model: "flash",
-			inputTokens: 10,
-			outputTokens: 5,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			usd: 0.001,
-			priced: true,
-		});
-		await writeFile(path, row + "\n");
-		const { parseDshBillLogLine } = await import("../src/main/usageStats/dshBillLogParser.ts");
-		const custom = new UsageLogReader({ parseLine: parseDshBillLogLine });
-		const result = await custom.readIncremental(path, null);
-		assert.equal(result.newRecords.length, 1);
-		assert.equal(result.newRecords[0].sid, "dsh-1");
-		assert.equal(result.newRecords[0].model, "deepseek/flash");
-		assert.equal(result.skippedLines, 0);
-	} finally {
-		await rm(dir, { recursive: true, force: true });
-	}
-});
-
 test("byte cap truncates oversized full rescan and flags truncated", async () => {
 	const dir = await makeDir();
 	try {

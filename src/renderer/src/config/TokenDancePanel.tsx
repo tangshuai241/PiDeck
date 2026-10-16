@@ -26,7 +26,7 @@ import type { ModelItem } from "./configTypes";
 /** 安装结果（主进程回执的精简视图，父级只需这两个值刷新 UI）。 */
 export type TokendanceInstallOutcome = {
 	modelCount: number;
-	dshSaved: boolean;
+	piSaved: boolean;
 };
 
 /** 卡片 props（配置页装配层注入，保持本组件无全局状态依赖）。 */
@@ -120,7 +120,7 @@ function TokenDanceSetupDialog(props: {
 				return false;
 			}
 			showNotice(t("config.tokendance.installSuccess", { count: result.modelCount }), 4000);
-			onDone({ modelCount: result.modelCount, dshSaved: result.dshSaved });
+			onDone({ modelCount: result.modelCount, piSaved: result.piSaved });
 			close();
 			return true;
 		},

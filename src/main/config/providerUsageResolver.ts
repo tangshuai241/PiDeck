@@ -4,7 +4,7 @@
  * 会话运行时 provider 名可能是两种来源：
  * - pi 侧：models.json 的 provider key（如 "oc"，含 baseUrl/apiKey/api/models）；
  * - DSH 侧：网关/route 名（如 "opencode-go"）。DSH 端点以 settings.yaml 的
- *   profile 优先（见 ConfigManager.resolveUsageEndpoint 的 dsh 分支），本解析是
+ *   本解析是
  *   其兜底——pi 精确命中后回退 pi-ai catalog 默认端点。
  *
  * 同一网关可能同时存在两套名字（models.json 的 "oc" 与 catalog 的
@@ -14,7 +14,7 @@
  * TokenDance 等外部供应商由用户确认写入 models.json 后走第一段命中，无需特判。
  */
 import type { PiAuthFile, PiModelsFile, PiProviderConfig } from "./ConfigManager";
-import { resolvePiApiKey } from "./providerMigration";
+import { resolvePiApiKey } from "./providerCompat";
 
 /** 从 PiProviderConfig 的安全抽出 headers（index signature 实为 unknown，需收窄为对象）。 */
 export function safeProviderHeaders(config: PiProviderConfig | undefined): Record<string, string> | undefined {

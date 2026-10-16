@@ -39,10 +39,10 @@ export type ChatMessage = {
 
 /**
  * 历史暂时不可读的结构化原因（渲染层据此出专态 UI，而不是让 IPC 抛裸错误）。
- * 目前只有一种：DSH host 被用户手动停止——此时 host 不会自动拉起，历史读取
+ * 目前只有一种：DSH 运行能力已移除，旧 DSH 会话的历史无法在应用内解析
  * 必然失败且不会自愈，「启动 host」是唯一恢复路径。
  */
-export type SessionHistoryUnavailableReason = "dsh-host-stopped";
+export type SessionHistoryUnavailableReason = "dsh-runtime-removed";
 
 /** A bounded historical timeline slice. `nextBefore` is the exclusive index for an older page. */
 export type SessionMessagePage = {
@@ -169,7 +169,7 @@ export type SessionSummary = {
 	messageCount: number;
 	/** 会话来源：pi 原生、Codex 导入、Claude 导入、OpenCode 导入 */
 	source?: SessionSource;
-	/** 运行时后端；缺省 "pi"。草稿/历史行用来区分 DSH 会话。 */
+	/** 运行时后端；缺省 "pi"。历史行可能保留已移除后端（dsh/acp）用于只读兼容。 */
 	backend?: import("./agent").AgentBackend;
 	/** 标记此会话文件来自 WSL，rename/delete/copy 等操作需走 wsl.exe */
 	wsl?: boolean;
@@ -178,25 +178,13 @@ export type SessionSummary = {
 	thinkingLevel?: string;
 	/** 会话里存在生图消息（openai-images / imageGen 标记）；侧栏显示图片角标便于查找 */
 	hasImageGen?: boolean;
-	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
+	/** 旧 DSH 会话身份（只读兼容；运行能力已移除）。 */
 	dshSessionId?: string;
 	codexSessionId?: string;
 	codexThreadSource?: "user" | "subagent";
 	codexParentThreadId?: string;
 	codexAgentRole?: string;
 	codexAgentNickname?: string;
-};
-
-/**
- * DSH 归档区会话清单行（G14）：host 目录已移入 .pideck-archive 的会话。
- * title 可选：归档 manifest 自 G14+ 起携带，旧归档缺省时由主进程
- * 从归档目录的会话日志前缀只读折叠补全；仍缺省则 UI 回退 cwd 末段/id。
- */
-export type ArchivedDshSession = {
-	dshSessionId: string;
-	cwd: string;
-	archivedAt: number;
-	title?: string;
 };
 
 /**
@@ -220,7 +208,7 @@ export type SessionRecord = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
-	/** 运行时后端（pi/dsh）；缺省 "pi"，旧 catalog 数据无需迁移。 */
+	/** 运行时后端（pi；历史行可能保留 dsh/acp 标签）；缺省 "pi"，旧 catalog 数据无需迁移。 */
 	backend?: import("./agent").AgentBackend;
 	filePath?: string;
 	wslDistro?: string;
@@ -242,16 +230,16 @@ export type SessionRecord = {
 	status: "draft" | "active";
 	model?: SessionModelPreference;
 	thinkingLevel?: string;
-	/** DSH 权限预设（read-only / workspace-write / danger-full-access）；
+	/** 旧 DSH 权限预设（read-only / workspace-write / danger-full-access；只读兼容）；
 	 *  草稿期预选，激活时经 /permission 命令应用到 host 会话。 */
 	permissionPreset?: string;
 	/**
-	 * DSH agent 预设（会话「模式」：standard/code/minimal/cordis 或用户预设）。
+	 * 旧 DSH agent 预设（会话「模式」；只读兼容）。
 	 * 草稿期预选，激活新建 host 会话时随 sessions.create 应用（host 持久化到会话 header）；
 	 * attach 已存在会话时从 host 读回实际值回写。会话创建后固定，不可运行时切换。
 	 */
 	agentPreset?: string;
-	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
+	/** 旧 DSH 会话身份（只读兼容；运行能力已移除）。 */
 	dshSessionId?: string;
 	/** ACP 会话身份（agent 侧 sessionId）；backend=acp 的会话用来重启后 session/load 恢复。 */
 	acpSessionId?: string;
@@ -279,7 +267,7 @@ export type CreateSessionDraftInput = {
 	thinkingLevel?: string;
 	/** 运行时后端；缺省 "pi"（旧调用方无需改动）。 */
 	backend?: import("./agent").AgentBackend;
-	/** DSH agent 预设（会话「模式」）草稿期预选；激活时随 sessions.create 应用。 */
+	/** 会话「模式」预设（旧 DSH 兼容字段，不再写入）。 */
 	agentPreset?: string;
 	/** ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI，激活时随 create 应用。 */
 	acpToolId?: string;
@@ -336,9 +324,9 @@ export type UpdateSessionRecordInput = {
 	/** null = 清空（切后端时丢掉另一套目录里的模型）。 */
 	model?: SessionModelPreference | null;
 	thinkingLevel?: string | null;
-	/** DSH 会话权限预设（草稿期预选；激活会话经 /permission 命令应用后回写同步）。 */
+	/** 会话权限预设（旧 DSH 兼容字段，不再写入）。 */
 	permissionPreset?: string | null;
-	/** DSH agent 预设（会话「模式」）：仅草稿期可改；激活后由 host 会话 header 回写为准。 */
+	/** 会话「模式」预设（旧 DSH 兼容字段，不再写入）。 */
 	agentPreset?: string | null;
 	/** 后端（pi/dsh）：仅草稿期可变更；会话激活（active/有 runtime）后锁定——pi 会话文件
 	 *  与 DSH session log 格式不同，中途切换会导致消息同步渲染不可靠。 */

@@ -138,8 +138,6 @@ export const ipcChannels = {
 	sessionsListFileChanges: "sessions:list-file-changes",
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
-	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
-	sessionsCatalogReadDshSystemPrompt: "sessions:catalog-read-dsh-system-prompt",
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",
 	/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」入口）。 */
 	sessionsCatalogReadMessageFullText: "sessions:catalog-read-message-full-text",
@@ -182,42 +180,14 @@ export const ipcChannels = {
 	sessionsRuntimePrepareResend: "sessions:runtime-prepare-resend",
 	sessionsRuntimeSetModel: "sessions:runtime-set-model",
 	sessionsRuntimeSetThinking: "sessions:runtime-set-thinking",
-	sessionsRuntimeSetPermission: "sessions:runtime-set-permission",
 	sessionsRuntimeClone: "sessions:runtime-clone",
 	// 从用户消息 fork 新会话（pi /fork）；与 clone 不同，会按 entryId 裁剪会话树
 	sessionsRuntimeGetForkMessages: "sessions:runtime-get-fork-messages",
 	sessionsRuntimeFork: "sessions:runtime-fork",
 	/** 渲染层汇报当前聚焦的会话（用于非聚焦会话 Ask 请求的桌面通知） */
 	sessionsSetFocusedSession: "sessions:set-focused-session",
-	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
+	/** 旧 DSH 会话文件路径推导（只读兼容；渲染层右键「复制会话文件路径」，不启动任何运行时）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
-	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
-	sessionsSearchDsh: "sessions:search-dsh",
-	/** DSH 创建目标（goal.create；objective 必填，maxGoalRounds 可选）。 */
-	dshCreateGoal: "dsh:create-goal",
-	/** DSH 目标操作（goal.pause/resume/complete/clear，按当前 goal CAS ref）。 */
-	dshGoalAction: "dsh:goal-action",
-	/** DSH 子代理列表（subagent.list 直接子代目录）。 */
-	dshListSubagents: "dsh:list-subagents",
-	dshCancelQueuedMessage: "dsh:cancel-queued-message",
-	/** DSH 子代理历史（subagent.history 只读 transcript）。 */
-	dshSubagentHistory: "dsh:subagent-history",
-	/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
-	dshListSkills: "dsh:list-skills",
-	/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
-	dshListOrphans: "dsh:list-orphans",
-	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话，跨工具导入用）。 */
-	dshListForeignSessions: "dsh:list-foreign-sessions",
-	/** DSH 外部会话导入（把 host 会话映射进 catalog，侧栏可见可加载）。 */
-	dshImportForeignSession: "dsh:import-foreign-session",
-	/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入；返回导入/跳过统计）。 */
-	dshSyncForeignSessions: "dsh:sync-foreign-sessions",
-	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
-	dshListArchived: "dsh:list-archived",
-	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
-	dshUnarchive: "dsh:unarchive",
-	/** DSH 永久删除已归档会话：归档目录移入系统回收站（区别于恢复）。 */
-	dshDeleteArchived: "dsh:delete-archived",
 	/** 定时任务与自动化 */
 	automationGetSnapshot: "automation:get-snapshot",
 	automationCreateTask: "automation:create-task",
@@ -230,88 +200,6 @@ export const ipcChannels = {
 	automationUpdateSettings: "automation:update-settings",
 	automationPreviewCron: "automation:preview-cron",
 	automationChanged: "automation:changed",
-	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
-	dshPluginList: "dsh:plugin-list",
-	/** DSH 静态 Loader 条目清单（origin 标注 user/builtin 来源）。 */
-	dshPluginStaticList: "dsh:plugin-static-list",
-	/** DSH 用户自装静态插件卸载（从 $DSH_HOME/cordis.patch.yml 移除行，可选回收插件目录）。 */
-	dshPluginUserUninstall: "dsh:plugin-user-uninstall",
-	/** DSH 插件市场搜索（官方目录 + npm 双源，单源失败降级 warnings）。 */
-	dshPluginMarketSearch: "dsh:plugin-market-search",
-	/** DSH 用户自装静态插件安装（npm pack → 受管目录 → 用户补丁层行；幂等）。 */
-	dshPluginUserInstall: "dsh:plugin-user-install",
-	/** DSH 用户补丁层清单（安装服务视角：受管目录内的行补全包名/版本/uiOnly）。 */
-	dshPluginUserList: "dsh:plugin-user-list",
-	/** DSH 动态插件安装（define：定义源码包，不运行）。 */
-	dshPluginInstall: "dsh:plugin-install",
-	/** DSH 动态插件运行（面板手势，requestId=null 无需审批）。 */
-	dshPluginRun: "dsh:plugin-run",
-	/** DSH 动态插件停止（保留全部包版本）。 */
-	dshPluginStop: "dsh:plugin-stop",
-	/** DSH 动态插件卸载（undefine：删除插件与全部包版本）。 */
-	dshPluginUninstall: "dsh:plugin-uninstall",
-	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
-	dshListModels: "dsh:list-models",
-	/** DSH 配置页模型发现（llm.discoverModels；只返回候选，不写配置）。 */
-	dshDiscoverModels: "dsh:discover-models",
-	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */
-	dshListProviders: "dsh:list-providers",
-	/** DSH 配置管理页状态（host 启动状态 + 目录 + providers + 模型目录）。 */
-	dshGetStatus: "dsh:get-status",
-	/** 探测本机 CUI node（DSH 沙箱 runner）；传草稿路径可在保存前预览。 */
-	dshDetectRunnerNode: "dsh:detect-runner-node",
-	/** 打开文件选择框挑 node.exe；取消返回 null。 */
-	dshChooseRunnerNode: "dsh:choose-runner-node",
-	/** 从 AtomGit/GitHub latest 应用 Release 下载 Node 24 到 userData（不改 PATH、不进安装包）。 */
-	dshInstallRunnerNode: "dsh:install-runner-node",
-	/** DSH settings.describe（脱敏 namespace 视图 + schema，渲染配置表单）。 */
-	dshConfigDescribe: "dsh:config-describe",
-	/** DSH settings.update（合并 patch 到 namespace 用户层）。 */
-	dshConfigUpdate: "dsh:config-update",
-	/** DSH settings.mutate（路径级操作，支持 unset 删除 provider/字段；update 无法删除）。 */
-	dshConfigMutate: "dsh:config-mutate",
-	/** DSH settings.openDocument（把配置文档交给平台打开）。 */
-	dshOpenDocument: "dsh:open-document",
-	/** DSH host 重启（DSH_HOME 切换后立即生效；有活跃 DSH 会话时拒绝）。 */
-	dshRestartHost: "dsh:restart-host",
-	/**
-	 * DSH host 手动停止（用户不想让它运行）：停所有 DSH 会话 + dispose host，
-	 * 并把 dshManualStopped 持久化为 true——之后所有自动拉起路径都被门控，
-	 * 只有 dshStartHost（显式启动）才能恢复。
-	 */
-	dshStopHost: "dsh:stop-host",
-	/** DSH host 显式启动：清除手动停止标记并 boot；返回 host 是否就绪。 */
-	dshStartHost: "dsh:start-host",
-	/** DSH credentials.describe（configured/source/writable，无值）。 */
-	dshCredentialDescribe: "dsh:credential-describe",
-	/** DSH credentials.set（写凭证值）。 */
-	dshCredentialSet: "dsh:credential-set",
-	/** DSH credentials.unset（删凭证）。 */
-	dshCredentialUnset: "dsh:credential-unset",
-	/** DSH 凭证明文读取（仅渲染层点「眼睛」时按 ref 取一次；DSH RPC 不回显值，由主进程读凭证文件/环境）。 */
-	dshCredentialRead: "dsh:credential-read",
-	/** DSH agent 预设目录（agentPreset.list：id/trust/isDefault/名称/描述）。 */
-	dshAgentPresets: "dsh:agent-presets",
-	/** DSH 部署默认模型选择（settings.yaml agent-default-model：provider/model/reasoningEffort）。 */
-	dshDefaultModel: "dsh:default-model",
-	/** DSH runtime 安装态查询（AgentRuntimeProvider 阶段 1：installed/notInstalled/broken 门控 UI）。 */
-	dshRuntimeGetStatus: "dsh-runtime:get-status",
-	/** DSH runtime 安装态变更推送（阶段 2 安装/卸载/版本切换时广播，订阅式）。 */
-	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
-	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
-	dshRuntimeInstall: "dsh-runtime:install",
-	/** 从本地导入 runtime 归档（.tgz；离线 / 镜像不可达时的兜底）。只开文件选择框。 */
-	dshRuntimeInstallLocal: "dsh-runtime:install-local",
-	/**
-	 * 从本地导入「已解压」的 runtime 目录。与上一条分开：Windows 上
-	 * showOpenDialog 同时给 openFile + openDirectory 会退化成只能选目录，
-	 * .tgz 反而选不到（2026-10 用户报「本地导入选不了归档」）。
-	 */
-	dshRuntimeInstallLocalDir: "dsh-runtime:install-local-dir",
-	/** 卸载已安装的 DSH runtime。 */
-	dshRuntimeUninstall: "dsh-runtime:uninstall",
-	/** 安装进度推送（订阅式）。 */
-	dshRuntimeInstallProgress: "dsh-runtime:install-progress",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",
@@ -671,10 +559,6 @@ export const ipcChannels = {
 	/** 项目信任确认：渲染进程 → 主进程，回传用户的信任选择（trust-remember/trust-session/deny） */
 	projectsTrustResponse: "projects:trust-response",
 
-	/** 预览可互迁的单供应商（pi → DSH 或 DSH → pi）。 */
-	configPreviewProviderMigration: "config:preview-provider-migration",
-	/** 执行单供应商互迁（覆盖同名目标前由渲染层确认）。 */
-	configApplyProviderMigration: "config:apply-provider-migration",
 	configGetModels: "config:get-models",
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",

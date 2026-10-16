@@ -62,7 +62,7 @@ import {
 	deriveComposerAgentMode,
 	type PromptTemplateInfo,
 } from "../composerBehavior";
-import { applySuggestion, buildSuggestionItems, clearSuggestionTrigger, detectTrigger, DSH_COMMAND_SUGGESTIONS, fileNodeDragPayloadToRef, flattenFiles, mergeCommands, PI_FILE_NODE_DRAG_MIME, PI_FILE_PATH_DRAG_MIME, readFileNodeDragPayload, type SuggestionItem } from "../components/app/AppUtils";
+import { applySuggestion, buildSuggestionItems, clearSuggestionTrigger, detectTrigger, fileNodeDragPayloadToRef, flattenFiles, mergeCommands, PI_FILE_NODE_DRAG_MIME, PI_FILE_PATH_DRAG_MIME, readFileNodeDragPayload, type SuggestionItem } from "../components/app/AppUtils";
 import { SESSION_TAB_DRAG_MIME } from "../utils/sessionSplitEdge";
 import { mergeFileTreeChildren, resolveAtDrillDirectory, shouldLoadFullTreeForAtSearch } from "../utils/fileTreeLazy";
 import { formatFilePathRef, type ComposerChip } from "../components/session/composer/chips";
@@ -76,7 +76,7 @@ import { t } from "../i18n";
 import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeModelPreference, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
@@ -335,7 +335,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// setGuideBackendOverride("acp") 同值不触发重渲染，trigger 回显会停在旧工具；
 	// 工具 id 必须自己有 state 才能让受控 Select 刷新。
 
-	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackendOverride === "dsh");
 	const hasImageGenHistory = (messageCache?.messages ?? []).some((message) => Boolean(message.meta?.imageGen));
 	// 生视频不存在 legacy 混排（videogen 是新后端，只有它自己会写 meta.videoGen），不需要历史锁。
 	const isVideoGenBackend = record?.backend === "videogen";
@@ -349,78 +348,24 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			: isVideoGenBackend
 				? "videogen"
 				: deriveComposerAgentMode({
-						backend: isDshBackend ? "dsh" : "pi",
+						backend: "pi",
 						localMode: localMode,
 						planModeActive: runtime?.state?.planModeActive === true,
 						alignmentPhase: runtime?.state?.alignment?.phase,
 						goalPhase: runtime?.state?.goal?.phase,
 					});
-	// DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
-	// 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
-	// settings.yaml 未配 reasoningEffort 时，回退到默认模型自身的 defaultEffort
-	// （DSH 官方语义：每个模型都有 reasoning.defaultEffort）。
-	const [dshDefault, setDshDefault] = useState<
-		| {
-				provider: string;
-				model: string;
-				reasoningEffort?: string;
-				defaultEffort?: string;
-		  }
-		| undefined
-	>(undefined);
-	useEffect(() => {
-		if (!isDshBackend) {
-			// 离开 dsh 后端（切回 pi/生图）时清掉残留的 DSH 部署默认模型：
-			// 底栏 defaultModel = dshDefaultModel ?? bootstrapDefaultModel，
-			// 残留会让 pi 会话误显示 DSH 的默认模型（用户反馈「切回 pi 默认模型变了」）。
-			setDshDefault(undefined);
-			return;
-		}
-		let cancelled = false;
-		void (async () => {
-			try {
-				const next = await desktopApi.sessions.getDshDefaultModel();
-				if (!next || cancelled) {
-					if (!cancelled) setDshDefault(next);
-					return;
-				}
-				let defaultEffort = next.reasoningEffort;
-				if (!defaultEffort) {
-					try {
-						const models = await desktopApi.sessions.listDshModels();
-						const defaultModel = models.find((model) => model.provider === next.provider && model.id === next.model);
-						defaultEffort = defaultModel?.defaultEffort;
-					} catch {
-						// 目录读取失败不影响 settings.yaml 的默认模型展示。
-					}
-				}
-				if (!cancelled) setDshDefault({ ...next, defaultEffort });
-			} catch {
-				if (!cancelled) setDshDefault(undefined);
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [isDshBackend]);
 	// 引导页虚拟会话（无 record）：预取主进程解析的启动默认（与 createDraft 缺省
 	// 同一解析器 launchDefaults），让底栏/选择器在用户从未设置欢迎页偏好时也能
 	// 显示当前默认模型/思考档位。真实会话的默认值写在 record 里走原链路，
 	// 不需要这里重复解析。
-	// 后端必须取「引导页实际展示的后端」（用户显式切换优先），不能只看设置项
-	// （issue #253）：引导页切到 DSH 后若仍按 pi 解析，launchDefaults 会返回 pi 的
-	// 默认模型，底栏就显示一个 DSH 下永远不会用的模型（用户报告的
-	// 「切到 dsh 后底栏显示 pi 模型」）。按 dsh 解析时该 IPC 不返回模型（模型归属
-	// host settings），底栏自然回落到 dshDefaultModel。
-	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
+	// 经 effectiveAgentBackendAtom 取默认值（引导页点选优先于设置默认）。
 	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
-	const guidePageBackend: AgentBackend = isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
 		if (record) return;
 		let cancelled = false;
 		void desktopApi.sessions
-			.resolveLaunchDefaults({ backend: guidePageBackend })
+			.resolveLaunchDefaults()
 			.then((next) => {
 				if (!cancelled) setBootstrapDefaults(next);
 			})
@@ -431,7 +376,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			cancelled = true;
 		};
-	}, [guidePageBackend, record]);
+	}, [record]);
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	// 程序化光标请求（带归属 forValue，见 composer/types.ts 的 ComposerCaretRequest）；
 	// 编辑器只在内容同步到 forValue 的同一趟 layout pass 配对消费，过期请求会被丢弃。
@@ -542,74 +487,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// videogen 同为独立后端：会话一旦是生视频后端，不允许切回普通/计划/目标（命令语义不适用）。
 			if (record?.backend === "videogen" && nextMode !== "videogen") return;
 			if (alignment.changeMode(nextMode, mode)) return;
-			// DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
-			// 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
-			if (isDshBackend) {
-				const currentPhase = runtime?.state?.goal?.phase;
-				const agentId = runtime?.agentId;
-				if (nextMode === "plan" || (nextMode === "normal" && mode === "plan")) {
-					const command = nextMode === "plan" ? "/plan" : "/plan off";
-					void desktopApi.sessions
-						.sendPrompt({
-							sessionId,
-							requestId: crypto.randomUUID(),
-							message: command,
-						})
-						.then((result) => {
-							if (!result.accepted) {
-								showNotice(result.error ?? t("dshPlan.switchFailed"), 4000);
-							} else if (nextMode === "plan") {
-								showNotice(t("dshPlan.pendingNotice"), 3000);
-							}
-						})
-						.catch((error) => {
-							showNotice(error instanceof Error ? error.message : String(error), 4000);
-						});
-					if (nextMode === "plan") {
-						setModeAtom({ sessionId, mode: "normal" });
-						// 模式选择器互斥：进 plan 时暂停进行中的 goal，不清除。
-						if (agentId && (currentPhase === "active" || currentPhase === "blocked")) {
-							void desktopApi.sessions.runDshGoalAction(agentId, "pause").catch((error) => {
-								showNotice(error instanceof Error ? error.message : String(error), 4000);
-							});
-						}
-					}
-					return;
-				}
-				if (nextMode === "goal") {
-					if (mode === "plan") {
-						void desktopApi.sessions
-							.sendPrompt({
-								sessionId,
-								requestId: crypto.randomUUID(),
-								message: "/plan off",
-							})
-							.catch((error) => {
-								showNotice(error instanceof Error ? error.message : String(error), 4000);
-							});
-					}
-					setModeAtom({ sessionId, mode: "goal" });
-					if (agentId && (currentPhase === "paused" || currentPhase === "blocked")) {
-						void desktopApi.sessions.runDshGoalAction(agentId, "resume").catch((error) => {
-							showNotice(error instanceof Error ? error.message : String(error), 4000);
-						});
-					} else if (!currentPhase || currentPhase === "complete") {
-						showNotice(t("dshGoal.pendingNotice"), 3000);
-					}
-					return;
-				}
-				if (nextMode === "normal" && mode === "goal") {
-					setModeAtom({ sessionId, mode: "normal" });
-					if (agentId && (currentPhase === "active" || currentPhase === "blocked")) {
-						void desktopApi.sessions.runDshGoalAction(agentId, "pause").catch((error) => {
-							showNotice(error instanceof Error ? error.message : String(error), 4000);
-						});
-					}
-					return;
-				}
-			}
 			// pi：切回普通立刻发 /goal pause，不要等下一条无标记消息才停。
-			if (!isDshBackend && nextMode === "normal" && mode === "goal") {
+			if (nextMode === "normal" && mode === "goal") {
 				setModeAtom({ sessionId, mode: "normal" });
 				void desktopApi.sessions
 					.sendPrompt({
@@ -624,7 +503,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			}
 			setModeAtom({ sessionId, mode: nextMode });
 		},
-		[alignment.changeMode, hasImageGenHistory, isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom],
+		[alignment.changeMode, hasImageGenHistory, mode, sessionId, setModeAtom],
 	);
 
 	const loadTemplates = useCallback(async () => {
@@ -782,39 +661,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	}, [effectiveProjectId]);
 
 	useEffect(() => {
-		// D15：DSH 会话的命令补全优先走 live 注册表（host 侧 ctx.commands.list，
-		// 含用户/插件注册的命令）；会话未激活（无 live Agent）或桥失败时降级为
-		// 已知命令建议集（与 dsh-web 命名空间一致；slash 桥未命中会放行给模型）。
-		if (isDshBackend) {
-			const staticCommands = DSH_COMMAND_SUGGESTIONS.map((command) => ({
-				name: command.name,
-				description: t(command.descriptionKey),
-				source: command.source,
-			}));
-			const dshTarget = toSessionRuntimeTarget(sessionId, runtime);
-			if (!dshTarget) {
-				setCommands(staticCommands);
-				return;
-			}
-			let current = true;
-			void desktopApi.sessions
-				.listRuntimeCommands(dshTarget)
-				.then((result) => {
-					if (current) {
-						const live = requireSessionCommand(result).value;
-						// live 清单可能不含 help 等基础命令（部分命令仅桌面侧存在）：
-						// 与静态建议集合并去重，优先 live 描述。
-						const names = new Set(live.map((command) => command.name));
-						setCommands([...live, ...staticCommands.filter((command) => !names.has(command.name))]);
-					}
-				})
-				.catch(() => {
-					if (current) setCommands(staticCommands);
-				});
-			return () => {
-				current = false;
-			};
-		}
 		const target = toSessionRuntimeTarget(sessionId, runtime);
 		if (!target) {
 			setCommands([]);
@@ -832,12 +678,12 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [isDshBackend, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
+	}, [runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 
 	// Draft sessions have no Pi process to ask for get_commands. Discover the same local
 	// skills/prompts Pi will load; as soon as a runtime exists, its RPC list is authoritative.
 	useEffect(() => {
-		if (isDshBackend || runtime?.agentId) {
+		if (runtime?.agentId) {
 			setDraftResourceCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
 			return;
 		}
@@ -865,13 +711,13 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [effectiveProjectId, isDshBackend, runtime?.agentId, templates]);
+	}, [effectiveProjectId, runtime?.agentId, templates]);
 
 	// Issue #316：草稿会话在 standby 池里有同项目已握手进程时，只读借用其 get_commands
 	// 预览扩展注册的命令（本地技能/提示词发现覆盖不到）。拿不到预览就保持空快照，
 	// 建议列表回退上面的本地发现；runtime 建立后上面 RPC 拉取的命令表重新成为唯一来源。
 	useEffect(() => {
-		if (isDshBackend || runtime?.agentId || !effectiveProjectId) {
+		if (runtime?.agentId || !effectiveProjectId) {
 			setStandbyPreviewCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
 			return;
 		}
@@ -886,7 +732,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [effectiveProjectId, isDshBackend, runtime?.agentId]);
+	}, [effectiveProjectId, runtime?.agentId]);
 
 	useEffect(() => {
 		templateRequestGateRef.current.invalidate(templateKey);
@@ -910,7 +756,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	}, [sessionQuotes]);
 	const draftResourceCommands = draftResourceCommandsForProject(draftResourceCommandSnapshot, effectiveProjectId);
 	const standbyPreviewCommands = standbyPreviewCommandsForProject(standbyPreviewCommandSnapshot, effectiveProjectId);
-	const suggestionCommands = selectComposerSuggestionCommands(isDshBackend, Boolean(runtime?.agentId), commands, draftResourceCommands, standbyPreviewCommands);
+	const suggestionCommands = selectComposerSuggestionCommands(Boolean(runtime?.agentId), commands, draftResourceCommands, standbyPreviewCommands);
 	const suggestionItems = useMemo(() => (suggestionsOpen ? buildSuggestionItems(draft, cursor, suggestionCommands, flatFiles, projectSessions) : []), [cursor, draft, flatFiles, projectSessions, suggestionCommands, suggestionsOpen]);
 
 	// @ 引用向下钻取：随输入懒加载子目录（maxDepth 0 只拉一层，与文件抽屉同语义）。
@@ -1087,16 +933,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		prepareMessage: async (message) => {
 			const resolved = await resolveSessionReferences(message);
 			// 条上暂停后 composer 仍可能停在目标模式：发送前先 resume，否则 host 不会续轮。
-			if (isDshBackend && mode === "goal") {
-				const phase = runtime?.state?.goal?.phase;
-				if (runtime?.agentId && (phase === "paused" || phase === "blocked")) {
-					try {
-						await desktopApi.sessions.runDshGoalAction(runtime.agentId, "resume");
-					} catch (error) {
-						showNotice(error instanceof Error ? error.message : String(error), 4000);
-					}
-				}
-			}
 			return resolved;
 		},
 		onDraftMutation: markDraftMutation,
@@ -1669,8 +1505,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const enhanceTarget = resolveEnhanceTargetModel({
 		configured: enhanceModelConfig,
 		recordModel: record?.model,
-		welcomeModel: (isDshBackend ? readWelcomeDshModelPreference() : readWelcomeModelPreference())?.model,
-		fallback: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model } : bootstrapDefaults?.model,
+		welcomeModel: readWelcomeModelPreference()?.model,
+		fallback: bootstrapDefaults?.model,
 	});
 	const captureEnhanceRequest = useCallback((): PromptEnhanceRequest | null => {
 		if (!enhanceTarget) return null;
@@ -2096,7 +1932,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// DSH 由宿主把裸 /名称注册成技能命令；插入后光标落末尾，回车即可发送。
 	const insertSkillInvocation = useCallback(
 		(name: string) => {
-			const token = toSkillInvocationToken(isDshBackend ? "dsh" : "pi", name);
+			const token = toSkillInvocationToken("pi", name);
 			const next = appendSlashCommandToDraft(draft, token);
 			liveDomDraftRef.current = { sessionId, value: next };
 			setDraft(next);
@@ -2104,7 +1940,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			setPicker(null);
 			requestAnimationFrame(() => editorRef.current?.focus());
 		},
-		[draft, isDshBackend, sessionId, setDraft],
+		[draft, sessionId, setDraft],
 	);
 
 	// 「一键插入全文」：选择器条目上的插入按钮把提示词/技能正文整段塞进草稿
@@ -2163,9 +1999,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 		/** DSH 部署默认模型（settings.yaml agent-default-model）；仅 dsh 后端时展示，
 		 *  离开 dsh 时清空（否则残留值会随 defaultModel 泄漏到 pi 会话底栏）。 */
-		dshDefaultModel: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model } : undefined,
+		dshDefaultModel: undefined,
 		/** DSH 部署默认思考档位：settings.yaml 的 reasoningEffort 优先，缺省用模型自身 defaultEffort。 */
-		dshDefaultThinkingLevel: isDshBackend ? (dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort) : undefined,
+		dshDefaultThinkingLevel: undefined,
 		/** 引导页（无 record）预选默认：主进程按 pi 配置/模型目录解析（显式默认 > 切换列表 > 上次使用），展示用。
 		 *  注：该 IPC 不传 welcomeModel（偏好只存在于渲染层 localStorage），引导页点选由
 		 *  resolveGuideDisplayModel 在本值之上叠加，次序与主进程 resolveLaunchDefaultOptions 一致。 */
@@ -2271,7 +2107,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
 			 */
-			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !generatingImage && runtime?.status !== "error",
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
 			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
@@ -2340,7 +2176,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			unknownError: sendState.error,
 			acknowledgeUnknown: acknowledgeUnknownDelivery,
 			// DSH 只在 host 明确报告 routable=false 时锁住发送；undefined 代表尚未确认或目录加载失败。
-			canSend: hasContent && !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSend: hasContent && !isStarting && !generatingImage && !submittingVideo && runtime?.status !== "error",
 			generatingImage,
 		},
 		pickers: {

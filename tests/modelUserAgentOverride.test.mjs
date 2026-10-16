@@ -9,7 +9,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // providerHeaders.ts 经 ../i18n（目录 import）依赖时，裸 node --test 会报
 // ERR_UNSUPPORTED_DIR_IMPORT，因此走完整依赖图加载 helper。
-const { getModelUserAgentOverride, getProviderHeaders, setModelUserAgentOverride, setHeaderValue, pruneModelOverrides, PROVIDER_API_OPTIONS, DSH_PROVIDER_API_OPTIONS, API_TYPE_LABELS, getApiTypeDescription } = loadTsCommonJs("src/renderer/src/config/providerHeaders.ts");
+const { getModelUserAgentOverride, getProviderHeaders, setModelUserAgentOverride, setHeaderValue, pruneModelOverrides, PROVIDER_API_OPTIONS, API_TYPE_LABELS, getApiTypeDescription } = loadTsCommonJs("src/renderer/src/config/providerHeaders.ts");
 
 /**
  * API 类型下拉必须覆盖 pi 1.0.4 pi-ai 的聊天协议全集（BUILTIN_APIS 里的非 image/
@@ -34,13 +34,6 @@ test("API 类型下拉不含生图 / 分类器协议", () => {
  * DSH（llm-pi-ai 适配器）与 pi 共用 ApiTypeInput，但它的设置 schema 只注册了三种协议。
  * 若 DSH 表单沿用 pi 的十项列表，用户会选到一个写不进 DSH 配置的值。
  */
-test("DSH 表单只列 DSH 适配器注册的三种协议", () => {
-	assert.deepEqual([...DSH_PROVIDER_API_OPTIONS].sort(), ["anthropic-messages", "openai-completions", "openai-responses"].sort());
-	for (const api of DSH_PROVIDER_API_OPTIONS) {
-		assert.ok(PROVIDER_API_OPTIONS.includes(api), `DSH 协议 ${api} 应是 pi 列表的子集`);
-	}
-});
-
 test("每个下拉选项都有展示名与 i18n 描述", () => {
 	for (const api of PROVIDER_API_OPTIONS) {
 		assert.ok(API_TYPE_LABELS[api], `${api} 缺 API_TYPE_LABELS 展示名`);

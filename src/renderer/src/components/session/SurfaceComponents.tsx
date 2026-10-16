@@ -188,7 +188,7 @@ export type SessionStatusDetail = {
 	detailRows: SessionDetailRow[];
 	/** 最近一条回复的性能指标（TTFT/总耗时/tps）：与上下文累计量分开展示，避免误读为整段会话均值 */
 	replyPerfRows: SessionDetailRow[];
-	/** DSH 会话统计（host sessionStats 投影：回合/步骤、墙钟、平均首字、生成速度） */
+	/** 会话级统计行（DSH 运行能力已移除，恒为空；保留字段避免调用方大改）。 */
 	sessionStatRows: SessionDetailRow[];
 	hasDetail: boolean;
 };
@@ -198,7 +198,7 @@ export type SessionStatusDetail = {
  * 纯函数：label/value 已本地化，调用方只负责布局。
  */
 export function buildSessionStatusDetail(
-	state: Pick<AgentRuntimeState, "contextPercent" | "contextTokens" | "contextWindow" | "inputTokens" | "outputTokens" | "cacheRead" | "cacheWrite" | "cacheTotal" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "cost" | "dshSessionStats"> | undefined,
+	state: Pick<AgentRuntimeState, "contextPercent" | "contextTokens" | "contextWindow" | "inputTokens" | "outputTokens" | "cacheRead" | "cacheWrite" | "cacheTotal" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "cost"> | undefined,
 	averageCacheHit: number | undefined,
 	averageCacheHitSampleCount: number,
 	tpsMode: TpsDisplayMode = "streaming",
@@ -269,27 +269,6 @@ export function buildSessionStatusDetail(
 	if (state.cost != null) {
 		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true, hint: t("ctx.detail.costHint") });
 		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true, hint: t("ctx.detail.costCnyHint") });
-	}
-	// DSH 会话统计（host sessionStats 投影，dsh-web StatsLine 同源）：整段日志的
-	// 回合/步骤计数与墙钟汇总。与 pi 的「上次回复」性能组语义不同，独立成组展示。
-	const sessionStats = state.dshSessionStats;
-	if (sessionStats) {
-		sessionStatRows.push({
-			label: t("ctx.detail.turnsSteps"),
-			value: `${sessionStats.turns} / ${sessionStats.steps}`,
-			hint: t("ctx.detail.turnsStepsHint"),
-		});
-		if (sessionStats.llmMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs), hint: t("ctx.detail.llmDurationHint") });
-		}
-		if (sessionStats.toolMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs), hint: t("ctx.detail.toolDurationHint") });
-		}
-		if (sessionStats.ttftAvgMs != null) {
-			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs), hint: t("ctx.detail.ttftAverageHint") });
-		}
-		const throughput = buildTpsDisplay(tpsMode, sessionStats.tokensPerSecond, sessionStats.endToEndTokensPerSecond, "session");
-		sessionStatRows.push({ label: throughput.label, value: throughput.value, hint: throughput.hint });
 	}
 	return {
 		detailRows,

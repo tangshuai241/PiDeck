@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { WELCOME_MODEL_KEY, WELCOME_DSH_MODEL_KEY, WELCOME_THINKING_KEY } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts");
+const { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts");
 
 function harness({ backend = "pi", status, agentId, fail = false } = {}) {
 	const storage = new Map([
 		[WELCOME_MODEL_KEY, "pi-selection"],
-		[WELCOME_DSH_MODEL_KEY, "dsh-selection"],
 		[WELCOME_THINKING_KEY, "high"],
 	]);
 	const calls = { updates: [], upserts: [], pending: [], notices: [], applied: 0 };
@@ -15,7 +14,6 @@ function harness({ backend = "pi", status, agentId, fail = false } = {}) {
 	const state = {
 		record: status ? { id: "test-session", status, backend, model: { provider: "custom", modelId: "chosen" } } : undefined,
 		runtime: binding.current,
-		isDshSession: backend === "dsh",
 		models: [],
 		favoriteModels: [],
 		favoritesLoaded: true,
@@ -62,30 +60,27 @@ function harness({ backend = "pi", status, agentId, fail = false } = {}) {
 	return { controller, calls, storage, binding };
 }
 
-for (const backend of ["pi", "dsh"]) {
-	test(`${backend} welcome clear removes only that backend's model preference`, async () => {
-		const { controller, calls, storage } = harness({ backend });
-		assert.equal(controller.canClearModel, true);
-		await controller.clearModel();
-		assert.equal(storage.has(backend === "dsh" ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY), false);
-		assert.equal(storage.has(backend === "dsh" ? WELCOME_MODEL_KEY : WELCOME_DSH_MODEL_KEY), true);
-		assert.equal(storage.get(WELCOME_THINKING_KEY), "high");
-		assert.equal(calls.updates.length, 0);
-		assert.deepEqual(calls.pending, [undefined]);
-		assert.equal(calls.applied, 1);
-	});
+test("pi welcome clear removes the welcome model preference", async () => {
+	const { controller, calls, storage } = harness();
+	assert.equal(controller.canClearModel, true);
+	await controller.clearModel();
+	assert.equal(storage.has(WELCOME_MODEL_KEY), false);
+	assert.equal(storage.get(WELCOME_THINKING_KEY), "high");
+	assert.equal(calls.updates.length, 0);
+	assert.deepEqual(calls.pending, [undefined]);
+	assert.equal(calls.applied, 1);
+});
 
-	test(`${backend} unstarted draft clears catalog model without changing welcome defaults`, async () => {
-		const { controller, calls, storage } = harness({ backend, status: "draft" });
-		await controller.clearModel();
-		assert.equal(controller.canClearModel, true);
-		assert.equal(calls.updates[0].id, "test-session");
-		assert.equal(calls.updates[0].patch.model, null);
-		assert.equal(calls.upserts[0].model, null);
-		assert.equal(storage.size, 3);
-		assert.equal(calls.applied, 1);
-	});
-}
+test("pi unstarted draft clears catalog model without changing welcome defaults", async () => {
+	const { controller, calls, storage } = harness({ status: "draft" });
+	await controller.clearModel();
+	assert.equal(controller.canClearModel, true);
+	assert.equal(calls.updates[0].id, "test-session");
+	assert.equal(calls.updates[0].patch.model, null);
+	assert.equal(calls.upserts[0].model, null);
+	assert.equal(storage.size, 2);
+	assert.equal(calls.applied, 1);
+});
 
 test("active and newly bound runtimes cannot be cleared", async () => {
 	for (const status of ["active", "draft"]) {

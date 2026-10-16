@@ -13,12 +13,11 @@ import { t } from "../i18n";
 import { SessionCommandFailure, requireSessionCommand, sessionCommandFailureToast, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { resolveComposerLiveModel } from "../utils/modelPendingDisplay";
 import { modelKey, pickCycleModel, pickCycleThinkingLevel, resolveFavoriteCycleCandidates, type CycleDirection } from "../utils/preferenceCycle";
-import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, WELCOME_THINKING_KEY } from "../utils/chatSessionBootstrap";
+import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY } from "../utils/chatSessionBootstrap";
 
 /** 目录加载前的按键意图仍属于发起栏及绑定，不能转交随后呈现的会话/后端。 */
 type PendingCycle = {
 	kind: "model" | "thinking";
-	isDshSession: boolean;
 	isCurrent: () => boolean;
 };
 
@@ -32,8 +31,6 @@ type ModelRestartIntent = {
 };
 
 export type SessionPreferenceController = {
-	/** 会话后端（DSH 的目录/档位来自 host catalog）：选择器与循环共用 */
-	isDshSession: boolean;
 	/** 模型目录（capability cache 数据源） */
 	models: AvailableModel[];
 	report: ModelListReport | null;
@@ -120,7 +117,7 @@ export function useSessionPreferenceController(options: {
 		defaultThinkingLevel: options.defaultThinkingLevel,
 		modelThinkingLevels: options.modelThinkingLevels,
 	});
-	const { record, runtime, isDshSession, models, favoriteModels, favoritesLoaded, hiddenProviders, hiddenModels, modelPending, currentModel: resolvedLiveModel, thinkingLevels, currentThinkingLevel } = state;
+	const { record, runtime, models, favoriteModels, favoritesLoaded, hiddenProviders, hiddenModels, modelPending, currentModel: resolvedLiveModel, thinkingLevels, currentThinkingLevel } = state;
 	// 与 Tab 栏「重启」共用 App.restartActiveAgent：置 restartingAgentId，
 	// SessionView overlay（loader + 文案）才会亮。这里自己调 restartRuntime
 	// 能换进程，但不会驱动那套 UI 状态。
@@ -265,7 +262,7 @@ export function useSessionPreferenceController(options: {
 		// 直接 return（不写任何存储），点选因此完全丢失——用户表现为「切到 DSH 后模型换不了」。
 		if (!record) {
 			try {
-				localStorage.setItem(isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY, JSON.stringify(selectedModelPreference(model)));
+				localStorage.setItem(WELCOME_MODEL_KEY, JSON.stringify(selectedModelPreference(model)));
 			} catch {
 				// localStorage 不可用时静默；创建会话回退到各后端自己的默认模型
 			}
@@ -324,7 +321,7 @@ export function useSessionPreferenceController(options: {
 				if (!isCurrent()) return;
 				state.upsertSession(updated);
 			} else {
-				localStorage.removeItem(isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY);
+				localStorage.removeItem(WELCOME_MODEL_KEY);
 			}
 			state.setModelPending(undefined);
 			onApplied();
@@ -399,7 +396,6 @@ export function useSessionPreferenceController(options: {
 				models,
 				hiddenProviders,
 				hiddenModels,
-				backend: isDshSession ? "dsh" : "pi",
 			});
 			if (candidates.length === 0) {
 				showNotice(t("app.cycleModelEmpty"), 2500, "info", undefined, undefined, "preference-cycle");
@@ -416,7 +412,7 @@ export function useSessionPreferenceController(options: {
 			const target = pickCycleModel({ candidates, currentKey, direction });
 			if (target) await applyModelRef.current(target);
 		},
-		[resolvedLiveModel.provider, resolvedLiveModel.modelId, favoriteModels, models, hiddenProviders, hiddenModels, isDshSession],
+		[resolvedLiveModel.provider, resolvedLiveModel.modelId, favoriteModels, models, hiddenProviders, hiddenModels],
 	);
 
 	/**
@@ -461,7 +457,7 @@ export function useSessionPreferenceController(options: {
 		const pending = pendingCycleRef.current;
 		if (!pending) return;
 		// 先淘汰旧意图，再检查目录：换栏/换绑时立即丢弃，回来也不能复活旧按键或错误提示。
-		if (!pending.isCurrent() || pending.isDshSession !== isDshSession || store.get(currentSessionIdAtom) !== sessionId) {
+		if (!pending.isCurrent() || store.get(currentSessionIdAtom) !== sessionId) {
 			pendingCycleRef.current = null;
 			return;
 		}
@@ -476,7 +472,7 @@ export function useSessionPreferenceController(options: {
 		pendingCycleRef.current = null;
 		if (pending.kind === "model") void cycleModelRef.current("forward");
 		else void cycleThinkingRef.current("forward");
-	}, [sessionId, runtime?.agentId, runtime?.runtimeGeneration, isDshSession, store, favoritesLoaded, catalogReady, state.catalogLoading, state.report]);
+	}, [sessionId, runtime?.agentId, runtime?.runtimeGeneration, store, favoritesLoaded, catalogReady, state.catalogLoading, state.report]);
 
 	useEffect(() => {
 		return desktopApi.app.onShortcutTriggered((id) => {
@@ -487,7 +483,6 @@ export function useSessionPreferenceController(options: {
 				setCycleArmed(true);
 				pendingCycleRef.current = {
 					kind: id === "cycleModel" ? "model" : "thinking",
-					isDshSession,
 					isCurrent: captureSelection(currentHandle()),
 				};
 				return;
@@ -495,7 +490,7 @@ export function useSessionPreferenceController(options: {
 			if (id === "cycleModel") void cycleModelRef.current("forward");
 			else void cycleThinkingRef.current("forward");
 		});
-	}, [sessionId, store, catalogReady, favoritesLoaded, isDshSession]);
+	}, [sessionId, store, catalogReady, favoritesLoaded]);
 
 	// 确认/取消入口只授权本次呈现的意图，旧弹窗回调不能挪用随后出现的新模型授权。
 	const confirmationIntent = restartIntentRef.current;
@@ -540,7 +535,6 @@ export function useSessionPreferenceController(options: {
 	// 不做 memo：本 controller 只服务一个选择器宿主组件，缓存对象反而要靠 ref 兜住
 	// 大量回调的最新闭包；直接返回当次渲染的引用更不容易出「点了没反应」的陈旧闭包。
 	return {
-		isDshSession,
 		models,
 		report: state.report,
 		catalogLoading: state.catalogLoading,

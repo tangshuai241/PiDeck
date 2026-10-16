@@ -51,7 +51,6 @@ export function SessionTrajectoryPanel() {
 			modelTraces={source.modelTraces}
 			sourceSession={sourceSession}
 			onOpenSourceSession={sourceSession ? openSourceSession : undefined}
-			isDsh={source.isDshSession}
 			hasMoreMessages={source.hasMoreMessages}
 			isLoadingMoreMessages={source.isLoadingMoreMessages}
 			onLoadMore={source.loadMore}

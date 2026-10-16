@@ -36,8 +36,6 @@ const ROOT = path.resolve(__dirname, "..");
 // 自动识别容易误伤，显式列表更可控，新增文件时手加一行即可。
 const TARGETS = [
 	{ file: ".github/workflows/release.yml", input: "tag" },
-	{ file: ".github/workflows/publish-dsh-runtime.yml", input: "tag" },
-	{ file: ".github/workflows/publish-dsh-runner-node.yml", input: "tag" },
 	{ file: ".github/workflows/release-linux-manual.yml", input: "tag" },
 	{ file: ".github/workflows/sync-atomgit.yml", input: "tags" },
 ];

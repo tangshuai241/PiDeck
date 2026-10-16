@@ -17,7 +17,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches, looksDeepSeekBacked } from "../utils/modelSpecAutoFill";
 import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetchedModel";
-import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderConnectionForm } from "./ProviderConnectionForm";
@@ -538,7 +537,6 @@ export function ModelsTab(props: {
 											>
 												<Eye size={14} />
 											</Button>
-											<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
 											{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；其余可配通用/New API 模板） */}
 											<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
 											<Button

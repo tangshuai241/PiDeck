@@ -1,11 +1,10 @@
 /**
  * 用量统计域服务：探测 / 增量刷新 / 查询聚合视图。
  *
- * 数据源（只读，采集由各后端插件负责）：
- *  - pi：<agentDir>/analytics/usage.jsonl（pi-tracker 扩展，append-only）
- *  - DSH：<DSH_HOME>/dsh-bill/records.jsonl（dsh-bill 插件，append-only）
+ * 数据源（只读，采集由 pi-tracker 扩展负责）：
+ *  - pi：<agentDir>/analytics/usage.jsonl（append-only）
  *
- * 两路独立增量缓存，查询时 merge 中间态。互不存在不算错误。
+ * 增量缓存；文件不存在不算错误。
  *
  * 缓存策略（两层，按日志路径隔离）：
  *  - 内存 memoryState（权威）：进程内连续刷新走增量合并，O(新增行)
@@ -24,7 +23,6 @@ import { join } from "node:path";
 import type { UsageAggregated, UsageStatsDetectResult, UsageStatsRefreshResult } from "../../shared/types/usageStats";
 import { SessionSummaryCache, type SessionFileVersion } from "../sessions/sessionSummaryCache";
 import { buildAggregatedView, intermediateFromRecords, mergeIntermediates, type UsageStatsIntermediate } from "./usageStatsAggregator";
-import { parseDshBillLogLine } from "./dshBillLogParser";
 import { UsageLogReader, type LogFileState } from "./UsageLogReader";
 
 /** 缓存结构版本：dayBuckets 含 byModel/byProject 明细后升到 2（旧结构直接弃用触发全量重扫）。 */
@@ -46,11 +44,6 @@ type MemoryState = {
 export type UsageStatsServiceDeps = {
 	/** pi agent 目录 host 路径（WSL 场景已由装配层转换为 host 路径） */
 	agentDir: string;
-	/**
-	 * 当前 DSH_HOME（host 路径）。装配层每次解析设置覆盖 / ~/.dsh / 应用私有目录。
-	 * 未提供或返回空串 = 不读 dsh-bill。
-	 */
-	getDshHomeDir?: () => string | undefined;
 	/** 缓存目录（测试注入；默认 electron userData） */
 	userDataDir?: string;
 	logger?: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -64,19 +57,6 @@ function versionEqual(a: SessionFileVersion, b: SessionFileVersion): boolean {
 	return a.mtimeMs === b.mtimeMs && a.size === b.size;
 }
 
-function emptyRefresh(): UsageStatsRefreshResult {
-	return { fullRescan: false, parsedRecords: 0, skippedLines: 0 };
-}
-
-function mergeRefresh(a: UsageStatsRefreshResult, b: UsageStatsRefreshResult): UsageStatsRefreshResult {
-	return {
-		fullRescan: a.fullRescan || b.fullRescan,
-		parsedRecords: a.parsedRecords + b.parsedRecords,
-		skippedLines: a.skippedLines + b.skippedLines,
-	};
-}
-
-/** 单路 JSONL 源：独立 reader / 内存游标，共享磁盘缓存（按路径分键）。 */
 class UsageLogSource {
 	private memoryState: MemoryState | null = null;
 
@@ -197,6 +177,10 @@ class UsageLogSource {
 	}
 }
 
+function emptyRefresh(): UsageStatsRefreshResult {
+	return { fullRescan: false, parsedRecords: 0, skippedLines: 0 };
+}
+
 /** stat 日志文件；ENOENT 返回 null（= 该源未安装），其他错误抛结构化异常。 */
 async function statLogOrMissing(logPath: string, logger?: UsageStatsServiceDeps["logger"]): Promise<{ mtimeMs: number; size: number } | null> {
 	try {
@@ -210,38 +194,22 @@ async function statLogOrMissing(logPath: string, logger?: UsageStatsServiceDeps[
 
 export class UsageStatsService {
 	private agentDir: string;
-	private lastDshHome: string | null = null;
-	private readonly getDshHomeDir?: () => string | undefined;
 	private readonly piSource: UsageLogSource;
-	private readonly dshSource: UsageLogSource;
 	/** 单飞：重叠 refresh 共享同一次执行，防止同一批记录被合并两次。 */
 	private refreshPromise: Promise<UsageStatsRefreshResult> | null = null;
 
 	constructor(deps: UsageStatsServiceDeps) {
 		this.agentDir = deps.agentDir;
-		this.getDshHomeDir = deps.getDshHomeDir;
 		this.logger = deps.logger;
-		// 独立缓存文件：与 session-summary-cache 互不干扰；pi / dsh 按 logPath 分键
+		// 独立缓存文件：与 session-summary-cache 互不干扰。
 		const cache = new SessionSummaryCache<CachedUsageStats>("usage-stats-cache.json", deps.userDataDir);
 		this.piSource = new UsageLogSource("pi", new UsageLogReader(), cache, deps.logger);
-		this.dshSource = new UsageLogSource("dsh", new UsageLogReader({ parseLine: parseDshBillLogLine }), cache, deps.logger);
 	}
 
 	private readonly logger?: UsageStatsServiceDeps["logger"];
 
 	private get piLogPath(): string {
 		return join(this.agentDir, "analytics", "usage.jsonl");
-	}
-
-	private get dshLogPath(): string | null {
-		const home = this.getDshHomeDir?.()?.trim() || "";
-		if (home !== (this.lastDshHome ?? "")) {
-			// DSH_HOME 切换（设置覆盖 / 首次解析）：旧游标不能套到新文件上
-			this.lastDshHome = home || null;
-			this.dshSource.clearMemory();
-		}
-		if (!home) return null;
-		return join(home, "dsh-bill", "records.jsonl");
 	}
 
 	/** WSL 环境后置配置：装配层在 syncWslEnvironment 时调用（host 路径）。 */
@@ -254,57 +222,29 @@ export class UsageStatsService {
 	/** 探测日志状态（轻量：只 stat + 读缓存，不触发全量读）。 */
 	async detect(): Promise<UsageStatsDetectResult> {
 		const piPath = this.piLogPath;
-		const dshPath = this.dshLogPath;
-		const [pi, dsh] = await Promise.all([
-			this.piSource.detect(piPath),
-			dshPath
-				? this.dshSource.detect(dshPath)
-				: Promise.resolve({
-						present: false,
-						recordCount: null,
-						firstRecordAt: null,
-						lastRecordAt: null,
-					}),
-		]);
-
-		const paths = [...(pi.present ? [piPath] : []), ...(dsh.present && dshPath ? [dshPath] : [])];
-		const recordCount = pi.recordCount === null && dsh.recordCount === null ? null : (pi.recordCount ?? 0) + (dsh.recordCount ?? 0);
-		const firsts = [pi.firstRecordAt, dsh.firstRecordAt].filter((v): v is number => v !== null);
-		const lasts = [pi.lastRecordAt, dsh.lastRecordAt].filter((v): v is number => v !== null);
-
+		const pi = await this.piSource.detect(piPath);
 		return {
-			installed: pi.present || dsh.present,
+			installed: pi.present,
 			piInstalled: pi.present,
-			dshInstalled: dsh.present,
-			dshAvailable: Boolean(dshPath),
-			logPath: paths.length > 0 ? paths.join(" · ") : null,
-			recordCount,
-			firstRecordAt: firsts.length > 0 ? Math.min(...firsts) : null,
-			lastRecordAt: lasts.length > 0 ? Math.max(...lasts) : null,
+			logPath: pi.present ? piPath : null,
+			recordCount: pi.recordCount,
+			firstRecordAt: pi.firstRecordAt,
+			lastRecordAt: pi.lastRecordAt,
 		};
 	}
 
-	/** 增量刷新两路源：返回本次解析统计；缓存已最新时零 IO。 */
+	/** 增量刷新：返回本次解析统计；缓存已最新时零 IO。 */
 	refresh(): Promise<UsageStatsRefreshResult> {
 		if (this.refreshPromise) return this.refreshPromise;
-		this.refreshPromise = this.doRefresh().finally(() => {
+		this.refreshPromise = this.piSource.refresh(this.piLogPath).finally(() => {
 			this.refreshPromise = null;
 		});
 		return this.refreshPromise;
 	}
 
-	private async doRefresh(): Promise<UsageStatsRefreshResult> {
-		const dshPath = this.dshLogPath;
-		const [pi, dsh] = await Promise.all([this.piSource.refresh(this.piLogPath), dshPath ? this.dshSource.refresh(dshPath) : Promise.resolve(emptyRefresh())]);
-		return mergeRefresh(pi, dsh);
-	}
-
-	/** 查询聚合视图；未缓存/过期时先刷新。两路文件都不存在返回 null。 */
+	/** 查询聚合视图；未缓存/过期时先刷新。日志不存在返回 null。 */
 	async getAggregated(): Promise<UsageAggregated | null> {
-		const dshPath = this.dshLogPath;
-		const [pi, dsh] = await Promise.all([this.piSource.getIntermediate(this.piLogPath), dshPath ? this.dshSource.getIntermediate(dshPath) : Promise.resolve(null)]);
-		if (!pi && !dsh) return null;
-		if (pi && dsh) return buildAggregatedView(mergeIntermediates(pi, dsh));
-		return buildAggregatedView(pi ?? (dsh as UsageStatsIntermediate));
+		const pi = await this.piSource.getIntermediate(this.piLogPath);
+		return pi ? buildAggregatedView(pi) : null;
 	}
 }

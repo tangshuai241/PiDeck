@@ -116,8 +116,6 @@ export function UsageProbeConfigDialog(props: {
 	onClose: () => void;
 	/** 供应商名（主进程解析端点与密钥；per-provider 配置的唯一作用域）。 */
 	provider: string;
-	/** 配置宿主：pi（缺省，~/.pi/agent/usage-probes.json）或 dsh（$DSH_HOME/usage-probes.json）。 */
-	backend?: "pi" | "dsh";
 	/**
 	 * 关闭宿主窗口（设置窗口或独立配置弹窗）：走宿主自己的未保存确认流程，
 	 * 供「让 AI 帮我查」写入输入框后回到主会话（缺省只关本弹窗）。
@@ -133,7 +131,7 @@ export function UsageProbeConfigDialog(props: {
 	const setDraft = useSetAtom(setSessionDraftAtom);
 	// 缓存 key：与 useProviderUsage.usageCacheKey 同规则（DSH 链路 dsh: 前缀 + 官方
 	// DeepSeek 名归一），保证弹窗「测试成功」写进的缓存与卡片/选择器/圆球的查询共用一份。
-	const cacheKey = usageCacheKey(props.provider, props.backend ?? "pi");
+	const cacheKey = usageCacheKey(props.provider, "pi");
 
 	// ── 打开时加载：已保存配置 + 内置模板自动识别 ──
 	const [loaded, setLoaded] = useState(false);
@@ -176,7 +174,7 @@ export function UsageProbeConfigDialog(props: {
 		// 默认关闭（与主进程一致）：内置识别/已配模板只表示「有可查询路径」，
 		// 真正查询必须用户在本弹窗（或卡片徽章）里显式打开。
 		desktopApi.config
-			.getUsageProbes(props.provider, props.backend)
+			.getUsageProbes(props.provider)
 			.then((result) => {
 				if (cancelled) return;
 				const config = result.config;
@@ -230,7 +228,7 @@ export function UsageProbeConfigDialog(props: {
 		return () => {
 			cancelled = true;
 		};
-	}, [props.open, props.provider, props.backend]);
+	}, [props.open, props.provider]);
 
 	// 关闭时重置瞬时状态（每次打开重新加载，弹窗不跨会话保留草稿）。
 	const resetInstant = useCallback(() => {
@@ -278,7 +276,6 @@ export function UsageProbeConfigDialog(props: {
 		try {
 			const result = await desktopApi.config.testUsageProbe({
 				provider: props.provider,
-				backend: props.backend,
 				template: current.id,
 				...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
 				...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
@@ -376,7 +373,6 @@ export function UsageProbeConfigDialog(props: {
 		try {
 			const result = await desktopApi.config.saveUsageProbes({
 				provider: props.provider,
-				backend: props.backend,
 				config,
 			});
 			if (result.ok) {
@@ -384,7 +380,7 @@ export function UsageProbeConfigDialog(props: {
 				// 保存成功 → 清全部用量缓存 + 回读该 provider 状态表（徽章的开关态/间隔来自状态表，
 				// 不回读会停在「未启用」直到重开应用）；三处消费随即重查出新配置的效果。
 				invalidateAll();
-				void refreshProviderState(props.provider, props.backend);
+				void refreshProviderState(props.provider, "pi");
 				window.setTimeout(handleClose, 600);
 			} else {
 				setSaveState("error");
@@ -399,13 +395,13 @@ export function UsageProbeConfigDialog(props: {
 	/**
 	 * 「让 AI 帮我查接口文档」：装技能 → 关闭弹窗与宿主窗口 → 提示词写进主会话输入框
 	 * （复用并行问询「插入主会话输入框」同一条 setSessionDraftAtom 通道，只填草稿不发送）。
-	 * 提示词模板带 provider 与配置路径（pi/DSH 的 usage-probes.json 位置不同），AI 拿到即可开工；
+	 * 提示词模板带 provider 与配置路径，AI 拿到即可开工；
 	 * 无活动会话（引导页）退回剪贴板兜底，不关窗口。
 	 */
 	const aiAssist = async () => {
 		const prompt = t("config.usageProbe.aiPrompt", {
 			provider: props.provider,
-			configPath: props.backend === "dsh" ? "$DSH_HOME/usage-probes.json" : "~/.pi/agent/usage-probes.json",
+			configPath: "~/.pi/agent/usage-probes.json",
 		});
 		try {
 			await desktopApi.config.installUsageSkill();
@@ -439,10 +435,7 @@ export function UsageProbeConfigDialog(props: {
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
 			<DialogContent className="max-h-[85vh] flex flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
 				<DialogHeader className="px-5 pt-4 pb-2">
-					<DialogTitle>
-						{t("config.usageProbe.titleWithProvider", { provider: props.provider })}
-						{props.backend === "dsh" ? t("config.usageProbe.dshSuffix") : null}
-					</DialogTitle>
+					<DialogTitle>{t("config.usageProbe.titleWithProvider", { provider: props.provider })}</DialogTitle>
 				</DialogHeader>
 				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 pb-3">
 					{!loaded ? (

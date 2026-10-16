@@ -31,13 +31,6 @@ test("mode picker lists goal between plan and imagegen", () => {
 	assert.ok(planOrder >= 0 && goalOrder >= 0 && imagegenOrder >= 0);
 });
 
-test("DSH setMode pauses on normal and resumes paused goals", () => {
-	assert.match(controller, /runDshGoalAction\(agentId, "pause"\)/);
-	assert.match(controller, /runDshGoalAction\(agentId, "resume"\)/);
-	assert.match(controller, /dshGoal\.pendingNotice/);
-	assert.match(controller, /deriveComposerAgentMode/);
-});
-
 test("pi goal extension auto-continues until complete, blocked, or max rounds", () => {
 	assert.match(extension, /__PI_DECK_GOAL_MODE__/);
 	assert.match(extension, /GOAL_COMPLETE/);
@@ -89,9 +82,4 @@ test("pi goal extension: resume kicks off a turn and abort stops the loop", () =
 	// Stop 会话（abort）后 agent_end 不再自动续轮：检查 assistant 的 stopReason。
 	assert.match(extension, /lastAssistant\.stopReason === "aborted" \|\| lastAssistant\.stopReason === "error"/);
 	assert.match(extension, /停止会话却停不下来/);
-});
-
-test("send path keeps DSH off agentMessage and uses /goal transform", () => {
-	assert.match(sendHook, /applyDshGoalSendTransform/);
-	assert.match(sendHook, /isDshSend \? "normal" : sendMode/);
 });

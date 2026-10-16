@@ -67,8 +67,8 @@ test("shared 契约：per-provider 配置类型 + 识别结果类型齐全", () 
 });
 
 test("preload 暴露与 previewApi stub 三处同步", () => {
-	assert.match(preload, /getUsageProbes: \(provider: string, backend\?/);
-	assert.match(preload, /fetchUsage: \(provider: string, backend\?/);
+	assert.match(preload, /getUsageProbes: \(provider: string\)/);
+	assert.match(preload, /fetchUsage: \(provider: string\)/);
 	assert.match(preload, /saveUsageProbes: \(payload: UsageProbeSaveInput\)/);
 	assert.match(preload, /testUsageProbe: \(payload: UsageProbeTestInput\)/);
 	assert.doesNotMatch(preload, /usageRecognized/);
@@ -76,55 +76,6 @@ test("preload 暴露与 previewApi stub 三处同步", () => {
 	assert.match(previewApi, /saveUsageProbes: async \(\) => \(\{ ok: false/);
 	assert.match(previewApi, /testUsageProbe: async \(\) => \(\{ success: false/);
 	assert.doesNotMatch(previewApi, /usageRecognized/);
-});
-
-test("backend 维度贯通：DSH 链路 = $DSH_HOME/.pideck 配置 + DSH 凭据库", () => {
-	const configManager = readFileSync("src/main/config/ConfigManager.ts", "utf8");
-	// 配置目录按 backend 分流（pi=configDir；dsh=$DSH_HOME/.pideck —— PiDeck 特有文件统一收拢目录）。
-	assert.match(configManager, /usageProbeSettingsDir\(backend: UsageProbeBackend\)/);
-	assert.match(configManager, /pideckUsageProbesDir\(dshHome\)/);
-	// DSH 凭据：models/auth 无 key 时回退 DSH 凭据库（credentialRefFor 常规 <ROUTE>_API_KEY）。
-	assert.match(configManager, /readCredential\(credentialRefFor\(\{\}, provider\)\)/);
-	// DSH 端点以 DSH 自身 profile（settings.yaml）为准：baseURL/api/headers 可能被自定义
-	// route 改写，只靠 pi/catalog 兜底会「时而查得对、时而判不支持」；凭据 ref 由 profile 给出。
-	assert.match(configManager, /loadDshUsageProviderProfile/);
-	assert.match(configManager, /profile\.credentialRef/);
-	// DSH 未单独配置时回退 Pi 侧同 provider 配置（display parity）：Pi 已配置并显示 →
-	// DSH 卡片默认也显示；DSH 一旦显式保存（含 enabled=false）即接管不回退。
-	assert.match(configManager, /loadUsageSettingsWithFallback/);
-	assert.match(configManager, /effectiveDir/);
-	assert.match(configManager, /backend !== "dsh" \|\| settings\.config/);
-	// 装配层（index.ts）注入：DSH_HOME 与 DshHost 同一解析 + .credentials.yaml 环境层优先。
-	const mainIndex = readFileSync("src/main/index.ts", "utf8");
-	assert.match(mainIndex, /new ConfigManager\(undefined, mainCopy, \{/);
-	assert.match(mainIndex, /resolveDshHomeDir\(settingsStore\.get\(\)\.dshHomeDir/);
-	assert.match(mainIndex, /\.credentials\.yaml/);
-	// 渲染层：DSH 卡片用量行走 dsh backend；缓存 key 带 dsh: 前缀防与 pi 同名 provider 串号。
-	const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
-	assert.match(dshCards, /backend="dsh"/);
-	const inlineSource = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
-	// 徽章把 props.backend 归一为局部 backend 后透传（默认 pi），三处消费（entry/state/toggle）同一值。
-	assert.match(inlineSource, /const backend = props\.backend \?\? "pi";/);
-	assert.match(inlineSource, /useProviderUsageEntry\(props\.provider, backend\)/);
-	assert.match(inlineSource, /useProviderUsageState\(props\.provider, backend\)/);
-	// 缓存 key 只在渲染层 atom 内使用；**发送给主进程的必须是原始 provider 名**——
-	// 曾把 `dsh:deepseek` 整体当 provider 寄回主进程，DSH 卡片永远解析不出、用量为空。
-	const usageHook = readFileSync("src/renderer/src/hooks/useProviderUsage.ts", "utf8");
-	assert.match(usageHook, /export function usageCacheKey/);
-	assert.match(usageHook, /dsh:\$\{normalizeDshDeepseekProvider\(provider\)\}/);
-	assert.match(usageHook, /fetchUsage\(provider, backend\)/);
-	assert.doesNotMatch(usageHook, /fetchUsage\(cacheKey/);
-	assert.doesNotMatch(usageHook, /fetchUsage\(key/);
-	// DSH 官方 DeepSeek 名归一：llm.models 组 id（deepseek-official）与配置面规范名
-	// （deepseek）不一致——主进程入口与端点解析先归一，模型选择器/圆球（provider=
-	// deepseek-official）才能命中 llm-deepseek 命名空间并读回 DSH 卡片保存的探针配置。
-	assert.match(configManager, /normalizeDshDeepseekProvider/);
-	const dshEndpoint = readFileSync("src/main/config/dshUsageEndpoint.ts", "utf8");
-	assert.match(dshEndpoint, /normalizeDshDeepseekProvider/);
-	const usageCacheKeySource = usageHook.match(/export function usageCacheKey\([\s\S]*?\n\}/)?.[0] ?? "";
-	assert.match(usageCacheKeySource, /normalizeDshDeepseekProvider\(provider\)/);
-	// shared 契约带 backend 类型。
-	assert.match(sharedTypes, /UsageProbeBackend/);
 });
 
 test("shared 契约包含旧探针配置类型（AI 直接写的 probes 数组兼容读取）", () => {

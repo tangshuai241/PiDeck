@@ -87,9 +87,6 @@
  * - **运行期无法调整**：`--max-old-space-size` 在进程启动时确定，
  *   `v8.setFlagsFromString` 改不了已建堆的上限。要换档只能重启进程
  *   （应用侧可用 app.relaunch() 自重启）。
- * - DSH host 跑在 Electron utilityProcess 里（src/main/dsh/DshHostProcess.ts），
- *   那份 V8 堆不跟随上面两档；若将来出现 host 侧 OOM，应在 forkEnv 里显式给
- *   `NODE_OPTIONS=--max-old-space-size=...`，而不是抬主进程档位。
  */
 
 /**

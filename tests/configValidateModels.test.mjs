@@ -53,11 +53,9 @@ function compile() {
 			return syncRequire(specifier);
 		}
 		if (specifier === "electron") return { net: { fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }) } };
-		// provider 名宽松校验（与 providerMigration.isSafeProviderName 同规则）。
-		if (specifier === "./providerMigration") {
-			return {
-				isSafeProviderName: (name) => typeof name === "string" && name.trim().length > 0 && name.trim().length <= 80 && !/[\\/]/.test(name) && !name.includes(".."),
-			};
+		// provider 名宽松校验与 catalog/key 工具：加载真实实现。
+		if (specifier === "./providerCompat") {
+			return loadTsCommonJs("src/main/config/providerCompat.ts");
 		}
 		// saveModelsConfig 会调用归因兜底（仅依赖纯常量，无副作用），加载真实实现避免空对象 stub
 		// 配置写盘留痕（ConfigManager.writeJsonFile 调 getAppLogger()?.info）；validate 路径只断言校验结果，未安装 logger 时返回 undefined。

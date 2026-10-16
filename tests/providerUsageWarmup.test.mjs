@@ -33,22 +33,17 @@ test("只选 enabled=true 的 provider（默认关的不进预热名单）", () 
 	assert.equal(json(targets.map((t) => `${t.backend}:${t.provider}`)), json(["pi:deepseek", "pi:kimi"]));
 });
 
-test("dsh 缓存 key 反解为原始 provider 名 + backend=dsh", () => {
-	const targets = selectWarmupProviders({
-		"dsh:deepseek": state(true),
-		"dsh:opencode-go": state(true),
-		deepseek: state(true),
-	});
-	assert.equal(json(targets.map((t) => `${t.backend}:${t.provider}`)), json(["pi:deepseek", "dsh:deepseek", "dsh:opencode-go"]));
+test("顺序稳定：按名字排序（每次启动请求顺序可预期）", () => {
+	const states = { zeta: { enabled: true }, alpha: { enabled: true }, beta: { enabled: true } };
+	assert.equal(
+		json(selectWarmupProviders(states)),
+		json([
+			{ provider: "alpha", backend: "pi" },
+			{ provider: "beta", backend: "pi" },
+			{ provider: "zeta", backend: "pi" },
+		]),
+	);
 });
-
-test("顺序稳定：pi 在前、各自按名字排序（每次启动请求顺序可预期）", () => {
-	const a = selectWarmupProviders({ z: state(true), a: state(true), "dsh:b": state(true), "dsh:a": state(true) });
-	const b = selectWarmupProviders({ "dsh:a": state(true), a: state(true), z: state(true), "dsh:b": state(true) });
-	assert.equal(json(a), json(b));
-	assert.equal(json(a.map((t) => `${t.backend}:${t.provider}`)), json(["pi:a", "pi:z", "dsh:a", "dsh:b"]));
-});
-
 test("空表 / 非法条目不炸", () => {
 	assert.equal(json(selectWarmupProviders({})), "[]");
 	assert.equal(json(selectWarmupProviders({ x: undefined })), "[]");

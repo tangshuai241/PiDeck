@@ -2,12 +2,8 @@ import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import { useStore, useSetAtom } from "jotai";
 import { applySessionRuntimeEventAtom, cacheSessionMessagesAtom, sessionHistoryMutationOverlayByIdAtom, sessionMessageLoadStateAtom, sessionMessagesCacheAtom, sessionRecordsAtom, setSessionHistoryMutationOverlayAtom, setSessionMessageLoadStateAtom, type SessionLoadState } from "../../atoms/session-atoms";
 import { sessionIdByRuntimeAgentIdAtomFamily, sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
-import { dshRuntimeStatusAtom } from "../../atoms/dsh-atoms";
-import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { canRunSessionAction, isLiveRuntimeStatus, requireSessionCommand, resolveSessionRunState, sessionRunCapabilities, SessionCommandFailure, toSessionRuntimeTarget, type SessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
 import { sessionHistoryUnavailableState } from "../../utils/sessionHistoryAvailability";
-import { DSH_INSTALL_SETTINGS_TARGET, maybeHintMissingDshRunnerNode, showDshRuntimeBlockHint } from "../../utils/dshRuntimeHint";
-import { dshSendBlockReason } from "../../../../shared/types/dshRuntime";
 import { isPendingAgentId, type PendingAgentTab } from "../../rendererUtils";
 import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -452,19 +448,11 @@ export function useSessionRunControl({
 				}
 			}
 			// 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
-			// DSH 会话 runtime 不可用（未安装/损坏）时 host 无法 fork，activateRuntime 只会抛
-			// 模块解析裸报错——给「去安装」提示（含直达入口）而不是把底层错误甩给用户。
+			// DSH 运行能力已移除：历史 dsh 会话不得再激活/继续运行。
 			const restartRecord = store.get(sessionRecordsAtom)[sessionId];
 			if (restartRecord?.backend === "dsh") {
-				const dshStatus = store.get(dshRuntimeStatusAtom);
-				if (dshSendBlockReason(dshStatus.state)) {
-					showDshRuntimeBlockHint(() => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET), dshStatus.state, dshStatus.reason, {
-						installed: dshStatus.runtimeVersion,
-						declared: dshStatus.declaredRuntimeVersion,
-					});
-					return;
-				}
-				maybeHintMissingDshRunnerNode(() => store.set(openSettingsAtom, { tab: "dev", section: "dsh-runner-node" }));
+				showToast(t("session.dshRuntimeRemoved"), 6000);
+				return;
 			}
 			// 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
 			// 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。

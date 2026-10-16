@@ -7,7 +7,6 @@ import { ConfigSelect, openDocsInSystemBrowser, SecretInput } from "./ConfigShar
 import { Input } from "../components/ui-shadcn/input";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
-import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { applyProviderOrder } from "../utils/providerOrder";
@@ -419,7 +418,6 @@ export function AuthTab(props: {
 									<ProviderUsageInline provider={name} variant="card" />
 								</span>
 								<div className="flex items-center gap-1">
-									<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
 									{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染） */}
 									<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
 									{onToggleHiddenAuthProvider && (

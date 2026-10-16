@@ -175,12 +175,6 @@ test("trajectory source concatenates runtime history prefix with the live window
 	assert.match(source, /prependSessionHistoryPageAtom/);
 	assert.match(source, /readProcessEvents/);
 	assert.match(source, /pi-system/);
-	// dsh 会话：系统提示由 harness 在请求时组装，从 host request/header 事件读取
-	// （readDshSystemPrompt），不加载 pi 的 pi-system 模板——否则 dsh 轨迹错误显示
-	// pi 的系统提示（2026-08 用户反馈）
-	assert.match(source, /record\?\.backend === "dsh"/);
-	assert.match(source, /isDshSession/);
-	assert.match(source, /readDshSystemPrompt/);
 	assert.match(panel, /currentSessionIdAtom/);
 	assert.match(panel, /processEvents/);
 });
@@ -276,8 +270,10 @@ test("tool records split inputDetail and outputDetail for the inspector copy blo
 				startedAt: 1600,
 				durationMs: 200,
 				status: "done",
-				view: { for: "call", view: { card: "terminal", title: "ls", cwd: "/repo" } },
-				resultView: { for: "result", view: { card: "terminal", output: "a.txt", exitCode: 0 } },
+				title: "ls",
+				detail: "cwd: /repo",
+				inputDetail: "$ ls\ncwd: /repo",
+				detailText: "a.txt\nexit 0",
 			},
 		}),
 	]);
@@ -287,7 +283,6 @@ test("tool records split inputDetail and outputDetail for the inspector copy blo
 	assert.match(tool?.outputDetail ?? "", /a\.txt/);
 	assert.match(tool?.outputDetail ?? "", /exit 0/);
 });
-
 test("inspector copy control is wired on the trajectory detail panel", () => {
 	const view = readFileSync("src/renderer/src/components/session/trajectory/SessionTrajectoryView.tsx", "utf8");
 	assert.match(view, /function CopyableBlock/);
@@ -297,11 +292,9 @@ test("inspector copy control is wired on the trajectory detail panel", () => {
 });
 
 test("trajectory header turn count follows the unified round contract", () => {
-	// 对外「N 轮」：DSH 会话用 host sessionStats（官方，与 dsh-web 一致）；pi 会话用
-	// countUserTurns（发言权周期，与分页/缓存协议同口径）。账本分组仍按 user 开轮。
+	// 对外「N 轮」：按 countUserTurns（发言权周期，与分页/缓存协议同口径）。账本分组仍按 user 开轮。
 	const view = readFileSync("src/renderer/src/components/session/trajectory/SessionTrajectoryView.tsx", "utf8");
 	assert.match(view, /countUserTurns/);
-	assert.match(view, /dshSessionStats\.turns/);
 	assert.doesNotMatch(view, /count: model\.turns\.length/);
 	assert.doesNotMatch(view, /countDialogueTurns/);
 });

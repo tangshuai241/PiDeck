@@ -1,4 +1,16 @@
-import type { ArchivedDshSession, ArchivedPiSession, Project, SessionSummary } from "../../shared/types";
+import type { ArchivedPiSession, Project, SessionSummary } from "../../shared/types";
+
+/**
+ * 旧 DSH 归档行（只读兼容契约）：DSH 运行能力已移除，主进程不再产出该清单，
+ * 保留类型与纯策略仅为编译既有会话管理代码，不新增读取入口。
+ */
+export type ArchivedDshSession = {
+	dshSessionId: string;
+	cwd: string;
+	archivedAt: number;
+	title?: string;
+	projectId?: string;
+};
 
 /**
  * 会话管理弹窗（SessionManagerModal）的纯策略层：收录条件、行身份、
@@ -157,38 +169,22 @@ export function archivedDshWorkspaceLabel(item: ArchivedDshSession, family: read
 	return workspaceMemberForPath(canonicalWorkspacePath(item.cwd, wsl), wsl, family)?.name;
 }
 
-/**
- * DSH 归档行标签（纯策略）：manifest/日志折叠标题 > cwd 末段 > 裸 host id。
- * 标题仍缺省（极老归档、日志无折叠结果）时也要比裸 id 可读。
- */
-export function managerArchivedDshLabel(row: Extract<ManagerArchivedRow, { kind: "dsh" }>): string {
-	const title = row.item.title?.trim();
-	if (title) return title;
-	const cwd = row.item.cwd.replace(/[\\/]+$/, "").trim();
-	if (cwd) {
-		const last = cwd.split(/[\\/]/).pop()?.trim();
-		if (last) return last;
-	}
-	return row.item.dshSessionId;
-}
-
-/** 归档视图合并行：pi 会话按文件恢复；DSH 会话按 host id 恢复。 */
-export type ManagerArchivedRow = { kind: "pi"; item: ArchivedPiSession } | { kind: "dsh"; item: ArchivedDshSession };
+/** 归档视图行：pi 会话按文件恢复。 */
+export type ManagerArchivedRow = { kind: "pi"; item: ArchivedPiSession };
 
 /**
- * 归档行身份（弹窗选中集合用）：pi 行用会话记录 id，DSH 行用 host 会话 id。
- * 与主列表 sessionManagerRowKey 同语义，两类 id 命名空间不冲突。
+ * 归档行身份（弹窗选中集合用）：与主列表 sessionManagerRowKey 同语义。
  */
 export function managerArchivedRowKey(row: ManagerArchivedRow): string {
-	return row.kind === "pi" ? sessionManagerRowKey(row.item.summary) : row.item.dshSessionId;
+	return sessionManagerRowKey(row.item.summary);
 }
 
 /** 归档行时间戳（排序用）：pi 用 updatedAt，DSH 用 archivedAt。 */
 function managerArchivedTimestamp(row: ManagerArchivedRow): number {
-	return row.kind === "pi" ? row.item.summary.updatedAt : row.item.archivedAt;
+	return row.item.summary.updatedAt;
 }
 
 /** 合并 pi / DSH 归档清单为一个视图，按时间倒序（调用方应先按家族过滤）。 */
-export function mergeManagerArchived(piSessions: readonly ArchivedPiSession[], dshItems: readonly ArchivedDshSession[]): ManagerArchivedRow[] {
-	return [...piSessions.map((item) => ({ kind: "pi" as const, item })), ...dshItems.map((item) => ({ kind: "dsh" as const, item }))].sort((a, b) => managerArchivedTimestamp(b) - managerArchivedTimestamp(a));
+export function mergeManagerArchived(piSessions: readonly ArchivedPiSession[]): ManagerArchivedRow[] {
+	return piSessions.map((item) => ({ kind: "pi" as const, item })).sort((a, b) => managerArchivedTimestamp(b) - managerArchivedTimestamp(a));
 }

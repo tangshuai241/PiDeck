@@ -13,7 +13,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const script = join(repoRoot, "scripts/sync-workflow-choices.js");
 const { parseVersions, rewriteOptions } = createRequire(import.meta.url)("../scripts/sync-workflow-choices.js");
 
-const TARGET_FILES = [".github/workflows/release.yml", ".github/workflows/publish-dsh-runtime.yml", ".github/workflows/publish-dsh-runner-node.yml", ".github/workflows/release-linux-manual.yml", ".github/workflows/sync-atomgit.yml"];
+const TARGET_FILES = [".github/workflows/release.yml", ".github/workflows/release-linux-manual.yml", ".github/workflows/sync-atomgit.yml"];
 
 /** 取出某个 workflow 里指定输入的 options 列表（按文件顺序）。 */
 function readOptions(file, inputName) {
@@ -67,7 +67,7 @@ test("sync-workflow-choices: 所有 tag 下拉都保留 v 前缀（workflow 里�
 test("sync-workflow-choices: 允许 latest 语义的 workflow 首项是哨兵值 auto，且不是 auto 的输入必须 required", () => {
 	// 哨兵值是「留空 = latest / 按 package.json 发版」这条旧语义的唯一载体，不能被脚本顶掉。
 	// 例外：release-linux-manual.yml 的 tag 是 required 且语义就是具体版本，没有 auto。
-	const sentinelFiles = [".github/workflows/release.yml", ".github/workflows/publish-dsh-runtime.yml", ".github/workflows/publish-dsh-runner-node.yml", ".github/workflows/sync-atomgit.yml"];
+	const sentinelFiles = [".github/workflows/release.yml", ".github/workflows/sync-atomgit.yml"];
 	for (const file of sentinelFiles) {
 		const input = file.endsWith("sync-atomgit.yml") ? "tags" : "tag";
 		assert.equal(readOptions(file, input)[0], "auto", `${file} 下拉首项必须是哨兵值 auto`);

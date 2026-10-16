@@ -1,5 +1,7 @@
 # DSH Runtime 独立化与按需安装方案（AgentRuntimeProvider）
 
+> 状态（2026-10-16）：已废弃 — DSH 运行时已从 TPA 移除，本文仅作历史对照，不再执行、不再维护。
+
 > 目标：把 DSH runtime（28 个 `@deepseek-ai/*` 依赖）从 PiDeck 安装包中拆出，改为**用户按需下载、可配置、可独立升级**的托管组件；并将「agent 后端 runtime 管理」抽象为 `AgentRuntimeProvider`，为后续更多 agent 后端接入 PiDeck 提供统一插槽。
 > 参考：flowix（Tauri 应用）将 dsh host 独立为 `dsh-flowix-host` 组件、按需获取的做法。
 > 非目标：不改 dsh 深融合架构（utilityProcess + ApiProxy IPC 桥）；不改 pi 现有链路；不做「同一会话中途换引擎」。

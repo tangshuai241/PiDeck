@@ -22,18 +22,18 @@ export function modelKey(provider: string, id: string): string {
  * 收藏 → 可循环候选（顺序 = favoriteModels 的添加顺序）。
  *
  * 过滤三类「不在当前目录里」的收藏：模型已被重命名/删除、供应商被用户隐藏、
- * 模型被用户单独隐藏（后两者与选择器可见性同规则，DSH 无供应商/模型隐藏概念）。
+ * 模型被用户单独隐藏。
  * 目录尚未加载完（models 为空）时结果自然为空。
  */
-export function resolveFavoriteCycleCandidates(input: { favorites: readonly string[]; models: readonly AvailableModel[]; hiddenProviders?: readonly string[]; hiddenModels?: readonly string[]; backend?: "pi" | "dsh" }): AvailableModel[] {
-	const hidden = new Set((input.backend ?? "pi") === "dsh" ? [] : (input.hiddenProviders ?? []));
-	const hiddenModels = new Set((input.backend ?? "pi") === "dsh" ? [] : (input.hiddenModels ?? []));
+export function resolveFavoriteCycleCandidates(input: { favorites: readonly string[]; models: readonly AvailableModel[]; hiddenProviders?: readonly string[]; hiddenModels?: readonly string[] }): AvailableModel[] {
+	const hidden = new Set(input.hiddenProviders ?? []);
+	const hiddenModels = new Set(input.hiddenModels ?? []);
 	const byKey = new Map<string, AvailableModel>();
 	for (const model of input.models) {
 		if (!model?.provider || !model.id) continue;
 		if (hidden.has(model.provider)) continue;
 		const key = modelKey(model.provider, model.id);
-		// 用户手动隐藏的模型不进循环（与选择器可见性同规则，DSH 无此概念）
+		// 用户手动隐藏的模型不进循环（与选择器可见性同规则）
 		if (hiddenModels.has(key)) continue;
 		if (!byKey.has(key)) byKey.set(key, model);
 	}

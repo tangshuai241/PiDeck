@@ -56,7 +56,7 @@ test("buildLanes：四条基础泳道 + e2e 开关 + 单测并发透传", () => 
 test("buildLanes：全部步骤脚本真实存在（脚本改名/删除时这里先红）", () => {
 	for (const lane of buildLanes({ testConcurrency: 4, e2e: false })) {
 		for (const step of lane.steps) {
-			if (step.skipReason) continue; // 条件跳过步骤（DSH 归档缺失）不查存在性
+			if (step.skipReason) continue; // 条件跳过步骤不查存在性
 			assert.ok(existsSync(step.file), `${lane.id}/${step.label} 的脚本不存在：${step.file}`);
 			assert.ok(Array.isArray(step.args), `${lane.id}/${step.label} 参数必须是数组`);
 		}
@@ -69,33 +69,8 @@ test("buildLanes：release 泳道覆盖全部 --check 型脚本", () => {
 		.filter((step) => !step.skipReason)
 		.map((step) => `${step.file} ${step.args.join(" ")}`)
 		.join(" ");
-	for (const expected of [
-		"check-release-consistency.mjs",
-		"sync-workflow-choices.js --check",
-		"sync-release-notes.js --check",
-		"generate-pi-ai-catalog.mjs --check",
-		"generate-extensions-manifest.mjs --check",
-		"--domain prompts --check",
-		"--domain skills --check",
-		"check-xueprompts.mjs",
-		"check-dsh-wire-payloads.mjs",
-		"check-electron.mjs",
-	]) {
+	for (const expected of ["check-release-consistency.mjs", "sync-workflow-choices.js --check", "sync-release-notes.js --check", "generate-pi-ai-catalog.mjs --check", "generate-extensions-manifest.mjs --check", "--domain prompts --check", "--domain skills --check", "check-xueprompts.mjs", "check-electron.mjs"]) {
 		assert.ok(commands.includes(expected), `release 泳道缺步骤：${expected}`);
-	}
-	// DSH 归档步骤：产物存在与否都合法，但必须存在这一步（skipped 或可执行）
-	assert.ok(release.steps.some((step) => step.label.includes("DSH runtime")));
-});
-
-test("buildLanes：DSH 归档缺失时该步带 skipReason 而非硬失败", () => {
-	const release = buildLanes({ testConcurrency: 4, e2e: false }).find((lane) => lane.id === "release");
-	const dshStep = release.steps.find((step) => step.label.includes("DSH runtime"));
-	const tgz = join(process.cwd(), "dist-runtime", `dsh-runtime-${process.platform}-${process.arch}.tgz`);
-	if (!existsSync(tgz)) {
-		assert.ok(dshStep.skipReason, "归档缺失时步骤应带 skipReason");
-		assert.match(dshStep.skipReason, /runtime:pack/);
-	} else {
-		assert.equal(dshStep.skipReason, undefined);
 	}
 });
 

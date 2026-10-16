@@ -114,12 +114,6 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "dev",
-		slug: "dsh-runner-node",
-		labelKey: "settings.dshRunnerNode",
-		keywords: ["dsh", "runner node", "node 路径", "沙箱 node", "本机 node"],
-	},
-	{
-		tab: "dev",
 		slug: "dev-auto-download-updates",
 		labelKey: "settings.autoDownloadUpdates",
 		keywords: ["自动下载", "更新", "auto download", "升级", "新版本"],

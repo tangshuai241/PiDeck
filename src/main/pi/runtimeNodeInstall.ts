@@ -22,8 +22,8 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { DshRuntimeDownloader, DshRuntimeExtractor } from "../dsh/runtime/DshRuntimeManager";
-import { sha256OfFile } from "../dsh/runtime/DshRuntimeManager";
+import type { ArchiveDownloader, ArchiveExtractor } from "../archiveIo/archiveIo";
+import { sha256OfFile } from "../archiveIo/archiveIo";
 import { piRuntimeNodeBinDir, piRuntimeNodeExePath, piRuntimeRootDir } from "./piRuntimePaths";
 import { PI_RUNTIME_NODE_VERSION, PI_RUNTIME_NODE_SHA256, piRuntimeNodeArchiveName, piRuntimeNodeDownloadUrls, piRuntimeNodeInnerDir, toPiRuntimePlatform, toPiRuntimeArch, type PiRuntimeNodeInstallResult, type PiRuntimeNodeStatus } from "../../shared/types/piRuntimeNode";
 
@@ -35,10 +35,10 @@ const execFileAsync = promisify(execFile);
 
 /** 安装器可替换的 IO 依赖（测试注入本地替身，不碰网络与磁盘归档）。 */
 export type RuntimeNodeInstallerDeps = {
-	/** 下载器：DSH runtime 同源的 net 流式下载（file:// 支持本地测试）。 */
-	download: DshRuntimeDownloader;
+	/** 下载器：net 流式下载（file:// 支持本地测试）。 */
+	download: ArchiveDownloader;
 	/** 解压器：系统 tar 两遍式（安全校验）。 */
-	extract: DshRuntimeExtractor;
+	extract: ArchiveExtractor;
 };
 
 /**
@@ -209,17 +209,8 @@ export async function installPiRuntimeNode(
 }
 
 /** 校验通过的归档：解压到临时目录 → 平铺移动整个发行包到 userData → 探测版本。 */
-async function extractAndProbe(input: {
-	archivePath: string;
-	destDir: string;
-	innerDir: string;
-	exePath: string;
-	expectedMajor: string;
-	extract: DshRuntimeExtractor;
-	probeVersion: (nodePath: string) => Promise<string | undefined>;
-	log?: (message: string, detail?: unknown) => void;
-}): Promise<PiRuntimeNodeInstallResult> {
-	// 解压目标用全新空目录（DshRuntimeExtractor 契约要求 destDir 为空），
+async function extractAndProbe(input: { archivePath: string; destDir: string; innerDir: string; exePath: string; expectedMajor: string; extract: ArchiveExtractor; probeVersion: (nodePath: string) => Promise<string | undefined>; log?: (message: string, detail?: unknown) => void }): Promise<PiRuntimeNodeInstallResult> {
+	// 解压目标用全新空目录（ArchiveExtractor 契约要求 destDir 为空），
 	// 解压后内层目录平铺移动到 destDir。
 	const extractRoot = await mkdtemp(join(tmpdir(), "pideck-node-extract-"));
 	try {

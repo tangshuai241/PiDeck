@@ -2,21 +2,13 @@ name: Post-release sidecars
 
 # 发版收尾链路（2026-09 起简化）：应用 Release 发布后触发 AtomGit 镜像同步。
 #
-# 历史职责变更：本 workflow 原本还要「原生补齐 win32-arm64 / darwin-x64 两份
-# runtime tgz」（release.yml 的 5 个构建 job 只能产出本机平台 runtime，macOS x64
-# 构建 job 跑在 arm64 runner 上、Windows 没有 arm64 构建 job，这两个平台天然缺口，
-# 且原生 prebuild 不能交叉打包）。runtime 打包改为 lock 驱动的交叉解析后（
-# scripts/pack-dsh-runtime 脚本的 --target-os/--target-arch 模式，WSL 真机 boot 验证见
-# docs/dsh-runtime-cross-pack.md），release.yml 内的交叉打包 job 在一个
-# ubuntu runner 上即可产出全部 6 份归档，本 workflow 的补发职责移除，只保留
-# sync-atomgit 触发兜底。
+# 职责：应用 Release 发布后触发 AtomGit 镜像同步（早期版本的原生 sidecar 补发职责
+# 已随 sidecar 分发链路移除）。
 #
 # 事件模型：release.yml 用 RELEASE_PAT 发布 Release（GITHUB_TOKEN 发布不广播
 # release: published，防递归），因此本 workflow 能被触发。release 事件使用「默认分支」
 # 上的 workflow 文件——本文件必须先合入 main，才会对之后的发布生效。
-# 交叉打包 job 也用 PAT 上传资产，但它不触发本 workflow（上传只产生
-# release: edited 事件），因此这里保留 release: published 直接触发 sync-atomgit。
-# 上传目标限定 v*（禁止 sidecar tag 抢 /releases/latest，同 ^v[0-9] 契约）。
+# 上传目标限定 v*（禁止独立 sidecar tag 抢 /releases/latest，同 ^v[0-9] 契约）。
 
 on:
   release:

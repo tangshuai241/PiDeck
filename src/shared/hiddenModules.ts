@@ -18,10 +18,10 @@
 export const HIDEABLE_SETTINGS_TAB_IDS = ["im", "pet", "vision", "imagegen", "videogen", "cloudmemory", "hostplugins", "git", "usage", "process"] as const;
 
 /**
- * 全部可隐藏模块：设置 tab + `dsh`（DSH 后端不是设置 tab，它对应配置管理的 DSH 分页
- * 与新建会话的 DSH 后端选项）+ `composerModes`（输入框底栏的模式选择器）。
+ * 全部可隐藏模块：设置 tab + `composerModes`（输入框底栏的模式选择器）。
+ * 旧 settings 里的未知 id（如已移除的 `dsh`）由存储层原样保留，读取方按需判断。
  */
-export const HIDEABLE_MODULE_IDS = [...HIDEABLE_SETTINGS_TAB_IDS, "composerModes", "dsh"] as const;
+export const HIDEABLE_MODULE_IDS = [...HIDEABLE_SETTINGS_TAB_IDS, "composerModes"] as const;
 
 export type HideableSettingsTabId = (typeof HIDEABLE_SETTINGS_TAB_IDS)[number];
 export type HideableModuleId = (typeof HIDEABLE_MODULE_IDS)[number];

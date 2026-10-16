@@ -114,13 +114,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 // 混进下拉会让用户给聊天 provider 选到不能聊天的协议）。
 export const PROVIDER_API_OPTIONS = ["openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "anthropic-messages", "google-generative-ai", "google-vertex", "mistral-conversations", "bedrock-converse-stream", "pi-messages"];
 
-/**
- * DSH（llm-pi-ai 适配器）只注册了三种协议（见 dsh 设置 schema 的 llm-pi-ai.api 联合：
- * openai-completions / openai-responses / anthropic-messages）。它的表单与 pi 共用
- * ApiTypeInput，所以必须单独给一份可选集，否则用户会选到 DSH 写不进配置的值。
- */
-export const DSH_PROVIDER_API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages"];
-
 export const API_TYPE_LABELS: Record<string, string> = {
 	"openai-completions": "OpenAI Chat Completions",
 	"openai-responses": "OpenAI Responses",

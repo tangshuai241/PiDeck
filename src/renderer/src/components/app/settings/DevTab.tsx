@@ -15,7 +15,6 @@ import { UpdateSourceSetting } from "./UpdateSourceSetting";
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { CatalogSection } from "./CatalogSection";
-import { DshRunnerNodeRow } from "./DshRunnerNodeRow";
 import { PiCommandSourcePanel } from "../PiCommandSourcePanel";
 import { PiChangelogDialog } from "./PiChangelogDialog";
 
@@ -407,7 +406,6 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 						shellProbing={props.shellProbingPiInstallations}
 					/>
 				</div>
-				{props.appInfo.platform === "win32" && <DshRunnerNodeRow draft={draft} updateDraft={updateDraft} isDirty={isDirty} />}
 			</SettingsSection>
 
 			{/* 版本与更新（electron-updater 快照驱动：检测/下载/安装状态一览，语义对齐 Netcatty 设置卡片） */}

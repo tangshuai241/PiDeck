@@ -1,7 +1,6 @@
 {
   "name": "pideck",
   "version": "0.9.1",
-  "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
     "npm": "^11.6.2"
@@ -59,16 +58,10 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "npm run sync:dsh-version && npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run runtime:pack && npm run runtime:check && npm run check:xueprompts && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build": "npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run check:xueprompts && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
     "build:packages": "node scripts/build-local-packages.js",
     "build:fast": "npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && electron-vite build",
     "build:main": "electron-vite build --config electron.vite.main.mjs",
-    "runtime:pack": "node scripts/pack-dsh-runtime.mjs",
-    "runner-node:pack": "node scripts/pack-dsh-runner-node.mjs",
-    "sync:dsh-version": "node scripts/sync-dsh-declared-version.mjs",
-    "runtime:pack:lite": "node scripts/pack-dsh-runtime.mjs --lite",
-    "runtime:check": "node scripts/check-dsh-asar.mjs",
-    "runtime:check:boot": "node scripts/check-dsh-boot.mjs",
     "generate:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs",
     "check:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs --check",
     "generate:extensions-manifest": "node scripts/generate-extensions-manifest.mjs",
@@ -79,7 +72,6 @@
     "check:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills --check",
     "check:xueprompts": "node scripts/check-xueprompts.mjs",
     "check:electron": "node scripts/check-electron.mjs",
-    "check:dsh-wire": "node scripts/check-dsh-wire-payloads.mjs",
     "pack:dev": "node scripts/pack-dev.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
@@ -110,8 +102,7 @@
     "compile-exe": "node scripts/compile-exe.js",
     "test:e2e": "npm run build:fast && playwright test",
     "e2e": "playwright test",
-    "verify": "npm run typecheck && npm test && npm run test:e2e",
-    "probe:dsh": "node scripts/dsh-embed-probe.mjs"
+    "verify": "npm run typecheck && npm test && npm run test:e2e"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
@@ -146,10 +137,7 @@
     "npmRebuild": false,
     "asarUnpack": [
       "node_modules/sql.js/dist/*.wasm",
-      "out/main/hostEntry.js",
       "node_modules/node-pty/**",
-      "node_modules/@deepseek-ai/dsh-subprocess-local/node_modules/node-pty/**",
-      "node_modules/dsh-tool-pwsh-persistent/node_modules/node-pty/**",
       "node_modules/**/@img/sharp-*/**",
       "node_modules/@koromix/koffi-win32-x64/**",
       "node_modules/@koromix/koffi-linux-x64/**",
@@ -251,13 +239,6 @@
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "dist-runtime/dsh-runtime",
-        "to": "dsh-runtime",
-        "filter": [
-          "**/*"
-        ]
       }
     ],
     "extraMetadata": {
@@ -347,31 +328,6 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.8",
-    "@deepseek-ai/cordis-plugin-group": "^1.0.1",
-    "@deepseek-ai/dsh": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-anonymous-user-id": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-bash-local": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-compaction": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-experimental-agent-team-profile": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-output-retention": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-sandbox": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-scope": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-session-projection-cache": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-session-stats": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-session-telemetry": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-session-title-llm": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-shell": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-spill": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-subagent-in-process-driver": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-workflow": "0.2.0-rc.2",
     "@earendil-works/pi-ai": "1.0.4",
     "@fiahfy/icns": "^0.0.7",
     "@lezer/highlight": "^1.2.3",
@@ -400,8 +356,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "dsh-bill": "^0.14.0",
-    "dsh-tool-pwsh-persistent": "file:packages/dsh-tool-pwsh-persistent",
     "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",

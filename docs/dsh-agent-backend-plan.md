@@ -1,5 +1,7 @@
 # DSH 双 Agent 后端接入对照计划
 
+> 状态（2026-10-16）：已废弃 — DSH 运行时已从 TPA 移除，本文仅作历史对照，不再执行、不再维护。
+
 > 目标：在 PiDeck 中把 DeepSeek Harness（DSH）作为**第二个 agent 后端**接入，与 pi 后端并列，同一项目下两种 agent 会话可自由创建、切换、浏览；DSH 侧采用**深融合（无 `dsh web`）**路线：进程内 `boot()` 引导完整 host，通过官方 `ApiProxy` 契约驱动，传输形态从 stdio 演进到 utilityProcess + IPC 桥。
 > 非目标：不做「同一会话中途换引擎」（pi 会话文件与 DSH session log 格式不同，迁移=重放）；不导入 DSH 历史会话为只读浏览源（一期不做 scanner，走 `session.list` 实时映射）；不把 DSH 的 Web GUI / 浏览器 UI 搬进 PiDeck。
 

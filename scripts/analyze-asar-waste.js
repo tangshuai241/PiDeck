@@ -19,7 +19,7 @@ const NM = "node_modules";
 const ASAR = process.argv[2] || "release/win-unpacked/resources/app.asar";
 
 // 必须读取 asar 内实际打入的 package.json，而不是开发工作区 node_modules：
-// catalog 来源 pi-ai@0.84.4 是 devDependency，但 DSH 在 app.asar 中保留的是 0.82.1，
+// catalog 来源 pi-ai 是 devDependency，不进 app.asar。
 // 从工作区读取会把 0.84.4 的依赖图错误地当成生产闭包。
 function readPkg(name) {
 	try {
@@ -53,14 +53,12 @@ const roots = [...inAsar]
 		"koffi",
 		"@koromix/koffi-win32-x64",
 		"node-addon-require-builtin-win32-x64-msvc",
-		"dsh-tool-pwsh-persistent",
-		"dsh-bill",
-		// PiDeck 主进程改读 extraResources catalog；DSH 的 pi-ai 由 @deepseek-ai 闭包追踪。
+		// PiDeck 主进程改读 extraResources catalog。
 		"undici",
 		// out/main 静态 require 的运行时库（2026-10 实测 grep 逐一验证；漏任何一个都会被误报
 		// 为可排除，照抄进 build.files 会运行时 MODULE_NOT_FOUND：
 		// zod+@modelcontextprotocol/sdk = CUA/MCP 默认关闭但 require 链存在；tar/smol-toml/
-		// minimatch/ignore = DSH/扩展运行时解析；electron-updater = 自动更新）。
+		// minimatch/ignore = 扩展运行时解析；electron-updater = 自动更新）。
 		"zod",
 		"@modelcontextprotocol/sdk",
 		"tar",

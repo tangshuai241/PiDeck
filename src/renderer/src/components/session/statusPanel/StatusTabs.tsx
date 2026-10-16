@@ -7,7 +7,7 @@ import { Button } from "../../ui-shadcn/button";
 import { TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 import type { AgentTodoItem } from "../agentTodoParser";
 import { FileEntry } from "../SessionFilesStrip";
-import { DshSubagentEntryRow, PiSubagentEntryRow, type SessionSubagentList } from "../SessionSubagentsStrip";
+import { PiSubagentEntryRow, type SessionSubagentList } from "../SessionSubagentsStrip";
 import { TodoItemRow, progressLabel } from "../SessionTodoStrip";
 import type { DiffFileHandler } from "../ToolCallComponents";
 import { fileChangeKind, type FileChangeKind, type SessionStatusTab } from "./sessionStatusPanelModel";
@@ -143,7 +143,9 @@ export function StatusSubagentsTab(props: { sessionId: string; list: SessionSuba
 	return (
 		<div className="flex flex-col gap-1 px-2 py-2">
 			<ul className="flex flex-col gap-1">
-				{list.isDsh ? list.dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={list.agentId ?? ""} entry={entry} />) : list.piEntries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
+				{list.piEntries.map((entry) => (
+					<PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />
+				))}
 			</ul>
 			{list.hasAcpEntries && <p className="px-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
 		</div>

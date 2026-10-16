@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { parsePrivateMemoryBytes, parsePsRssKb, parseTasklistMemoryKb } from "../src/main/process/pidMemoryParsers.ts";
-import { buildDshHostMonitorRow, DSH_HOST_MONITOR_ROW_ID, isDshHostMonitorId } from "../src/main/process/dshHostMonitor.ts";
-import { DSH_HOST_MONITOR_ID } from "../src/shared/types/processMetrics.ts";
 import { formatBytes, formatMb } from "../src/shared/formatBytes.ts";
 
 // ===== 纯函数：tasklist CSV / ps rss 解析 =====
@@ -65,25 +63,6 @@ test("formatBytes: human readable units", () => {
 	assert.equal(formatBytes(Number.NaN), "-");
 });
 
-test("buildDshHostMonitorRow uses a stable id and keeps full titles for hover", () => {
-	const empty = buildDshHostMonitorRow({ pid: 4242, sessions: [] });
-	assert.equal(empty.agentId, DSH_HOST_MONITOR_ROW_ID);
-	assert.equal(empty.kind, "dsh-host");
-	assert.equal(empty.pid, 4242);
-	assert.equal(empty.sessionTitle, undefined);
-	assert.equal(empty.sessionTitles, undefined);
-	const named = buildDshHostMonitorRow({
-		pid: 7,
-		sessions: [{ title: "打包体积" }, { title: "  " }, { title: "外部会话" }],
-	});
-	// 单元格只放首个标题，完整列表走 sessionTitles，避免长串拼接被表格截断
-	assert.equal(named.sessionTitle, "打包体积");
-	assert.deepEqual(named.sessionTitles, ["打包体积", "外部会话"]);
-	assert.equal(isDshHostMonitorId(DSH_HOST_MONITOR_ID), true);
-	assert.equal(isDshHostMonitorId("agent-1"), false);
-	assert.equal(DSH_HOST_MONITOR_ROW_ID, DSH_HOST_MONITOR_ID);
-});
-
 test("formatMb: fixed MB unit for process monitor", () => {
 	assert.equal(formatMb(0), "0.0 MB");
 	assert.equal(formatMb(1048576), "1.0 MB");
@@ -134,15 +113,6 @@ test("PiProcess exposes pid accessor", () => {
 	assert.match(source, /return this\.proc\?\.pid;/);
 });
 
-test("DshHostProcess and DshHost expose host pid for process monitor", () => {
-	const hostProcess = readFileSync("src/main/dsh/DshHostProcess.ts", "utf8");
-	const host = readFileSync("src/main/dsh/DshHost.ts", "utf8");
-	assert.match(hostProcess, /get pid\(\): number \| undefined/);
-	assert.match(hostProcess, /this\.child\?\.pid/);
-	assert.match(host, /getHostPid\(\): number \| undefined/);
-	assert.match(host, /return this\.hostProcess\?\.pid/);
-});
-
 // ===== IPC / preload / UI 接线 =====
 
 test("IPC channel + systemIpc handler + preload exposure", () => {
@@ -156,8 +126,6 @@ test("IPC channel + systemIpc handler + preload exposure", () => {
 	assert.match(systemIpc, /getSessionInfoForAgent\(\s*agent\.agentId,?\s*\)/);
 	assert.match(systemIpc, /\.\.\.agent, kind: "pi" as const, \.\.\.\(sessionInfo \?\? \{\}\)/);
 	assert.match(systemIpc, /getProcessSnapshot\(agents\)/);
-	assert.match(systemIpc, /getDshHostPid\?\.\(\)/);
-	assert.match(systemIpc, /buildDshHostMonitorRow/);
 	assert.doesNotMatch(systemIpc, /getProcessSnapshot\(deps\.agentManager\.listAgentPids\(\)\)/);
 	assert.match(preload, /getProcessMetrics: \(\) =>/);
 	assert.match(preload, /ipcRenderer\.invoke\(ipcChannels\.processMetrics\)/);
@@ -176,8 +144,6 @@ test("stop-agent: full session stop chain (coordinator + detach)", () => {
 	assert.match(systemIpc, /typeof agentId !== "string" \|\| !agentId/);
 	// 关键：不能只调 agentManager.stop（会跳过会话状态收尾 → 运行标记不熄灭）
 	assert.match(systemIpc, /deps\.stopAgentFromMonitor\(agentId\)/);
-	assert.match(systemIpc, /isDshHostMonitorId\(agentId\)/);
-	assert.match(systemIpc, /deps\.stopDshHostFromMonitor/);
 	assert.doesNotMatch(systemIpc, /deps\.agentManager\.stop\(agentId\)/);
 	// coordinator 按 agentId 反查会话 → 走 stopRuntime 完整收尾（无绑定时幂等直停）
 	assert.match(coordinator, /async stopAgentById\(/);
@@ -189,9 +155,6 @@ test("stop-agent: full session stop chain (coordinator + detach)", () => {
 	assert.match(index, /terminalManager\.closeAgent\(agentId\);/);
 	assert.match(index, /emitSessionRuntimeDetach\(result\.value\);/);
 	assert.match(index, /stopAgentFromMonitor,/);
-	assert.match(index, /async function stopDshHostFromMonitor\(/);
-	assert.match(index, /await dshHost\.dispose\(\)/);
-	assert.match(index, /stopDshHostFromMonitor,/);
 	// preload 暴露
 	assert.match(preload, /stopAgent: \(agentId: string\) =>/);
 	assert.match(preload, /ipcRenderer\.invoke\(ipcChannels\.stopAgent, agentId\)/);
@@ -200,7 +163,6 @@ test("stop-agent: full session stop chain (coordinator + detach)", () => {
 	assert.match(tab, /window\.piDesktop\.system\.stopAgent\(agent\.agentId\)/);
 	assert.match(tab, /setStoppingAgent\(agent\)/);
 	assert.match(tab, /<ConfirmDialog\n\s*title=\{t\("config\.process\.stop"\)\}/);
-	assert.match(tab, /config\.process\.stopHostConfirm/);
 	assert.match(tab, /monitorRowLabel\(stoppingAgent\)/);
 	assert.match(tab, /danger\n/);
 	assert.match(tab, /void stopAgent\(agent\);/);
@@ -223,7 +185,6 @@ test("process monitor rows show the session associated with each agent", () => {
 	assert.match(tab, /sessionColumnLabel\(agent\)/);
 	assert.match(tab, /title=\{sessionColumnTooltip\(agent\)\}/);
 	assert.match(tab, /title=\{monitorRowLabel\(agent\)\}/);
-	assert.match(tab, /config\.process\.dshSessionSummary/);
 	assert.match(tab, /titles\.join\("\\n"\)/);
 	assert.match(tab, /max-w-56 truncate text-text-secondary/);
 	assert.doesNotMatch(tab, /title=\{agent\.agentId\}/);
@@ -286,10 +247,7 @@ test("process monitor i18n keys exist in zh-CN and en-US", () => {
 		"config.process.sampledAt",
 		"config.process.agentSection",
 		"config.process.section",
-		"config.process.dshHost",
-		"config.process.dshSessionSummary",
 		"config.process.empty",
-		"config.process.stopHostConfirm",
 		"config.process.loadFailed",
 		"config.process.column.memory",
 		"config.process.column.agentId",

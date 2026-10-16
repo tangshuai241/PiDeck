@@ -21,8 +21,7 @@ export interface SidebarArchiveActionsDeps {
 }
 
 /**
- * 侧栏会话归档/删除族：常规删除、归档/恢复（pi 文件归档 + DSH host 目录归档）、
- * 归档区列表与永久删除。会话管理弹窗与侧栏会话菜单共用这一套动作。
+ * 侧栏会话归档/删除族：常规删除、归档/恢复（pi 文件归档）、归档区列表与永久删除。
  */
 export function useSidebarArchiveActions({ activeProjectId, showToast, overlays, refreshProjectSessions, dismissSessionTree, getSessionRecords }: SidebarArchiveActionsDeps) {
 	async function deleteSidebarSession(projectId: string, session: SessionSummary) {
@@ -47,7 +46,7 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 		await refreshProjectSessions(projectId, true);
 	}
 
-	/** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
+	/** 归档会话：从列表移除但不销毁文件；toast 告知恢复入口（会话管理） */
 	async function archiveSidebarSession(projectId: string, session: SessionSummary) {
 		await api.sessions.archiveRecord(session.id);
 		dismissSessionTree(session, projectId);
@@ -63,14 +62,6 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 		if (projectId) await refreshProjectSessions(projectId);
 	}
 
-	/** 恢复 DSH 归档会话：host 目录移回 sessions 树并由主进程重建 catalog 记录 */
-	async function unarchiveDshSidebarSession(dshSessionId: string, projectId = activeProjectId) {
-		await api.sessions.unarchiveDshSession(dshSessionId);
-		showToast(t("app.sessionRestored"), 2200);
-		// 恢复目标项目由主进程按 manifest 的 cwd 决定；刷新当前弹窗项目即可让 catalog 快照更新。
-		if (projectId) await refreshProjectSessions(projectId);
-	}
-
 	/** 列出已归档会话（会话管理弹窗恢复视图用） */
 	function listArchivedSidebarSessions() {
 		return api.sessions.listArchived();
@@ -81,19 +72,6 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 		await api.sessions.deleteArchivedRecord(archivedPath);
 		showToast(t("app.sessionDeletedFromArchive"), 2200);
 		// 归档删除不影响常规目录；刷新当前项目只是让 catalog 快照与磁盘一致。
-		const projectId = activeProjectId;
-		if (projectId) await refreshProjectSessions(projectId);
-	}
-
-	/** 列出 DSH 归档会话（会话管理弹窗归档视图用；与 pi 归档合并展示） */
-	function listArchivedDshSidebarSessions() {
-		return api.sessions.listArchivedDshSessions();
-	}
-
-	/** 永久删除已归档 DSH 会话（host 目录移入回收站） */
-	async function deleteArchivedDshSidebarSession(dshSessionId: string) {
-		await api.sessions.deleteArchivedDshSession(dshSessionId);
-		showToast(t("app.sessionDeletedFromArchive"), 2200);
 		const projectId = activeProjectId;
 		if (projectId) await refreshProjectSessions(projectId);
 	}
@@ -123,11 +101,8 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 		deleteSidebarSession,
 		archiveSidebarSession,
 		unarchiveSidebarSession,
-		unarchiveDshSidebarSession,
 		listArchivedSidebarSessions,
 		deleteArchivedSidebarSession,
-		listArchivedDshSidebarSessions,
-		deleteArchivedDshSidebarSession,
 		requestDeleteSidebarSession,
 	};
 }

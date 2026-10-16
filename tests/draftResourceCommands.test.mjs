@@ -172,9 +172,9 @@ test("live Pi command discovery replaces draft suggestions once the runtime star
 	const live = [{ name: "skill:live", description: "Pi runtime command", source: "skill" }];
 	const draft = [{ name: "skill:draft", description: "Pre-agent command", source: "skill" }];
 
-	assert.strictEqual(selectComposerSuggestionCommands(false, true, live, draft), live);
-	assert.strictEqual(selectComposerSuggestionCommands(false, false, live, draft), draft);
-	assert.strictEqual(selectComposerSuggestionCommands(true, false, live, draft), live);
+	assert.strictEqual(selectComposerSuggestionCommands(true, live, draft), live);
+	assert.strictEqual(selectComposerSuggestionCommands(false, live, draft), draft);
+	assert.strictEqual(selectComposerSuggestionCommands(false, live, draft), draft);
 });
 
 // ── standby 进程命令预览（Issue #316）──────────────────────────
@@ -193,11 +193,11 @@ test("standby preview wins over local discovery for drafts but never over a live
 	const preview = [{ name: "grill-me", description: "Extension command via standby", source: "skill" }];
 
 	// 草稿 + 有预览：预览优先（含扩展命令，本地发现覆盖不到）
-	assert.strictEqual(selectComposerSuggestionCommands(false, false, live, draft, preview), preview);
+	assert.strictEqual(selectComposerSuggestionCommands(false, live, draft, preview), preview);
 	// 预览为空（池关/无进程/查询失败）：回退本地发现
-	assert.strictEqual(selectComposerSuggestionCommands(false, false, live, draft, []), draft);
-	assert.strictEqual(selectComposerSuggestionCommands(false, false, live, draft, undefined), draft);
-	// runtime 已起/DSH：本会话 RPC 表永远唯一权威，预览不掺和
-	assert.strictEqual(selectComposerSuggestionCommands(false, true, live, draft, preview), live);
-	assert.strictEqual(selectComposerSuggestionCommands(true, false, live, draft, preview), live);
+	assert.strictEqual(selectComposerSuggestionCommands(false, live, draft, []), draft);
+	assert.strictEqual(selectComposerSuggestionCommands(false, live, draft, undefined), draft);
+	// runtime 已起：本会话 RPC 表永远唯一权威，预览不掺和
+	assert.strictEqual(selectComposerSuggestionCommands(true, live, draft, preview), live);
+	assert.strictEqual(selectComposerSuggestionCommands(true, live, draft, preview), live);
 });

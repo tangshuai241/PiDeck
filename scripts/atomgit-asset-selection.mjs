@@ -46,8 +46,6 @@ export function formatAssetSize(bytes) {
  * 分类顺序也决定选择器里的排序，让同类资产聚在一起看。
  */
 const ASSET_CATEGORIES = [
-	["DSH runtime", (name) => /^dsh-runtime-/.test(name)],
-	["DSH runner", (name) => /^dsh-runner-node/.test(name)],
 	["Node 运行时", (name) => /^node-v?\d/.test(name)],
 	["更新索引", (name) => /^latest.*\.yml$/.test(name)],
 	["增量更新", (name) => /\.blockmap$/.test(name)],

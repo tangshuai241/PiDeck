@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { isValidProviderName, PROVIDER_NAME_MAX_LENGTH } from "../src/shared/providerName.ts";
-import { credentialRefFor } from "../src/shared/dshCredentialRef.ts";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-// 配置键不应被 DSH 环境变量引用的 ASCII 规则约束。
+const { credentialRefFor } = loadTsCommonJs("src/main/config/providerCompat.ts");
+
+// 配置键不应被环境变量引用的 ASCII 规则约束。
 test("provider names accept Unicode, digits, spaces and punctuation", () => {
 	for (const name of ["openai", "my-provider", "my_provider", "中文供应商", "供应商 2", "2provider", "123", "a.b", "a;b", "a$b", "a&b", "a|b", "a`b", "-leading-dash"]) {
 		assert.equal(isValidProviderName(name), true, name);

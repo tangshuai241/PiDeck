@@ -153,7 +153,7 @@ function MiniOverlayHome({ workspace }: { workspace: MiniOverlayWorkspace }) {
 /** 新建页在创建前呈现项目与模型；目录仍复用会话的可搜索 ModelPicker。 */
 function MiniOverlayNewSession({ workspace }: { workspace: MiniOverlayWorkspace }) {
 	const [modelPickerOpen, setModelPickerOpen] = useState(false);
-	const catalog = useBackendModelCatalog({ sessionId: "renderer:mini-new-session", backend: workspace.backend, projectId: workspace.project?.id, enabled: modelPickerOpen });
+	const catalog = useBackendModelCatalog({ sessionId: "renderer:mini-new-session", projectId: workspace.project?.id, enabled: modelPickerOpen });
 	const modelLabel = workspace.displayModel?.modelName ?? workspace.displayModel?.modelId ?? t("miniOverlay.defaultModel");
 
 	return (

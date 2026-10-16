@@ -23,12 +23,6 @@ const EMPTY_RUNTIME_ATOM = atom<SessionRuntimeViewState | undefined>(undefined);
  */
 export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const cachedEntry = useAtomValue(sessionId ? sessionMessageCacheBySessionIdAtomFamily(sessionId) : EMPTY_CACHE_ATOM);
-	// dsh 会话的系统提示在 DSH harness 内部组装（persona + sections），文本从
-	// request/header 事件读取（readDshSystemPrompt）；pi 的 pi-system 模板只对 pi
-	// 会话是「参考系统提示」。按 backend 区分来源，否则 dsh 会话的轨迹会错误显示
-	// pi 的系统提示（2026-08 用户反馈）。
-	const record = useAtomValue(sessionId ? sessionRecordByIdAtomFamily(sessionId) : EMPTY_RECORD_ATOM);
-	const isDshSession = record?.backend === "dsh";
 	const runtime = useAtomValue(sessionId ? sessionRuntimeBySessionIdAtomFamily(sessionId) : EMPTY_RUNTIME_ATOM);
 	const prependMessagePage = useSetAtom(prependSessionMessagePageAtom);
 	const prependHistoryPage = useSetAtom(prependSessionHistoryPageAtom);
@@ -57,18 +51,16 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			});
 	}, [sessionId, cachedEntry?.revision, cachedEntry?.updatedAt]);
 
-	// 模型请求快照（model-trace）：pi 会话的账本补充数据源（拉取 effect 在 messages
-	// 之后声明，重拉触发器之一是 messages.length）。DSH 请求体不走 pi 桥，无 trace。
+	// 模型请求快照（model-trace）：账本补充数据源（拉取 effect 在 messages 之后声明，
+	// 重拉触发器之一是 messages.length）。
 	// 活运行时传 target（主进程校验后按 agent 过滤）；历史/已停止会话不传 target 会拿到
 	// 全部 agent 的日志，再按会话最后已知 agentId 客户端过滤（重启前的旧 agent 世代快照
 	// 暂无法归属，接受缺失——快照保留 30 天，近期会话不受影响）。
 	const runtimeAgentId = runtime?.agentId;
 	const lastKnownAgentId = runtimeAgentId;
 
-	// 系统提示：pi 会话优先用最近一次模型请求快照里的真实 system（含技能上下文，
-	// 与发给供应商的请求体同源）；无快照/解析失败退回 pi-system 模板参考。
-	// dsh 会话从 host 的 request/header 事件读当轮真实系统提示（harness 按
-	// persona + sections 在请求时组装，dsh-web 轨迹同源），未装配/无数据时不展示。
+	// 系统提示：优先用最近一次模型请求快照里的真实 system（含技能上下文，与发给供应商
+	// 的请求体同源）；无快照/解析失败退回 pi-system 模板参考。
 	useEffect(() => {
 		if (!sessionId) {
 			setSystemPrompt(undefined);
@@ -88,20 +80,6 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 					if (!cancelled) setSystemPrompt(undefined);
 				});
 		};
-		if (isDshSession) {
-			void desktopApi.sessions
-				.readDshSystemPrompt(sessionId)
-				.then((prompt) => {
-					if (cancelled) return;
-					setSystemPrompt(prompt);
-				})
-				.catch(() => {
-					if (!cancelled) setSystemPrompt(undefined);
-				});
-			return () => {
-				cancelled = true;
-			};
-		}
 		const latest = modelTraces.at(-1);
 		if (!latest?.agentId) {
 			loadPiTemplate();
@@ -123,7 +101,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		return () => {
 			cancelled = true;
 		};
-	}, [sessionId, isDshSession, modelTraces]);
+	}, [sessionId, modelTraces]);
 
 	const messages = useMemo(() => {
 		if (!cachedEntry) return [];
@@ -134,7 +112,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	}, [cachedEntry]);
 
 	useEffect(() => {
-		if (!sessionId || isDshSession) {
+		if (!sessionId) {
 			setModelTraces([]);
 			return;
 		}
@@ -167,7 +145,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			.catch(() => {
 				if (traceSequenceRef.current === sequence) setModelTraces([]);
 			});
-	}, [sessionId, isDshSession, runtime?.status, runtimeAgentId, runtime?.runtimeGeneration, lastKnownAgentId, messages.length]);
+	}, [sessionId, runtime?.status, runtimeAgentId, runtime?.runtimeGeneration, lastKnownAgentId, messages.length]);
 
 	const diskPage = cachedEntry?.source === "disk" ? cachedEntry.page : undefined;
 	const runtimeHistory = cachedEntry?.source === "runtime" ? cachedEntry.history : undefined;
@@ -187,9 +165,8 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 				.readRecordMessagePage(sessionId, before, 100)
 				.then((page) => {
 					if (loadSequenceRef.current !== sequence) return;
-					// DSH host 被手动停止时返回「暂时读不了」的空页：不能当前缀写进缓存，
-					// 否则 total 归零、游标被清空，「加载更多」消失且无法重试。保持现状即可，
-					// 恢复路径由时间线的「启动 host」专态给出。
+					// 「暂时读不了」的空页（历史不可用）：不能当前缀写进缓存，否则 total 归零、
+					// 游标被清空，「加载更多」消失且无法重试。保持现状即可。
 					if (sessionHistoryUnavailableState(page)) return;
 					prependMessagePage({ sessionId, before, expectedRevision, page });
 				})
@@ -213,7 +190,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			})
 			.then((page) => {
 				if (loadSequenceRef.current !== sequence) return;
-				// 与 disk 翻页同源：host 被停时的空页不是新历史（否则同样的游标/total 损坏）。
+				// 与 disk 翻页同源：不可用的空页不是新历史（否则同样的游标/total 损坏）。
 				if (sessionHistoryUnavailableState(page)) return;
 				prependHistoryPage({ sessionId, expectedRevision, before, page });
 			})
@@ -227,7 +204,6 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		processEvents,
 		systemPrompt,
 		modelTraces,
-		isDshSession,
 		hasMoreMessages: hasMore,
 		isLoadingMoreMessages: hasMore ? isLoadingMore : false,
 		loadMore,

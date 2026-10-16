@@ -48,8 +48,8 @@ export function standbyPreviewCommandsForProject(snapshot: StandbyPreviewCommand
  * 预览不与本地发现合并——合并需要按命令名/优先级消歧，而两条来源的
  * 同名命令描述可能不一致；直接取更接近 pi 真实命令表的那份。
  */
-export function selectComposerSuggestionCommands(isDshBackend: boolean, runtimeStarted: boolean, runtimeCommands: PiCommand[], draftCommands: PiCommand[], standbyPreviewCommands?: PiCommand[]): PiCommand[] {
-	if (isDshBackend || runtimeStarted) return runtimeCommands;
+export function selectComposerSuggestionCommands(runtimeStarted: boolean, runtimeCommands: PiCommand[], draftCommands: PiCommand[], standbyPreviewCommands?: PiCommand[]): PiCommand[] {
+	if (runtimeStarted) return runtimeCommands;
 	return standbyPreviewCommands?.length ? standbyPreviewCommands : draftCommands;
 }
 

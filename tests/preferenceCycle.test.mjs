@@ -48,13 +48,6 @@ test("resolveFavoriteCycleCandidates：pi 过滤被隐藏的供应商，DSH 不�
 		backend: "pi",
 	});
 	assert.deepEqual(plain(pi.map((item) => item.provider)), ["openai"]);
-	const dsh = cycle.resolveFavoriteCycleCandidates({
-		favorites,
-		models: MODELS,
-		hiddenProviders: ["deepseek"],
-		backend: "dsh",
-	});
-	assert.equal(dsh.length, 2);
 });
 
 test("resolveFavoriteCycleCandidates：过滤用户单独隐藏的模型（Ctrl+M 不切到隐藏模型）", () => {
@@ -67,13 +60,6 @@ test("resolveFavoriteCycleCandidates：过滤用户单独隐藏的模型（Ctrl+
 	});
 	assert.deepEqual(plain(pi.map((item) => `${item.provider}/${item.id}`)), ["deepseek/deepseek-v4-pro"]);
 	// DSH 没有「隐藏模型」概念（目录由 host 给），不应因此被过滤
-	const dsh = cycle.resolveFavoriteCycleCandidates({
-		favorites,
-		models: MODELS,
-		hiddenModels: ["openai/gpt-5.6"],
-		backend: "dsh",
-	});
-	assert.equal(dsh.length, 2);
 });
 
 test("pickCycleModel：环绕前进/后退，当前项不在候选里时前进取首个、后退取末个", () => {

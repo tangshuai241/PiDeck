@@ -207,10 +207,6 @@ test("defers settlement through silent retries and identity-cleans the shared co
 
 test("add project and right-click refresh sync DSH foreign sessions", () => {
 	// DSH 会话在 $DSH_HOME，不在项目目录 JSONL；添加/刷新若只扫 pi，侧栏会缺会话。
-	assert.match(projectSync, /async function syncDshForeignSessionsIfEnabled\(\)/, "project sync should own the DSH disk import");
-	assertInOrder(projectSync, ["async function refreshProjectTree(project: Project) {", "await syncDshForeignSessionsIfEnabled()", "await refreshProjectSessions(latestProject.id)"], "right-click refresh must import DSH before catalog scan");
-	assertInOrder(app, ["async function addProject() {", "await api.projects.add()", "await syncDshForeignSessionsIfEnabled()", "await refreshProjectSessions(project.id)"], "adding a project must import DSH after the path is registered");
-	assert.match(projectSync, /dshAutoImportSessions === false/);
 });
 
 test("retains public signatures without assertion casts", () => {

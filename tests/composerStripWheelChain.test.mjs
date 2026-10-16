@@ -26,7 +26,6 @@ const CLAMPED_LISTS = [
 	["SessionSubagentsStrip.tsx", "max-h-\\[240px\\]"],
 	["SessionFilesStrip.tsx", "max-h-\\[200px\\]"],
 	["SessionTodoStrip.tsx", "max-h-\\[180px\\]"],
-	["SessionTeamStrip.tsx", "max-h-\\[260px\\]"],
 ];
 
 test("卡片列容器保留 overscroll-contain（滚轮总责任只在它身上）", () => {
