@@ -17,16 +17,16 @@ test("filterAssetsByPatterns: 未给模式时原样返回（保持全量同步�
 	assert.deepEqual(filterAssetsByPatterns(input, undefined), input);
 });
 
-test("filterAssetsByPatterns: 按前缀 glob 只挑命中资产（v0.7.5 只补传 dsh-runtime 场景）", () => {
-	const input = assets("PiDeck-0.7.5-setup.exe", "dsh-runtime-win32-x64.tgz", "dsh-runtime-win32-x64-releases.json", "dsh-runner-node-releases.json");
+test("filterAssetsByPatterns: 按前缀 glob 只挑命中资产（按前缀 glob 只挑命中资产）", () => {
+	const input = assets("PiDeck-0.7.5-setup.exe", "node-v24.13.0-win-x64.zip", "node-v24.13.0-win-x64-releases.json", "latest.yml");
 	assert.deepEqual(
-		filterAssetsByPatterns(input, ["dsh-runtime-*"]).map((a) => a.name),
-		["dsh-runtime-win32-x64.tgz", "dsh-runtime-win32-x64-releases.json"],
+		filterAssetsByPatterns(input, ["node-v24.13.0-*"]).map((a) => a.name),
+		["node-v24.13.0-win-x64.zip", "node-v24.13.0-win-x64-releases.json"],
 	);
 	// 多模式取并集；? 只匹配单个字符
 	assert.deepEqual(
-		filterAssetsByPatterns(input, ["dsh-runtime-win32-x64.tgz", "dsh-runner-?ode-*"]).map((a) => a.name),
-		["dsh-runtime-win32-x64.tgz", "dsh-runner-node-releases.json"],
+		filterAssetsByPatterns(input, ["node-v24.13.0-win-x64.zip", "node-v24.13.0-?in-x64-releases.*"]).map((a) => a.name),
+		["node-v24.13.0-win-x64.zip", "node-v24.13.0-win-x64-releases.json"],
 	);
 	assert.deepEqual(filterAssetsByPatterns(input, ["nothing-*"]), []);
 });
@@ -39,8 +39,6 @@ test("globToRegExp: 正则元字符按字面处理，不会被当成模式", () 
 });
 
 test("classifyAsset / formatAssetSize: 选择器展示用的分组与体积", () => {
-	assert.equal(classifyAsset("dsh-runtime-linux-x64.tgz"), "DSH runtime");
-	assert.equal(classifyAsset("dsh-runner-node-releases.json"), "DSH runner");
 	assert.equal(classifyAsset("node-v24.13.0-win-x64.zip"), "Node 运行时");
 	assert.equal(classifyAsset("latest-mac.yml"), "更新索引");
 	assert.equal(classifyAsset("PiDeck-0.7.5-setup.exe.blockmap"), "增量更新");
@@ -54,7 +52,7 @@ test("classifyAsset / formatAssetSize: 选择器展示用的分组与体积", ()
 
 test("buildAssetSelectionRows: 合并远端状态与默认动作，编号与资产一一对应", () => {
 	const plan = {
-		uploads: [{ name: "dsh-runtime-win32-x64.tgz", reason: "new" }],
+		uploads: [{ name: "node-v24.13.0-win-x64.zip", reason: "new" }],
 		skips: [
 			{ name: "PiDeck-0.7.5-setup.exe", reason: "same-size" },
 			{ name: "latest.yml", reason: "remote-size-unknown" },

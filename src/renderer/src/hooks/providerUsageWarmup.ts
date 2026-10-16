@@ -18,25 +18,17 @@ export type ProviderUsageWarmupTarget = {
 /** 错峰间隔（毫秒）：每个 provider 之间留出的空档。 */
 export const PROVIDER_USAGE_WARMUP_GAP_MS = 300;
 
-/** DSH 链路缓存 key 前缀（与 useProviderUsage 的 usageCacheKey 规则一致）。 */
-const DSH_CACHE_PREFIX = "dsh:";
-
 /**
  * 从状态表挑出预热目标：只取 enabled=true 的条目。
  *
- * 状态表 key 是渲染层缓存 key（pi = provider 名；dsh = `dsh:<provider>`），
- * 这里反解回「原始 provider 名 + backend」交给查询链路——主进程只认原始名。
- * 顺序固定（pi 在前、各自按名字排序），让每次启动的请求顺序可预期、便于排查。
+ * 状态表 key 就是 provider 名（DSH 链路已移除），直接交给查询链路。
+ * 顺序按名字排序，让每次启动的请求顺序可预期、便于排查。
  */
 export function selectWarmupProviders(states: Record<string, UsageProbeProviderState>): ProviderUsageWarmupTarget[] {
 	const targets: ProviderUsageWarmupTarget[] = [];
 	for (const [cacheKey, state] of Object.entries(states)) {
 		if (!state?.enabled) continue;
-		if (cacheKey.startsWith(DSH_CACHE_PREFIX)) {
-			targets.push({ provider: cacheKey.slice(DSH_CACHE_PREFIX.length), backend: "dsh" });
-		} else {
-			targets.push({ provider: cacheKey, backend: "pi" });
-		}
+		targets.push({ provider: cacheKey, backend: "pi" });
 	}
 	return targets.sort((a, b) => {
 		if (a.backend !== b.backend) return a.backend === "pi" ? -1 : 1;

@@ -30,7 +30,7 @@
  * 脚本以非 0 退出码结束，让 workflow 明确标红。
  *
  * 资产选择（v0.7.5 sidecar 补传场景）：默认行为是「GitHub 有、AtomGit 缺的全量增量同步」。
- * 只补传某类资产（如 6 平台 dsh-runtime）时用 --only，想自己逐项勾选时用 --select。
+ * 只补传某类资产（如 6 平台安装包）时用 --only，想自己逐项勾选时用 --select。
  * 选择只影响「这次传哪些附件」，不动 Release 元数据、不碰未选中的附件。
  *
  * 远端大小探测（去重有效性修复）：AtomGit 的下载 CDN 对 HEAD 返回 401（WAF 拦），
@@ -42,7 +42,7 @@
  * 用法：
  *   node scripts/sync-release-to-atomgit.mjs --tag v0.7.4
  *   ATOMGIT_TOKEN=xxx node scripts/sync-release-to-atomgit.mjs --tag v0.7.2,v0.7.3,v0.7.4
- *   ATOMGIT_TOKEN=xxx node scripts/sync-release-to-atomgit.mjs --tag v0.7.5 --only 'dsh-runtime-*'
+ *   ATOMGIT_TOKEN=xxx node scripts/sync-release-to-atomgit.mjs --tag v0.7.5 --only '*.zip'
  *   ATOMGIT_TOKEN=xxx node scripts/sync-release-to-atomgit.mjs --tag v0.7.5 --select
  */
 
@@ -83,7 +83,7 @@ const token = process.env.ATOMGIT_TOKEN || getArg("--token", "");
 // 强制重建开关：同名 Release 在 AtomGit 已存在时先删除再全量重传（同版本号重建产物重发版场景）
 const forceResync = args.includes("--force-resync");
 // 资产选择（只影响「这次传哪些附件」，不动 Release 元数据与未选中的附件）：
-//   --only <patterns>  逗号分隔的 glob（如 dsh-runtime-*），可重复传入；用于单独补传某类资产
+//   --only <patterns>  逗号分隔的 glob（如 *.zip），可重复传入；用于单独补传某类资产
 //   --select           交互式列出附件让用户勾选（CI 不传，保持全量增量行为）
 //   --force-upload     对本次选中的附件强制先删后传，即使远端同名同大小
 //   --dry-run          只打印计划，不做任何写操作（配合 --select 可放心预演）
@@ -111,7 +111,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
 
 /**
  * 只有应用版本 tag（vX.Y.Z / vX.Y.Z-beta）才允许成为 latest。
- * sidecar 资源（dsh-runner-node 等）必须挂在版本 Release 上，禁止独立占 latest。
+ * 附加资源必须挂在版本 Release 上，禁止独立占 latest。
  */
 export function isAppVersionReleaseTag(tag) {
 	return /^v\d+\.\d+/.test(String(tag ?? "").trim());

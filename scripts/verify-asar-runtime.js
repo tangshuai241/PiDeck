@@ -23,17 +23,13 @@ if (!fs.existsSync(asarPath)) {
 	process.exit(2);
 }
 
-// 运行时必须保留：主进程 external 包 + 动态 import 目标 + hostEntry 动态加载树根 + 原生/asarUnpack 包
-// 注意：@deepseek-ai/* 与 dsh-bill/dsh-tool-pwsh-persistent 已依赖分区（仅 devDependencies），
-// 不进 app.asar——它们的加载锚点在外部 runtime（resources/dsh-runtime 归档 / userData 已装目录），
-// 归档完整性由 scripts/check-dsh-asar.mjs + check-dsh-boot.mjs 守护，这里不再断言。
+// 运行时必须保留：主进程 external 包 + 动态 import 目标 + 原生/asarUnpack 包。
 const MUST_KEEP = ["node-pty", "sql.js", "@larksuiteoapi/node-sdk", "@img/sharp-win32-x64", "@vscode/ripgrep-win32-x64", "openai", "@anthropic-ai/sdk", "@mistralai/mistralai", "@google/genai", "zod", "undici", "@electron-toolkit/utils", "koffi"];
 
 // 已知冗余（已打进 out/renderer）：抽样式验证排除规则确实生效
 const SHOULD_BE_GONE = ["date-fns", "recharts", "shiki", "framer-motion", "@reduxjs/toolkit", "@tiptap/core", "prosemirror-view", "pngjs", "linkifyjs"];
 
-// 主进程模型目录是 extraResources，不再依赖根 pi-ai SDK；DSH 自身的 pi-ai
-// 仍由 @deepseek-ai 闭包按需保留，不能把它当作 PiDeck 主进程的 MUST_KEEP 根。
+// 主进程模型目录是 extraResources，不再依赖根 pi-ai SDK。
 const REQUIRED_RESOURCE_FILES = ["pi-ai-catalog.json", "pi-ai-catalog.manifest.json"];
 const resourcesDir = path.join(unpackedDir, "resources");
 const missingResources = REQUIRED_RESOURCE_FILES.filter((name) => !fs.existsSync(path.join(resourcesDir, name)));
@@ -92,8 +88,7 @@ if (missingResources.length === 0) {
 	console.error(`FAIL 模型目录资源缺失：${missingResources.join(", ")}`);
 }
 
-// 主进程只需 artifact，catalog 的构建期 pi-ai 版本绝不能被 electron-builder
-// 一并带入 app.asar；DSH 自己保留的 0.82.x 则允许继续存在。
+// 主进程只需 artifact，catalog 的构建期 pi-ai 版本绝不能被 electron-builder 一并带入 app.asar。
 const sourceVersion = catalogSourceVersion();
 const packedPiAiVersions = piAiVersionsInAsar();
 if (!sourceVersion) {
@@ -103,7 +98,7 @@ if (!sourceVersion) {
 	failed = true;
 	console.error(`FAIL catalog 来源 pi-ai@${sourceVersion} 泄漏进 app.asar：${packedPiAiVersions.join(", ")}`);
 } else {
-	console.log(`OK catalog 来源 pi-ai@${sourceVersion} 未进入 app.asar（DSH 保留：${packedPiAiVersions.join(", ") || "无"}）`);
+	console.log(`OK catalog 来源 pi-ai@${sourceVersion} 未进入 app.asar（asar 内 pi-ai：${packedPiAiVersions.join(", ") || "无"}）`);
 }
 
 if (missing.length === 0) {

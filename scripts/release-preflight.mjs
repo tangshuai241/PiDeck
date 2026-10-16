@@ -69,13 +69,9 @@ function releaseSteps() {
 		scriptStep("提示词库清单", join(ROOT, "scripts/generate-content-manifests.mjs"), ["--domain", "prompts", "--check"]),
 		scriptStep("技能库清单", join(ROOT, "scripts/generate-content-manifests.mjs"), ["--domain", "skills", "--check"]),
 		scriptStep("提示词库可检索性", join(ROOT, "scripts/check-xueprompts.mjs")),
-		scriptStep("DSH wire payload 形状", join(ROOT, "scripts/check-dsh-wire-payloads.mjs")),
 		scriptStep("Electron 二进制体检", join(ROOT, "scripts/check-electron.mjs")),
 	];
-	// DSH runtime 归档由 runtime:pack 产出、npm run build 会重打包：产物在就校验，
 	// 不在就跳过并说明原因（preflight 常在构建前跑，不能拿缺失当失败）。
-	const tgz = join(ROOT, "dist-runtime", `dsh-runtime-${process.platform}-${process.arch}.tgz`);
-	steps.push(existsSync(tgz) ? scriptStep("DSH runtime 归档完整性", join(ROOT, "scripts/check-dsh-asar.mjs")) : { label: "DSH runtime 归档完整性", skipReason: `未找到 ${relative(ROOT, tgz)}——先跑 npm run runtime:pack 再校验` });
 	return steps;
 }
 

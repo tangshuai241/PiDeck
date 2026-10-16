@@ -228,7 +228,7 @@ test("bottom bar keeps model and thinking together with independent one-click en
 	// 注入 ComposerStatsLine（与统计行并排）；chip 容器仍在 ComposerComponents。
 	const areaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 	assert.match(areaSource, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-	assert.match(areaSource, /contextMeter=\{[\s\S]{0,240}?<SessionContextMeter[\s\S]{0,360}?backend=\{composer\.backend === "dsh" \? "dsh" : "pi"\}/);
+	assert.match(areaSource, /contextMeter=\{[\s\S]{0,240}?<SessionContextMeter[\s\S]{0,360}?backend="pi"/);
 	assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
 	const chip = readFileSync("src/renderer/src/components/session/ModelThinkingChip.tsx", "utf8");
 	const host = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
@@ -294,7 +294,7 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
 test("picker shows usage inline on the provider group row; provider config pages keep the header badge", () => {
 	const picker = bottomBarSource();
 	// 用量回到「模型提供商」标题行右侧（trailing inline 单值位）：无数据/未启用时不渲染，
-	// 所以标题行保持干净；backend 随会话后端透传（DSH 会话走 dsh 链路，不误查 pi 的 usage-probes.json）。
+	// 所以标题行保持干净。
 	assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" backend=\{props\.backend\} \/>\}/);
 	assert.match(picker, /useProviderUsageBatchRefresh/);
 	// 展开区不再挂用量明细块（明细在圆球面板；标题行只放单值位）。
@@ -305,7 +305,7 @@ test("picker shows usage inline on the provider group row; provider config pages
 	assert.match(commandPicker, /trailing\?: ReactNode/);
 	// Pi 模型页：折叠卡片不再另开 h-9 底栏——模型数徽章 + 卡头用量徽标都收进标题行；
 	// 展开体里的「用量」明细块（ProviderUsageDetails）仍不挂（卡头徽标已覆盖展示）；
-	// 整行点击展开来自上游，卡头徽标常驻；模型/认证/DSH 三页统一。
+	// 整行点击展开来自上游，卡头徽标常驻；模型/认证两页统一。
 	const modelsTab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
 	assert.match(modelsTab, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
 	assert.match(modelsTab, /UsageQueryEntryButton/);
@@ -332,14 +332,6 @@ test("picker shows usage inline on the provider group row; provider config pages
 	assert.doesNotMatch(authTab, /ProviderUsageDetails/);
 	assert.doesNotMatch(authTab, /ProviderUsageRow/);
 	assert.match(authTab, /UsageQueryEntryButton/);
-	const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
-	// DSH 卡片徽章必须走 dsh 链路（配置/凭据都在 $DSH_HOME，不误读 pi 的 usage-probes.json）。
-	assert.match(dshCards, /<ProviderUsageInline provider=\{entry\.key\} variant="card" backend="dsh" \/>/);
-	assert.match(dshCards, /<ProviderUsageInline provider="deepseek" variant="card" backend="dsh" \/>/);
-	assert.doesNotMatch(dshCards, /ProviderUsageDetails/);
-	assert.match(dshCards, /config\.dsh\.modelsCount/);
-	assert.doesNotMatch(dshCards, /ProviderUsageRow/);
-	assert.match(dshCards, /UsageQueryEntryButton/);
 	// 旧胶囊徽标组件已删除（cc-switch 风格无胶囊）
 	assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);
 });

@@ -102,7 +102,6 @@ export function SessionTrajectoryView(props: {
 	processEvents?: SessionProcessEvent[];
 	systemPrompt?: string;
 	/** 会话是否 DSH 后端（系统提示说明文案按后端区分）。 */
-	isDsh?: boolean;
 	/** 模型请求快照摘要（pi 会话；每个请求一行，可回读完整请求体）。 */
 	modelTraces?: TrajectoryModelTraceSummary[];
 	/** 来源会话（fork/子代理的父会话）：显示在面板顶部，可跳转。 */
@@ -115,12 +114,12 @@ export function SessionTrajectoryView(props: {
 	variant?: "page" | "drawer";
 }) {
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
-	// 对外「N 轮」口径（统一轮次契约）：DSH 会话用 host sessionStats（官方，与
+	// 对外「N 轮」口径（统一轮次契约）：按发言权周期计数，与
 	// dsh-web 一致，含 goal 自动续跑轮）；pi 会话（及 DSH 投影未到时的兜底）按
 	// 发言权周期计（countUserTurns，与分页/缓存协议同口径，开口即算一轮）。
 	// 账本分组结构仍按 user 开轮（buildTrajectory），连发 user 时组数可能略多于
 	// 发言权轮数——账本是结构展示，对外计数统一走 countUserTurns。
-	const dialogueTurns = props.isDsh === true && runtime?.state?.dshSessionStats ? runtime.state.dshSessionStats.turns : countUserTurns(props.messages);
+	const dialogueTurns = countUserTurns(props.messages);
 	const [now, setNow] = useState(() => Date.now());
 	const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
 	const [range, setRange] = useState<TrajectoryTimeRange | undefined>(undefined);
@@ -201,7 +200,7 @@ export function SessionTrajectoryView(props: {
 			) : null}
 			<div className={drawer ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(140px,38%)]" : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,32%)]"}>
 				<TrajectoryLedger records={visible} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} />
-				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
+				<TrajectoryInspector record={selected} runtimeState={runtime?.state} />
 			</div>
 		</div>
 	);
@@ -436,8 +435,7 @@ function TrajectoryInspector(props: {
 	const record = props.record;
 	const state = props.runtimeState;
 	const tpsMode = useAtomValue(tpsDisplayModeAtom);
-	const sessionStats = state?.dshSessionStats;
-	const throughput = buildTpsDisplay(tpsMode, sessionStats ? sessionStats.tokensPerSecond : state?.tps, sessionStats ? sessionStats.endToEndTokensPerSecond : state?.endToEndTps, sessionStats ? "session" : "reply", 1);
+	const throughput = buildTpsDisplay(tpsMode, state?.tps, state?.endToEndTps, "reply", 1);
 	// modelRequest 检查器的完整请求体回读：按记录隔离，切换选中即清空。
 	const [traceView, setTraceView] = useState<{ traceId: string; status: "loading" | "loaded" | "missing"; payloadJson?: string } | undefined>(undefined);
 	useEffect(() => {
@@ -493,7 +491,7 @@ function TrajectoryInspector(props: {
 				{record.kind === "tool" ? <Wrench size={14} /> : record.kind === "modelRequest" ? <FileJson size={14} /> : <Hash size={14} />}
 				{record.kind === "tool" ? record.toolName : kindLabel(record)}
 			</div>
-			{record.kind === "systemPrompt" ? <p className="mb-2 text-caption text-muted-foreground">{props.isDsh ? t("session.trajectory.systemPromptHintDsh") : t("session.trajectory.systemPromptHint")}</p> : null}
+			{record.kind === "systemPrompt" ? <p className="mb-2 text-caption text-muted-foreground">{t("session.trajectory.systemPromptHint")}</p> : null}
 			<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption">
 				{record.startedAt > 0 ? (
 					<>
@@ -611,7 +609,7 @@ function TrajectoryInspector(props: {
 				</button>
 			) : null}
 			{!record.inputDetail && !record.outputDetail && (record.detail || record.text) ? <CopyableBlock text={record.detail || record.text || ""} /> : null}
-			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined || state.totalMs !== undefined || state.dshSessionStats !== undefined) ? (
+			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined || state.totalMs !== undefined) ? (
 				<div className="mt-4 border-t border-border/60 pt-3">
 					<div className="mb-1 flex items-center gap-1 text-caption font-medium">
 						<Clock size={12} />
@@ -630,7 +628,7 @@ function TrajectoryInspector(props: {
 								<dd className="tabular-nums">{formatDuration(state.totalMs)}</dd>
 							</>
 						) : null}
-						{state.tps !== undefined || state.endToEndTps !== undefined || state.totalMs !== undefined || sessionStats !== undefined ? (
+						{state.tps !== undefined || state.endToEndTps !== undefined || state.totalMs !== undefined ? (
 							<>
 								<dt title={throughput.hint}>{throughput.label}</dt>
 								<dd className="tabular-nums">{throughput.value}</dd>

@@ -1,5 +1,7 @@
 # DSH Runtime 交叉打包方案（单 runner 出全平台）
 
+> 状态（2026-10-16）：已废弃 — DSH 运行时已从 TPA 移除，本文仅作历史对照，不再执行、不再维护。
+
 > 状态：已落地。`pack-dsh-runtime.mjs` 支持 `--target-os/--target-arch/--target-libc`
 > 交叉解析模式；`release.yml` 用单个 ubuntu runner 打满 6 平台；`post-release-sidecars.yml`
 > 的原生补发职责移除。默认（无 --target-*）行为不变：从项目 node_modules 收集闭包。

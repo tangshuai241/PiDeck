@@ -819,22 +819,6 @@ function getBuiltinCommands(): PiCommand[] {
 	];
 }
 
-/**
- * DSH 已知斜杠命令建议（G4）：与 dsh-web 命名空间一致——host 侧 pideck-slash-bridge
- * 在 agent/pre-step 拦截执行，未命中（未知命令）放行给模型。列表仅作 Composer `/` 菜单
- * 建议，不参与执行正确性。description 用 i18n key（controller 注入时翻译）。
- */
-export const DSH_COMMAND_SUGGESTIONS: Array<{ name: string; descriptionKey: TranslationKey; source: "dsh" }> = [
-	{ name: "permission", descriptionKey: "dshCommand.permission", source: "dsh" },
-	{ name: "plan", descriptionKey: "dshCommand.plan", source: "dsh" },
-	{ name: "plan off", descriptionKey: "dshCommand.planOff", source: "dsh" },
-	{ name: "compact", descriptionKey: "dshCommand.compact", source: "dsh" },
-	{ name: "help", descriptionKey: "dshCommand.help", source: "dsh" },
-	{ name: "goal", descriptionKey: "dshCommand.goal", source: "dsh" },
-	{ name: "subagent", descriptionKey: "dshCommand.subagent", source: "dsh" },
-	{ name: "feedback", descriptionKey: "dshCommand.feedback", source: "dsh" },
-];
-
 export function mergeCommands(commands: PiCommand[]) {
 	const visibleCommands = commands.filter(isVisibleDesktopCommand);
 	const names = new Set(visibleCommands.map((command) => command.name));

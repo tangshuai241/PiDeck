@@ -105,30 +105,10 @@ export default defineConfig({
     build: {
       lib: {
         // electron-vite 多入口：lib.entry 对象形式输出到 out/main。
-        // hostEntry 是 utilityProcess 的 DSH host 入口，独立 chunk 供 DshHostProcess fork；
-        // runnerConsolePreload 经 host 补丁 NODE_OPTIONS=--require 注入沙箱 runner。
-        // 持久 pwsh 已抽成独立包 dsh-tool-pwsh-persistent，不再打进 out/main。
         entry: {
           index: resolve(__dirname, "src/main/index.ts"),
-          hostEntry: resolve(__dirname, "src/main/dsh/hostEntry.ts"),
-          runnerConsolePreload: resolve(__dirname, "src/main/dsh/runnerConsolePreload.ts"),
-          pideckPluginBridge: resolve(__dirname, "src/main/dsh/pideckPluginBridge.ts"),
-          pideckCommandsBridge: resolve(__dirname, "src/main/dsh/pideckCommandsBridge.ts"),
-          // hostEntry 的 Loader 行按 join(__dirname, "pideckSessionBridge.js") 引用本文件；
-          // 只作为静态 import 时 rollup 会打成带 hash 的共享 chunk，Loader 行找不到文件
-          // （out/main 被清空重建后必然复现），必须保持独立入口产出稳定文件名。
-          pideckSessionBridge: resolve(__dirname, "src/main/dsh/pideckSessionBridge.ts"),
         },
         formats: ["cjs"],
-      },
-      rollupOptions: {
-        // @deepseek-ai/dsh 的子包（dsh-app-boot / dsh-llm / cordis 等）不在
-        // package.json 顶层 dependencies，externalizeDepsPlugin 只外置
-        // `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh/...`，不会匹配
-        // `@deepseek-ai/dsh-app-boot`。打进 out/main 后 import.meta.url
-        // 变成产物路径，createRequire(...)("../package.json") 会报
-        // Cannot find module '../package.json'（发送 DSH 消息即触发）。
-        external: [/^@deepseek-ai\//, "dsh-tool-pwsh-persistent", "dsh-bill"],
       },
     },
     define: {
@@ -171,34 +151,6 @@ export default defineConfig({
       reportCompressedSize: false,
       // CSS 压缩使用 esbuild（比 cssnano 快）
       cssMinify: "esbuild",
-      rollupOptions: {
-        // 缓存模块解析结果，增量构建时跳过未变更模块，加速二次打包
-        cache: true,
-        // 多入口：主窗口 index.html + 桌面宠物悬浮窗 pet.html
-        input: {
-          index: resolve("src/renderer/index.html"),
-          pet: resolve("src/renderer/pet.html"),
-
-          floater: resolve("src/renderer/floater.html"),
-        },
-        output: {
-          // 将大体积的第三方依赖拆分为独立 chunk，减少首屏需要加载和解析的 JS 体积。
-          // 拆分策略：React 全家桶、图标库、Markdown 渲染栈各归一类。
-          // 利用 Rollup 的 chunk 缓存机制：vendor 不变时浏览器复用缓存，加快二次加载。
-          // Mermaid 已在渲染层用 dynamic import 惰性加载，此处不额外聚合，避免破坏已有 code splitting。
-          manualChunks(id) {
-            if (id.includes("/node_modules/react/") || id.includes("/node_modules/react-dom/") || id.includes("/node_modules/scheduler/")) {
-              return "vendor-react";
-            }
-            if (id.includes("/node_modules/lucide-react/")) {
-              return "vendor-icons";
-            }
-            if (id.includes("/node_modules/react-markdown/") || id.includes("/node_modules/remark-") || id.includes("/node_modules/rehype-") || id.includes("/node_modules/unified/") || id.includes("/node_modules/katex/") || id.includes("/node_modules/mdast-") || id.includes("/node_modules/hast-") || id.includes("/node_modules/micromark-") || id.includes("/node_modules/vfile") || id.includes("/node_modules/unist-") || id.includes("/node_modules/trough") || id.includes("/node_modules/bail") || id.includes("/node_modules/dequal") || id.includes("/node_modules/devlop") || id.includes("/node_modules/html-to-image/")) {
-              return "vendor-markdown";
-            }
-          },
-        },
-      },
     },
   },
 });

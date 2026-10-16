@@ -28,19 +28,11 @@ const formats = args.length > 0 ? args.join(" ") : "nsis";
 console.log(`[1/4] 构建本地 packages（file: 依赖需要 lib/ 产物）…`);
 execSync("npm run build:packages", { cwd: root, stdio: "inherit", shell: true });
 
-// DSH runtime 官方默认 lite：extraResources 目录只留 .gitkeep，安装包不随 runtime。
-// --if-missing 跳过重打 tgz，但仍会清 extraResources，避免本地 --full 残留被打进包。
-// 前置同步声明版本根字段（devDependencies 会被 electron-builder 从 asar 剥掉，
-// 打包版靠根字段做 runtime 版本一致性门控——见 scripts/sync-dsh-declared-version.mjs）。
-console.log(`\n[2/4] 同步 DSH 声明版本 + 准备随包资源（--if-missing）…`);
-execSync("node scripts/sync-dsh-declared-version.mjs", { cwd: root, stdio: "inherit", shell: true });
-execSync("node scripts/pack-dsh-runtime.mjs --if-missing", { cwd: root, stdio: "inherit", shell: true });
-
 // build:fast 同步生成 pi-ai catalog，避免快速包带上升级前的静态模型目录。
-console.log(`\n[3/4] 生成 catalog + electron-vite build（跳过 tsc 全量类型检查）…`);
+console.log(`\n[2/3] 生成 catalog + electron-vite build（跳过 tsc 全量类型检查）…`);
 execSync("npm run build:fast", { cwd: root, stdio: "inherit", shell: true });
 
-console.log(`\n[4/4] electron-builder --win ${formats}（compression=store + 跳过 asar 重打包）…`);
+console.log(`\n[3/3] electron-builder --win ${formats}（compression=store + 跳过 asar 重打包）…`);
 execSync(`npx electron-builder --win ${formats} --config.compression=store`, {
 	cwd: root,
 	stdio: "inherit",

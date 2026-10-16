@@ -21,7 +21,7 @@ import { resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending }
 import { resolveComposerThinkingLevel } from "../utils/thinkingDisplay";
 import { modelThinkingLevelOfMap } from "../../../shared/modelThinkingLevels";
 import { modelKey } from "../utils/preferenceCycle";
-import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
+import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
 
 /**
  * 会话「模型 + 思考强度」的读侧状态：模型目录、收藏、当前模型与可用档位。
@@ -90,7 +90,6 @@ export function useSessionPreferenceState(options: {
 	// 模型未知/未声明时回退全量，host 负责最终能力校验）。
 	// 引导页虚拟会话没有 record，后端以前端显式切换偏好为准（与 changeBackend 的
 	// 引导页分支同源），切到 dsh 后模型/思考选择器展示 DSH 目录而非 pi 目录。
-	const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh" || (sessionId === GUIDE_BOOTSTRAP_SESSION_ID && readWelcomeBackendPreference() === "dsh");
 	// 目录刻意懒加载：选择器打开、或快捷键首次按下（cycleArmed）才拉，避免每个会话栏开机各拉一次。
 	const catalogEnabled = options.pickerOpen || options.cycleArmed;
 	const {
@@ -101,14 +100,11 @@ export function useSessionPreferenceState(options: {
 		reload,
 	} = useBackendModelCatalog({
 		sessionId,
-		backend: isDshSession ? "dsh" : "pi",
 		projectId: record?.projectId,
 		enabled: catalogEnabled,
 	});
-	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
-	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 models.json 模型去高亮 DSH 目录。
-	const welcomeModel = isDshSession ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model;
-	const welcomeModelStorageKey = isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY;
+	const welcomeModel = readWelcomeModelPreference()?.model;
+	const welcomeModelStorageKey = WELCOME_MODEL_KEY;
 	// welcome 偏好可能指向已删除的供应商/模型（models.json 已更新而 localStorage 残留）：
 	// 目录加载后校验存在性，失效则忽略该偏好，避免选择器/默认高亮落在幽灵模型上。
 	// 与 ComposerBottomBar 共用 isWelcomeModelLost 判定；目录未加载（models 为空）时不判定，
@@ -137,7 +133,6 @@ export function useSessionPreferenceState(options: {
 	// 引导页（无 record）模型高亮：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
 	// 规则收拢到 resolveGuideDisplayModel，不再在本 hook 与 ComposerComponents 各写一份。
 	const guideDefaultModel = resolveGuideDisplayModel({
-		isDsh: isDshSession,
 		welcomeModel: effectiveWelcomeModel,
 		defaultModel: options.defaultModel,
 	});
@@ -178,7 +173,7 @@ export function useSessionPreferenceState(options: {
 		const provider = resolvedLiveModel.provider;
 		const modelId = resolvedLiveModel.modelId;
 		const cachedModel = models.find((model) => model.provider === provider && model.id === modelId);
-		if (!(options.thinkingPickerOpen || options.cycleArmed) || isDshSession || runtime?.status !== "idle" || report === null || cachedModel?.thinkingLevels !== undefined || !agentId || typeof runtimeGeneration !== "number" || !provider || !modelId) {
+		if (!(options.thinkingPickerOpen || options.cycleArmed) || runtime?.status !== "idle" || report === null || cachedModel?.thinkingLevels !== undefined || !agentId || typeof runtimeGeneration !== "number" || !provider || !modelId) {
 			return;
 		}
 		const target = { agentId, runtimeGeneration, provider, modelId };
@@ -202,12 +197,12 @@ export function useSessionPreferenceState(options: {
 			.catch(() => {
 				resolvePiRuntimeThinkingLevels({ sessionId, target });
 			});
-	}, [sessionId, options.thinkingPickerOpen, options.cycleArmed, isDshSession, runtime?.agentId, runtime?.runtimeGeneration, runtime?.status, resolvedLiveModel.provider, resolvedLiveModel.modelId, models, report, beginPiRuntimeThinkingLevels, resolvePiRuntimeThinkingLevels]);
+	}, [sessionId, options.thinkingPickerOpen, options.cycleArmed, runtime?.agentId, runtime?.runtimeGeneration, runtime?.status, resolvedLiveModel.provider, resolvedLiveModel.modelId, models, report, beginPiRuntimeThinkingLevels, resolvePiRuntimeThinkingLevels]);
 
 	// 思考档位表：与思考选择器同一份（runtime 精确档位 > capability cache > 兼容全量）。
 	const currentModelEntry = models.find((model) => model.provider === resolvedLiveModel.provider && model.id === resolvedLiveModel.modelId);
 	const runtimeThinkingTarget =
-		!isDshSession && runtimeLive && runtime?.agentId && typeof runtime.runtimeGeneration === "number" && resolvedLiveModel.provider && resolvedLiveModel.modelId
+		runtimeLive && runtime?.agentId && typeof runtime.runtimeGeneration === "number" && resolvedLiveModel.provider && resolvedLiveModel.modelId
 			? {
 					agentId: runtime.agentId,
 					runtimeGeneration: runtime.runtimeGeneration,
@@ -220,7 +215,7 @@ export function useSessionPreferenceState(options: {
 	// 为唯一展示源，runtime RPC 仅在 cache 未覆盖该模型时兑底。缓存/元数据尚不可用时
 	// 保留全量兼容档位；后端才是最终能力裁决者。
 	const thinkingLevels = resolveThinkingPickerLevels({
-		backend: isDshSession ? "dsh" : "pi",
+		backend: "pi",
 		runtimePiLevels: runtimeLevels,
 		cachedPiLevels: currentModelEntry?.thinkingLevels,
 		dshReasoningEfforts: currentModelEntry?.reasoningEfforts,
@@ -275,7 +270,6 @@ export function useSessionPreferenceState(options: {
 		record,
 		runtime,
 		runtimeLive,
-		isDshSession,
 		projectId: record?.projectId,
 		agentId: runtime?.agentId,
 		models,

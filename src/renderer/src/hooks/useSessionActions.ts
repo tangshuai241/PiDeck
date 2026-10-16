@@ -6,7 +6,7 @@ import { t } from "../i18n";
 
 /**
  * 新建会话默认后端（C21 统一真相源）：缺省为 pi（经典后端，2026-12 兼容期
- * 从 dsh 回调）。用户可在设置「默认 Agent 后端」中切换为 dsh；运行时值由
+ * 从回调）。运行时值由
  * useSessionActions 的 options.defaultBackend 注入（App 从 settings 读取）。
  * 引导页/匿名会话/侧栏「+」都经这里或显式传值，避免后端默认值分裂（F2）。
  */
@@ -18,10 +18,10 @@ export const ARCHIVED_SESSION_TOAST_MS = 4500;
 /**
  * 归档成功提示按后端分流。
  * pi/jsonl 会话恢复入口在项目右键「会话管理」→「已归档」；
- * DSH 会话不进该弹窗，要去「配置管理」DSH 页的「归档区」。
+ * 旧 DSH 会话（只读兼容）不进该弹窗。
  */
 export function archivedSessionToastMessage(session: { backend?: AgentBackend }): string {
-	return session.backend === "dsh" ? t("app.sessionArchivedDsh") : t("app.sessionArchived");
+	return t("app.sessionArchived");
 }
 
 export type RefreshProjectSessions = (projectId: string, silent?: boolean) => Promise<SessionSummary[] | SessionRecord[] | undefined>;
@@ -53,7 +53,6 @@ export interface UseSessionActionsOptions {
 			unarchiveRecord: (archivedPath: string) => Promise<boolean>;
 			listArchived: () => Promise<ArchivedPiSession[]>;
 			deleteArchivedRecord: (archivedPath: string) => Promise<boolean>;
-			deleteArchivedDshSession: (dshSessionId: string) => Promise<boolean>;
 			createDraft: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<SessionRecord>;
 			createAnonymous: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
 		};
@@ -180,14 +179,6 @@ export function useSessionActions(options: UseSessionActionsOptions) {
 		if (projectId) await refreshProjectSessions(projectId);
 	}
 
-	/** 永久删除已归档 DSH 会话（host 目录移入回收站） */
-	async function deleteArchivedDshSession(dshSessionId: string) {
-		await api.sessions.deleteArchivedDshSession(dshSessionId);
-		showToast(t("app.sessionDeletedFromArchive"), 2200);
-		const projectId = sessionsProjectId ?? activeProjectId;
-		if (projectId) await refreshProjectSessions(projectId);
-	}
-
 	// ── Sidebar session actions ──
 	async function openSidebarSession(projectId: string, session: SessionSummary): Promise<string | undefined> {
 		const requestSequence = ++openSessionRequestRef.current;
@@ -298,7 +289,6 @@ export function useSessionActions(options: UseSessionActionsOptions) {
 		unarchiveHistorySession,
 		listArchivedSessions,
 		deleteArchivedSession,
-		deleteArchivedDshSession,
 		openSidebarSession,
 		openSidebarSessionById,
 		copySidebarSession,

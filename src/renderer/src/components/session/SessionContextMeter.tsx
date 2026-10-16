@@ -156,7 +156,6 @@ export function SessionContextMeter(props: {
 		| "totalMs"
 		| "tps"
 		| "endToEndTps"
-		| "dshSessionStats"
 		| "cacheRead"
 		| "cacheWrite"
 		| "cacheTotal"

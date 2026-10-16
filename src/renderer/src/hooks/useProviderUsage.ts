@@ -15,7 +15,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { ProviderUsageResult, UsageProbeBackend, UsageProbeProviderState, UsageProbeStatesResult } from "../../../shared/types/providerUsage";
-import { normalizeDshDeepseekProvider } from "../../../shared/dshProviderNames";
 import { desktopApi } from "../desktopApi";
 import {
 	beginProviderUsageAtom,
@@ -37,17 +36,8 @@ export {
 	providerUsageEntryStale,
 } from "./providerUsageAutoQuery";
 
-/**
- * 用量展示/缓存 key：DSH 链路的 provider 名前缀 `dsh:`，避免与 pi 侧同名 provider
- * （如 deepseek）串缓存。DSH 官方 DeepSeek 的 provider 名先归一（llm.models 组 id
- * deepseek-official → 配置面规范名 deepseek），使卡片行（deepseek）、模型选择器分组行
- * 与圆球面板（deepseek-official）共享同一缓存 key——一处刷新三处联动。
- * 注意与「发送给主进程的 provider 名」是两个概念——
- * key 只用于渲染层 atom 缓存；主进程按**原始 provider 名**解析端点/配置（主进程侧
- * 再做同一归一化，两条链路各自幂等）。
- */
-export function usageCacheKey(provider: string, backend: UsageProbeBackend): string {
-	if (backend === "dsh") return `dsh:${normalizeDshDeepseekProvider(provider)}`;
+/** 用量展示/缓存 key：DSH 链路已移除，key 就是 provider 名（保留参数签名给既有调用方）。 */
+export function usageCacheKey(provider: string, _backend: UsageProbeBackend = "pi"): string {
 	return provider;
 }
 
@@ -57,12 +47,12 @@ const inFlight = new Map<string, Promise<void>>();
 /**
  * 发起一次查询并写入 atoms（in-flight 去重；结果无论成败都 resolve 进缓存）。
  * @param provider 原始 provider 名（主进程按它解析端点/配置）
- * @param cacheKey 渲染层缓存 key（与 provider 相同；DSH 链路为 `dsh:<provider>`）
+ * @param cacheKey 渲染层缓存 key（与 provider 相同）
  */
-function startFetch(provider: string, cacheKey: string, resolve: (key: string, result: ProviderUsageResult) => void, backend: UsageProbeBackend = "pi"): void {
+function startFetch(provider: string, cacheKey: string, resolve: (key: string, result: ProviderUsageResult) => void): void {
 	if (inFlight.has(cacheKey)) return;
 	const promise = desktopApi.config
-		.fetchUsage(provider, backend)
+		.fetchUsage(provider)
 		.then((result) => resolve(cacheKey, result))
 		.catch(() => {
 			// 网络异常/IPC 失败：写一条结构化失败结果，与主进程返回失败同路径展示。
@@ -87,7 +77,6 @@ const statesInFlight = new Map<string, Promise<UsageProbeStatesResult>>();
  * 批量拉取 provider 用量状态（徽章开关 / 启动预热选源）。
  *
  * - pi 链路 providers 传空数组 = 主进程按 models.json + auth.json + 已配置项枚举；
- * - dsh 链路必须显式传卡片 provider 名（主进程不枚举 DSH settings.yaml）；
  * - 结果按 usageCacheKey 写入 atom，同一签名并发挂载共享一次 IPC；
  * - 拉取期间把 backend 标为 loading，避免卡片在「状态未知」时抢发一轮白请求。
  */
@@ -99,16 +88,15 @@ export function useProviderUsageStatesLoader(providers: string[], backend: Usage
 	useEffect(() => {
 		// pi 链路一律请求「全量」（主进程按 models.json + auth.json + 已配置项枚举）：
 		// 签名与 backend 同名，多张卡片/多个消费点共享同一次 IPC，不会按卡片扇出。
-		// dsh 链路必须带卡片 provider 名（主进程不枚举 DSH settings.yaml），按列表签名去重。
-		const list = backend === "pi" ? [] : providerKey ? providerKey.split("\n") : [];
-		const signature = backend === "pi" ? "pi" : `dsh|${providerKey}`;
+		// 按固定签名去重，多张卡片共享同一次 IPC。
+		const signature = "pi";
 		let cancelled = false;
-		markStatus(backend, "loading");
-		const pending = statesInFlight.get(signature) ?? desktopApi.config.listUsageProbeStates({ providers: list, backend }).catch(() => ({ providers: {}, errors: [] }));
+		markStatus("pi", "loading");
+		const pending = statesInFlight.get(signature) ?? desktopApi.config.listUsageProbeStates({ providers: [] }).catch(() => ({ providers: {}, errors: [] }));
 		statesInFlight.set(signature, pending);
 		void pending.then((result) => {
 			// 卸载后仍写 atoms 无害（状态是跨组件共享的），但标记状态要避免覆盖后一次加载。
-			if (!cancelled) markStatus(backend, "ready");
+			if (!cancelled) markStatus("pi", "ready");
 			const entries: Record<string, UsageProbeProviderState> = {};
 			for (const [name, state] of Object.entries(result.providers)) {
 				entries[usageCacheKey(name, backend)] = state;
@@ -124,14 +112,14 @@ export function useProviderUsageStatesLoader(providers: string[], backend: Usage
 /**
  * 重拉指定 provider 的状态（用量查询弹窗保存后调）：徽章的开关态/间隔来自状态表，
  * 保存只写了 usage-probes.json，必须回读一次才能让徽章立即从「未启用」变「查询中」。
- * 只请求该 provider（pi 侧主进程仍全量解析，dsh 侧只回名单内），开销与一次刷新同级。
+ * 只请求该 provider，开销与一次刷新同级。
  */
 export function useRefreshProviderUsageState(): (provider: string, backend?: UsageProbeBackend) => Promise<void> {
 	const merge = useSetAtom(mergeProviderUsageStatesAtom);
 	return useCallback(
 		async (provider: string, backend: UsageProbeBackend = "pi") => {
 			if (!provider) return;
-			const result = await desktopApi.config.listUsageProbeStates({ providers: [provider], backend }).catch(() => ({ providers: {}, errors: [] }));
+			const result = await desktopApi.config.listUsageProbeStates({ providers: [provider] }).catch(() => ({ providers: {}, errors: [] }));
 			const entries: Record<string, UsageProbeProviderState> = {};
 			for (const [name, state] of Object.entries(result.providers)) {
 				entries[usageCacheKey(name, backend)] = state;
@@ -143,12 +131,8 @@ export function useRefreshProviderUsageState(): (provider: string, backend?: Usa
 }
 
 /** 订阅并自动取数：provider 未指定时不查（三处调用方各自兜底 provider 来源）。
- * backend="dsh" 时查询走 DSH 链路（$DSH_HOME 配置 + DSH 凭据库），缓存 key 用
- * `dsh:<provider>` 隔离；**主进程收到的永远是原始 provider 名**（缓存 key 只在
- * 渲染层 atom 里用，不能当 provider 名发过去——之前把 `dsh:deepseek` 整体当
- * provider 寄回主进程，导致 DSH 卡片用量永远解析不出、显示为空）。
  * 自动查询前置条件 = 该 provider 的开关为真（徽章开关/弹窗「是否启用」，默认关）；
- * 本 hook 自己拉一次该 provider 的状态（pi 全量/单条同一次 IPC，dsh 按名字）。
+ * 本 hook 自己拉一次该 provider 的状态。
  * 开关打开后按 intervalMinutes 排下一次自动刷新（0 = 不轮询；默认 5 分钟）。 */
 export function useProviderUsageEntry(provider: string | undefined, backend: UsageProbeBackend = "pi"): ProviderUsageEntry {
 	const cacheKey = provider ? usageCacheKey(provider, backend) : undefined;
@@ -173,11 +157,11 @@ export function useProviderUsageEntry(provider: string | undefined, backend: Usa
 			})
 		) {
 			begin(cacheKey);
-			startFetch(provider, cacheKey, resolve, backend);
+			startFetch(provider, cacheKey, resolve);
 		}
 		// 依赖只用 fetchedAt 而非整个 entry：begin() 会把 status 改成 loading，
 		// 若订整个对象会在首查发出后立刻重跑 effect（inFlight 能挡住 HTTP，但仍多一次 begin）。
-	}, [provider, cacheKey, entry.fetchedAt, intervalMinutes, queryEnabled, begin, resolve, backend]);
+	}, [provider, cacheKey, entry.fetchedAt, intervalMinutes, queryEnabled, begin, resolve]);
 
 	// 自动轮询：开关开 + 间隔 > 0 才排下一次刷新。
 	// 挂载在哪个消费面板就轮询哪个（圆球面板/模型选择器展开区/配置卡片），不后台刷全部供应商。
@@ -194,7 +178,7 @@ export function useProviderUsageEntry(provider: string | undefined, backend: Usa
 		}
 		const timer = window.setTimeout(() => {
 			begin(cacheKey);
-			startFetch(provider, cacheKey, resolve, backend);
+			startFetch(provider, cacheKey, resolve);
 		}, intervalMinutes * 60_000);
 		return () => window.clearTimeout(timer);
 	}, [provider, cacheKey, intervalMinutes, queryEnabled, begin, resolve, backend]);
@@ -211,10 +195,8 @@ export function useProviderUsageEntry(provider: string | undefined, backend: Usa
  * 调用方：App.tsx 装配层。
  */
 export function useProviderUsageStartupWarmup(): void {
-	// pi 链路请求全量（主进程按 models.json + auth.json + 已配置项枚举）；
-	// dsh 链路不带名字 = 主进程只回 DSH 侧已配置过的 provider。
+	// 请求全量（主进程按 models.json + auth.json + 已配置项枚举）。
 	useProviderUsageStatesLoader([], "pi");
-	useProviderUsageStatesLoader([], "dsh");
 	const states = useAtomValue(providerUsageStatesReadAtom);
 	const status = useAtomValue(providerUsageStatesStatusAtom);
 	const refresh = useProviderUsageRefresh();
@@ -222,17 +204,16 @@ export function useProviderUsageStartupWarmup(): void {
 	useEffect(() => {
 		if (started.current) return;
 		const piStatus = status.pi ?? "idle";
-		const dshStatus = status.dsh ?? "idle";
-		// 状态表在途就等；两边都从未请求（不可能，但保持幂等）也不排。
-		if (piStatus === "loading" || dshStatus === "loading") return;
-		if (piStatus === "idle" && dshStatus === "idle") return;
+		// 状态表在途就等；从未请求（保持幂等）也不排。
+		if (piStatus === "loading") return;
+		if (piStatus === "idle") return;
 		started.current = true;
 		const targets = selectWarmupProviders(states);
 		const timers = targets.map((target, index) => window.setTimeout(() => refresh(target.provider, target.backend), warmupDelayMs(index)));
 		return () => {
 			for (const timer of timers) window.clearTimeout(timer);
 		};
-	}, [status.pi, status.dsh, states, refresh]);
+	}, [status.pi, states, refresh]);
 }
 
 /** 手动刷新单个 provider（详情面板刷新按钮 / 保存探针后重查）：不看开关、不走新鲜期。 */
@@ -244,15 +225,14 @@ export function useProviderUsageRefresh(): (provider: string, backend?: UsagePro
 			if (!provider) return;
 			const cacheKey = usageCacheKey(provider, backend);
 			begin(cacheKey);
-			startFetch(provider, cacheKey, resolve, backend);
+			startFetch(provider, cacheKey, resolve);
 		},
 		[begin, resolve],
 	);
 }
 
 /** 批量刷新（模型选择器打开时）：只查「从未查过或已超过各自间隔」的 provider。
- * 调用方为模型选择器（provider 即缓存 key）；DSH 会话的选择器传 backend="dsh"，
- * 与 pi 侧同名 provider（如 deepseek）互不串缓存、也不误读对方链路的配置。 */
+ * 调用方为模型选择器（provider 即缓存 key）。 */
 export function useProviderUsageBatchRefresh(): (providers: string[], backend?: UsageProbeBackend) => void {
 	const records = useAtomValue(providerUsageRecordsReadAtom);
 	const begin = useSetAtom(beginProviderUsageAtom);
@@ -275,7 +255,7 @@ export function useProviderUsageBatchRefresh(): (providers: string[], backend?: 
 					continue;
 				}
 				begin(cacheKey);
-				startFetch(provider, cacheKey, resolve, backend);
+				startFetch(provider, cacheKey, resolve);
 			}
 		},
 		[records, begin, resolve],

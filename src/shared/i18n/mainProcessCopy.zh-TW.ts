@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 9f280c8cece1a8974b367fce56d49cf95004b773cc6fe55bd931c3e367f9f0bf（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b83f1ac52466d498a615989d453d7deb9d58fa5fed6f8df36e84b8de199b8932（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -102,28 +102,15 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"session.invalidModel": "模型選擇無效，請重新選擇。",
 	"session.backendLocked": "會話已建立，後端（Pi / DSH）不可切換。",
 	"session.backendRemoved": "當前版本已移除這個會話後端。原會話資料仍保留。",
+	"session.dshRuntimeRemoved": "DSH 執行能力已在此版本移除。原會話記錄與 $DSH_HOME 中的會話檔案仍保留；可右鍵「複製會話檔案路徑」定位原檔案，或在 DSH CLI / dsh-web 中繼續使用。",
 	"session.agentPresetLocked": "會話已建立，Agent 模式（預設）不可更改。",
 	"session.fileNotFound": "會話檔案不存在，請重新整理會話列表後重試。",
-	"session.copyDshUnsupported": "DSH 歷史會話暫不支援直接複製，請開啟會話後使用執行中 Agent 的「複製會話」。",
 	"session.exportFailed": "會話匯出失敗，請重試。",
 	"session.inUseDeleteBlocked": "會話“{title}”正在使用中，請先關閉 Agent 後再刪除。",
 	"session.stopBeforeDelete": "請先停止會話執行例項，再刪除會話。",
 	"session.invalidArchivePath": "無效的歸檔會話路徑。",
 	"session.newTitle": "新會話",
 	"session.dshUntitled": "DSH 會話",
-	"session.dshRuntimeNotInstalled": "DSH 後端執行時未安裝，無法新建 DSH 會話。請在配置管理頁安裝後再試；Pi 後端不受影響。",
-	"session.dshRuntimeOutdated": "DSH 後端執行時與本版本 TPA 不配套，已停止使用。請在配置管理頁重新安裝配套版本後再試；Pi 後端不受影響。",
-	"dsh.runtime.invalidArchivePath": "所選路徑不是有效的 runtime（.tgz 歸檔或已解壓目錄），請重新選擇。",
-	"dsh.runtime.pickArchiveTitle": "選擇 DSH runtime 歸檔（.tgz）",
-	"dsh.runtime.pickDirectoryTitle": "選擇已解壓的 DSH runtime 目錄",
-	"dsh.runtime.errors.manifestMissing": "所選目錄缺少 manifest.json，不是完整的 DSH runtime。請選擇包含 manifest.json 與 node_modules 的 runtime 根目錄（或 .tgz 歸檔）。",
-	"dsh.runtime.errors.manifestUnreadable": "所選目錄的 manifest.json 無法解析（可能已損壞），請重新下載或選擇有效目錄。",
-	"dsh.runtime.errors.schemaUnsupported": "所選 runtime 的 manifest schema 版本過高，當前應用不支援，請升級 TPA 或換用匹配的 runtime。",
-	"dsh.runtime.errors.appIncompatible": "所選 runtime 與當前應用版本不相容（版本區間不匹配），請換用匹配的 runtime。",
-	"dsh.runtime.errors.nodeModulesMissing": "所選目錄缺少 node_modules，不是完整的 DSH runtime，請重新選擇。",
-	"dsh.runtime.errors.requiredPackageMissing": "所選 runtime 缺少關鍵包 {pkg}，檔案可能不完整，請重新下載。",
-	"dsh.runtime.errors.directoryNotFound": "所選路徑不存在或不是目錄，請重新選擇。",
-	"dsh.runtime.errors.runtimeVersionUnavailable": "下載源裡沒有與本版本 TPA 配套的 runtime（需要 {required}；源內可用：{available}）。請用「匯入本地 runtime 歸檔」選擇配套版本，或升級到已釋出配套 runtime 的 TPA 版本。",
 	"session.anonymousTitle": "匿名聊天 - {project}",
 	"session.untitled": "未命名會話",
 	"session.emptyPreview": "空會話",

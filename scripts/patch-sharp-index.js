@@ -5,7 +5,7 @@
  * `require('./lib/sharp-win32-x64-<ver>.node')` 加载原生绑定。打包后该文件
  * 经 asar 虚拟路径加载（asar 内副本，asar.unpacked 为镜像），__dirname 是
  * asar 虚拟路径；Electron 的 dlopen 补丁会把 .node 复制到 %TEMP% 再加载，
- * 同目录 libvips-*.dll 不会跟随复制 → ERR_DLOPEN_FAILED（DSH host 启动即退）。
+ * 同目录 libvips-*.dll 不会跟随复制 → ERR_DLOPEN_FAILED。
  * 注意：fs.realpathSync 对 asar 内路径不解析 unpacked，因此不能依赖它；
  * 这里直接用 process.resourcesPath 构造 asar.unpacked 的真实磁盘路径再 require，
  * 保证 .node 与 DLL 同目录加载（node-pty 走 node-gyp-build 同理）。

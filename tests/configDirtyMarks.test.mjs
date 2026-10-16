@@ -102,7 +102,7 @@ test("保存全部脏来源时 settings 排最后（它的重载会连带刷新 
 test("嵌入配置管理的顶部保存仍复用 models 保存入口", () => {
 	const source = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
 	// 新增/编辑 provider 是 models 页内子页面，不能因为内容切换而丢失顶部保存路由。
-	assert.match(source, /const currentTabKey = backendPane === "dsh" \? "dsh" : sectionTabValue\(section, tab\);/);
+	assert.match(source, /const currentTabKey = sectionTabValue\(section, tab\);/);
 	assert.match(source, /await saveByKey\(currentTabKey\);/);
 	assert.match(source, /模型页的新增\/编辑供应商是一个页内子页面/);
 });

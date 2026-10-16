@@ -48,7 +48,7 @@ import { cn } from "../../lib/utils";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
-import type { SessionSummary, Project, AgentTab, ArchivedDshSession, ArchivedPiSession, SessionSortModeId } from "../../../../shared/types";
+import type { SessionSummary, Project, AgentTab, ArchivedPiSession, SessionSortModeId } from "../../../../shared/types";
 import { SESSION_SORT_MODES, resolveSessionSortMode } from "../../sessionSortModes";
 import { worktreeSlugify } from "../../../../shared/worktreeSlug";
 import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
@@ -57,7 +57,7 @@ import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { SESSION_FILTER_PILLS, filterSessionsByPills, pillsPresentIn, type SessionFilterPill } from "../../sessionFilterPills";
-import { archivedDshWorkspaceLabel, archivedPiWorkspaceLabel, filterArchivedDshByFamily, filterArchivedPiByFamily, managerArchivedDshLabel, managerArchivedRowKey, mergeManagerArchived, sessionManagerRowKey, sessionWorkspaceLabel, worktreeFamilyProjects, type ManagerArchivedRow } from "../../sessionManagerModel";
+import { archivedPiWorkspaceLabel, filterArchivedPiByFamily, managerArchivedRowKey, mergeManagerArchived, sessionManagerRowKey, sessionWorkspaceLabel, worktreeFamilyProjects, type ManagerArchivedRow } from "../../sessionManagerModel";
 
 /**
  * 工作区标签（会话管理弹窗内复用）：worktree 家族聚合后，非主工作区会话
@@ -90,12 +90,6 @@ export function SessionManagerModal(props: {
 	listArchived: () => Promise<ArchivedPiSession[]>;
 	/** 永久删除已归档会话（pi 文件归档：移入回收站并移出索引） */
 	deleteArchived: (archivedPath: string) => Promise<void>;
-	/** 列出 DSH 归档会话（归档视图用；host 目录已移入 .pideck-archive，含标题） */
-	listArchivedDsh: () => Promise<ArchivedDshSession[]>;
-	/** 恢复 DSH 归档会话（主进程移回 sessions 树并重建 catalog 记录） */
-	onUnarchiveDsh: (dshSessionId: string) => Promise<void>;
-	/** 永久删除已归档 DSH 会话（host 目录移入回收站） */
-	deleteArchivedDsh: (dshSessionId: string) => Promise<void>;
 }) {
 	// 弹窗项目上下文 = 整个 worktree 家族（根 + 全部子工作区），与侧栏工作区树语义一致。
 	const family = useMemo(() => worktreeFamilyProjects(props.projects, props.projectId), [props.projects, props.projectId]);
@@ -159,12 +153,13 @@ export function SessionManagerModal(props: {
 		props.onDelete(toDelete);
 	};
 
-	// 归档视图数据：pi（文件归档）+ DSH（host 目录归档）按家族归属过滤后合并，恢复后重新拉取。
+	// 归档视图数据：pi 文件归档按家族归属过滤，恢复后重新拉取。
 	// 弹窗按项目上下文（整个 worktree 家族）展示归档，不再全量跨项目。
 	const loadArchivedRows = () => {
-		void Promise.all([props.listArchived(), props.listArchivedDsh()])
-			.then(([piSessions, dshItems]) => {
-				setArchivedRows(mergeManagerArchived(filterArchivedPiByFamily(piSessions, family), filterArchivedDshByFamily(dshItems, family)));
+		void props
+			.listArchived()
+			.then((piSessions) => {
+				setArchivedRows(mergeManagerArchived(filterArchivedPiByFamily(piSessions, family)));
 				// 数据刷新后清空选中，避免删除/恢复后残留全选或计数。
 				setArchivedSelected(new Set());
 				setArchivedSelectAll(false);
@@ -331,7 +326,7 @@ export function SessionManagerModal(props: {
 									) : (
 										archivedRows.map((row) => {
 											// 归档行工作区标签：worktree 子项目会话打「目录名」标（与主列表同策略），主工作区不打。
-											const workspaceLabel = row.kind === "pi" ? archivedPiWorkspaceLabel(row.item, family) : archivedDshWorkspaceLabel(row.item, family);
+											const workspaceLabel = archivedPiWorkspaceLabel(row.item, family);
 											const rowKey = managerArchivedRowKey(row);
 											const isChecked = archivedSelected.has(rowKey);
 											return (
@@ -342,23 +337,11 @@ export function SessionManagerModal(props: {
 														</Label>
 													</TableCell>
 													<TableCell className="w-full max-w-0">
-														{row.kind === "pi" ? (
-															<div className="flex min-w-0 items-center gap-2">
-																<span className="truncate text-control text-text-primary">{row.item.summary.name || row.item.summary.preview?.slice(0, 60) || t("common.untitled")}</span>
-																{workspaceLabel && <WorkspaceTag label={workspaceLabel} />}
-																{row.item.summary.source && row.item.summary.source !== "pi" && <SessionSourceBadge source={row.item.summary.source} />}
-															</div>
-														) : (
-															// DSH 归档行：manifest/日志折叠标题 > cwd 末段 > host id（managerArchivedDshLabel 纯策略）。
-															// 不展示 cwd 路径（同家族下路径信息无益；cwd 末段兜底已含区分能力）。
-															<div className="flex min-w-0 items-center gap-2">
-																<span className="truncate text-control text-text-primary">
-																	<span className="font-medium">{managerArchivedDshLabel(row)}</span>
-																</span>
-																{workspaceLabel && <WorkspaceTag label={workspaceLabel} />}
-																<SessionBackendMark backend="dsh" />
-															</div>
-														)}
+														<div className="flex min-w-0 items-center gap-2">
+															<span className="truncate text-control text-text-primary">{row.item.summary.name || row.item.summary.preview?.slice(0, 60) || t("common.untitled")}</span>
+															{workspaceLabel && <WorkspaceTag label={workspaceLabel} />}
+															{row.item.summary.source && row.item.summary.source !== "pi" && <SessionSourceBadge source={row.item.summary.source} />}
+														</div>
 													</TableCell>
 													<TableCell className="w-40 text-right">
 														<div className="flex items-center justify-end gap-0.5">
@@ -368,8 +351,7 @@ export function SessionManagerModal(props: {
 																className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]"
 																onClick={() => {
 																	// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
-																	const restored = row.kind === "pi" ? props.onUnarchive(row.item.summary) : props.onUnarchiveDsh(row.item.dshSessionId);
-																	void restored.then(loadArchivedRows);
+																	void props.onUnarchive(row.item.summary).then(loadArchivedRows);
 																}}
 																title={t("sessionManager.restore")}
 															>
@@ -460,12 +442,7 @@ export function SessionManagerModal(props: {
 							{pendingDeleteArchived !== null && pendingDeleteArchived.length > 1
 								? t("sessionManager.deleteArchivedBodyMany", { count: pendingDeleteArchived.length })
 								: t("sessionManager.deleteArchivedBody", {
-										name:
-											pendingDeleteArchived === null || pendingDeleteArchived.length === 0
-												? ""
-												: pendingDeleteArchived[0].kind === "pi"
-													? pendingDeleteArchived[0].item.summary.name || pendingDeleteArchived[0].item.summary.preview?.slice(0, 60) || t("common.untitled")
-													: managerArchivedDshLabel(pendingDeleteArchived[0]),
+										name: pendingDeleteArchived === null || pendingDeleteArchived.length === 0 ? "" : pendingDeleteArchived[0].item.summary.name || pendingDeleteArchived[0].item.summary.preview?.slice(0, 60) || t("common.untitled"),
 									})}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
@@ -477,7 +454,7 @@ export function SessionManagerModal(props: {
 								const pending = pendingDeleteArchived;
 								setPendingDeleteArchived(null);
 								if (!pending || pending.length === 0) return;
-								const deleting = Promise.all(pending.map((row) => (row.kind === "pi" ? props.deleteArchived(row.item.summary.filePath) : props.deleteArchivedDsh(row.item.dshSessionId))));
+								const deleting = Promise.all(pending.map((row) => props.deleteArchived(row.item.summary.filePath)));
 								void deleting.then(loadArchivedRows).catch(() => loadArchivedRows());
 							}}
 						>

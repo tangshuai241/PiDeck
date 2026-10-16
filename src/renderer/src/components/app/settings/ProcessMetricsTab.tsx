@@ -1,7 +1,6 @@
 import { Loader2, Activity, CircleStop, Info, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { AgentProcessMetric, ProcessMetricsSnapshot } from "../../../../../shared/types";
-import { DSH_HOST_MONITOR_ID } from "../../../../../shared/types/processMetrics";
 import { formatMb } from "../../../../../shared/formatBytes";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
@@ -167,7 +166,7 @@ export function ProcessMetricsTab() {
 			{stoppingAgent ? (
 				<ConfirmDialog
 					title={t("config.process.stop")}
-					message={t(isDshHostRow(stoppingAgent) ? "config.process.stopHostConfirm" : "config.process.stopConfirm", { agent: monitorRowLabel(stoppingAgent) })}
+					message={t("config.process.stopConfirm", { agent: monitorRowLabel(stoppingAgent) })}
 					confirmLabel={t("config.process.stop")}
 					danger
 					onConfirm={() => {
@@ -182,13 +181,9 @@ export function ProcessMetricsTab() {
 	);
 }
 
-function isDshHostRow(agent: AgentProcessMetric): boolean {
-	return agent.kind === "dsh-host" || agent.agentId === DSH_HOST_MONITOR_ID;
-}
-
-/** 表内展示名：DSH host 用固定文案，避免把内部 id `dsh-host` 直接甩给用户。 */
+/** 表内展示名。 */
 function monitorRowLabel(agent: AgentProcessMetric): string {
-	return isDshHostRow(agent) ? t("config.process.dshHost") : agent.agentId;
+	return agent.agentId;
 }
 
 function listedSessionTitles(agent: AgentProcessMetric): string[] {

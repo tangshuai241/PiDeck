@@ -21,14 +21,10 @@ import {
 	type SessionQuoteMap,
 	setSessionSendStateAtom,
 	upsertSessionAtom,
-	dshRuntimeStatusAtom,
-	openSettingsAtom,
 } from "../atoms";
-import { applyDshGoalSendTransform, buildComposerPromptSubmission, deriveComposerAgentMode, expandPromptTemplates } from "../composerBehavior";
+import { buildComposerPromptSubmission, deriveComposerAgentMode, expandPromptTemplates } from "../composerBehavior";
 import { expandQuoteTokens, stripQuoteTokens } from "../components/session/composer/quoteChip";
 import { t, translateI18nDescriptor } from "../i18n";
-import { DSH_INSTALL_SETTINGS_TARGET, maybeHintMissingDshRunnerNode, showDshRuntimeBlockHint } from "../utils/dshRuntimeHint";
-import { dshSendBlockReason } from "../../../shared/types/dshRuntime";
 
 export type EnqueuePromptSnapshot = {
 	displayText: string;
@@ -214,42 +210,21 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			return;
 		}
 
-		// DSH 会话在 runtime 不可用（未安装/损坏）时拦截发送：DSH host fork 依赖
-		// @deepseek-ai/dsh-base 产物，runtime 缺失时主进程只会抛模块解析的裸报错。
-		// 发送前给「去安装」提示（含直达入口），避免乐观气泡 + 失败回滚的体验；
-		// checking 不算拦截——状态未定时不误拦正常发送。
 		const recordAtEntry = store.get(sessionRecordsAtom)[sourceSessionId];
 		const runtimeAtEntry = store.get(sessionRuntimeByIdAtom)[sourceSessionId];
+		// DSH 运行能力已移除：历史 dsh 会话禁止发送/继续。原会话文件保留，
+		// 渲染层对这类会话展示「运行时已移除」专态并提供路径定位入口。
 		if (recordAtEntry?.backend === "dsh" || runtimeAtEntry?.backend === "dsh") {
-			const dshStatusAtEntry = store.get(dshRuntimeStatusAtom);
-			if (dshSendBlockReason(dshStatusAtEntry.state)) {
-				const blockMessage =
-					dshStatusAtEntry.state === "broken"
-						? t("dsh.runtime.sendBroken", { reason: dshStatusAtEntry.reason ?? "" })
-						: dshStatusAtEntry.state === "outdated"
-							? t("dsh.runtime.sendOutdated", {
-									installed: dshStatusAtEntry.runtimeVersion ?? "",
-									declared: dshStatusAtEntry.declaredRuntimeVersion ?? "",
-								})
-							: t("dsh.runtime.sendNotInstalled");
-				setSendState({
-					sessionId: sourceSessionId,
-					state: { status: "error", error: blockMessage },
-				});
-				showDshRuntimeBlockHint(() => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET), dshStatusAtEntry.state, dshStatusAtEntry.reason, {
-					installed: dshStatusAtEntry.runtimeVersion,
-					declared: dshStatusAtEntry.declaredRuntimeVersion,
-				});
-				return;
-			}
-			maybeHintMissingDshRunnerNode(() => store.set(openSettingsAtom, { tab: "dev", section: "dsh-runner-node" }));
+			setSendState({ sessionId: sourceSessionId, state: { status: "error", error: t("session.dshRuntimeRemoved") } });
+			options.showError?.(t("session.dshRuntimeRemoved"), 6000);
+			return;
 		}
 
 		const resolveSendMode = (targetSessionId: string): ComposerAgentMode => {
 			const record = store.get(sessionRecordsAtom)[targetSessionId];
 			const liveRuntime = store.get(sessionRuntimeByIdAtom)[targetSessionId];
 			return deriveComposerAgentMode({
-				backend: record?.backend === "dsh" || liveRuntime?.backend === "dsh" ? "dsh" : "pi",
+				backend: "pi",
 				localMode: store.get(sessionComposerModeByIdAtom)[targetSessionId],
 				planModeActive: liveRuntime?.state?.planModeActive === true,
 				alignmentPhase: liveRuntime?.state?.alignment?.phase,
@@ -486,23 +461,14 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 		const record = store.get(sessionRecordsAtom)[sessionId];
 		const liveRuntime = store.get(sessionRuntimeByIdAtom)[sessionId];
-		const isDshSend = record?.backend === "dsh" || liveRuntime?.backend === "dsh";
 		const sendMode: ComposerAgentMode = deriveComposerAgentMode({
-			backend: isDshSend ? "dsh" : "pi",
+			backend: "pi",
 			localMode: store.get(sessionComposerModeByIdAtom)[sessionId],
 			planModeActive: liveRuntime?.state?.planModeActive === true,
 			alignmentPhase: liveRuntime?.state?.alignment?.phase,
 			goalPhase: liveRuntime?.state?.goal?.phase,
 		});
-		// DSH 拒绝 agentMessage：首次目标改写成 /goal；已有目标则原文推进。
-		const visibleMessage = isDshSend
-			? applyDshGoalSendTransform({
-					message: expandedMessage,
-					mode: sendMode,
-					goal: liveRuntime?.state?.goal,
-				})
-			: expandedMessage;
-		const submission = buildComposerPromptSubmission(visibleMessage, isDshSend ? "normal" : sendMode);
+		const submission = buildComposerPromptSubmission(expandedMessage, sendMode);
 
 		try {
 			const result = await options.sendPrompt({

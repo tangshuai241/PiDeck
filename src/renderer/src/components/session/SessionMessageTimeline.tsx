@@ -123,21 +123,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const messageLoadState = useAtomValue(messageLoadStateSelector);
 	const sendState = useAtomValue(sendStateSelector);
 	const controller = props.controller;
-	// DSH host 被用户手动停止：历史暂时读不了（main 侧降级成带原因的空页）。
-	// 与普通读盘失败分开渲染——DSH 会话没有 pi 会话文件，重试也永远不会自愈。
-	const dshHostStopped = messageLoadState?.status === "error" && messageLoadState.reason === "dsh-host-stopped";
-	const [startingDshHost, setStartingDshHost] = useState(false);
-	/** 专态主按钮：显式启动 host（唯一能解开手动停止标记的路径）+ 重载本会话历史。 */
-	const startDshHostAndRetry = useCallback(async () => {
-		if (startingDshHost) return;
-		setStartingDshHost(true);
-		try {
-			// 启动失败（host boot 报错）保留专态并提示；成功路径由控制器重载历史
-			if (!(await controller.startDshHostAndReload())) showNotice(t("config.dsh.hostStartFailed"), 6000);
-		} finally {
-			setStartingDshHost(false);
-		}
-	}, [controller, startingDshHost]);
+	// DSH 运行能力已移除：历史读取依赖已删除的 host，重试永远不会自愈。
+	const dshRuntimeRemoved = messageLoadState?.status === "error" && messageLoadState.reason === "dsh-runtime-removed";
 	const timelineRef = props.timelineRef ?? controller.timelineRef;
 	const activeMessages = controller.messages;
 	const paginatedMessages = controller.visibleMessages;
@@ -799,7 +786,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
           也不裸显示起始页误导——明确错误文案 + 重试（2026-08 生图会话文件缺失）。
           DSH host 被手动停止走下面的专态分支：DSH 会话没有 pi 会话文件，说成
           「文件可能已被删除」会把用户引向错误方向，而且重试永远无效。 */}
-			{messageLoadState?.status === "error" && activeMessages.length === 0 && !dshHostStopped && (
+			{messageLoadState?.status === "error" && activeMessages.length === 0 && !dshRuntimeRemoved && (
 				<div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
 					<p className="text-sm font-medium">{t("timeline.loadFailed")}</p>
 					<p className="max-w-[560px] text-xs text-muted-foreground">{t("timeline.loadFailedHint")}</p>
@@ -811,22 +798,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 				</div>
 			)}
 
-			{/* DSH 手动停止专态：不是故障而是用户自己的选择（预热/按需兜底/崩溃重启全被
-			    门控，不会自愈），所以主操作是「启动 host」而非只给重试；启动成功后
-			    控制器自动重载历史，用户无感回到会话内容。 */}
-			{messageLoadState?.status === "error" && activeMessages.length === 0 && dshHostStopped && (
+			{/* 旧 DSH 会话专态：运行能力已移除，历史不可解析；原文件保留在 $DSH_HOME，
+			    可经侧栏右键「复制会话文件路径」定位，不再提供重试/启动入口。 */}
+			{messageLoadState?.status === "error" && activeMessages.length === 0 && dshRuntimeRemoved && (
 				<div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-					<p className="text-sm font-medium">{t("timeline.dshHostStopped")}</p>
-					<p className="max-w-[560px] text-xs text-muted-foreground">{t("timeline.dshHostStoppedHint")}</p>
-					<div className="flex items-center gap-2">
-						<Button type="button" size="sm" className="gap-1.5" disabled={startingDshHost} onClick={() => void startDshHostAndRetry()}>
-							{startingDshHost ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <Power className="size-3.5" aria-hidden="true" />}
-							{t("timeline.dshHostStoppedStart")}
-						</Button>
-						<Button type="button" variant="outline" size="sm" onClick={() => void controller.reloadFromDisk()}>
-							{t("common.retry")}
-						</Button>
-					</div>
+					<p className="text-sm font-medium">{t("timeline.dshRuntimeRemoved")}</p>
+					<p className="max-w-[560px] text-xs text-muted-foreground">{t("timeline.dshRuntimeRemovedHint")}</p>
 				</div>
 			)}
 

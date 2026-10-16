@@ -188,23 +188,6 @@ test("pi compact failure resolves the cancel source instead of swallowing it", (
 	assert.match(pi, /throw new Error\(cancelSource\)/);
 });
 
-test("context overflow is carried through the main and DSH runtime paths", () => {
-	const pi = readFileSync("src/main/pi/AgentManager.ts", "utf8");
-	const dsh = readFileSync("src/main/dsh/DshAgentManager.ts", "utf8");
-	assert.match(pi, /isContextOverflowError\(errorMsg\)/);
-	assert.match(pi, /contextOverflowByAgent/);
-	assert.match(dsh, /isContextOverflowError\(reasonMessage\)/);
-	assert.match(dsh, /contextOverflow: runtime\.contextOverflow === true/);
-});
-
-test("pi and dsh compact throw already compacting instead of returning success", () => {
-	const pi = readFileSync("src/main/pi/AgentManager.ts", "utf8");
-	assert.match(pi, /throw new Error\("already compacting"\)/);
-	assert.doesNotMatch(pi, /Compact skipped: already compacting[\s\S]{0,120}return this\.getRuntimeState\(agentId\)/);
-	const dsh = readFileSync("src/main/dsh/DshAgentManager.ts", "utf8");
-	assert.match(dsh, /if \(runtime\.isCompacting\) \{\s*\n\s*throw new Error\("already compacting"\)/);
-});
-
 test("locales keep compact feedback keys in sync", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");

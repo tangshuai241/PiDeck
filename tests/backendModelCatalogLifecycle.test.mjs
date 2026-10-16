@@ -105,21 +105,6 @@ test("Pi catalog publishes its report and does not refetch on unchanged renders"
 	h.unmount();
 });
 
-test("DSH catalog publishes the host model list as a successful report", async () => {
-	const h = createHarness({ backend: "dsh" });
-	h.render();
-	const models = report("dsh-route").models;
-	assert.equal(h.requests[0].backend, "dsh");
-	h.requests[0].resolve(models);
-	await settle();
-	const value = h.render();
-	assert.equal(value.models, models);
-	assert.equal(value.report.ok, true);
-	assert.equal(value.report.source, "cli");
-	assert.equal(value.loading, false);
-	h.unmount();
-});
-
 for (const outcome of ["success", "failure"]) {
 	for (const retirement of ["close", "unmount"]) {
 		test(`late catalog ${outcome} cannot write state or show a notice after ${retirement}`, async () => {
@@ -164,7 +149,7 @@ for (const outcome of ["success", "failure"]) {
 }
 
 for (const enabled of [true, false]) {
-	for (const patch of [{ backend: "dsh" }, { projectId: "project-b" }]) {
+	for (const patch of [{ projectId: "project-b" }]) {
 		const dimension = Object.keys(patch)[0];
 		test(`switching ${dimension} hides an accepted old catalog on the first render (enabled=${enabled})`, async () => {
 			const h = createHarness();
@@ -179,34 +164,10 @@ for (const enabled of [true, false]) {
 			assert.equal(h.requests.length, enabled ? 2 : 1);
 			if (enabled) {
 				const next = report("new-scope");
-				h.requests[1].resolve(patch.backend === "dsh" ? next.models : next);
+				h.requests[1].resolve(next);
 				await settle();
 				assert.equal(h.render().models, next.models);
 			}
-			h.unmount();
-		});
-	}
-}
-
-for (const backend of ["pi", "dsh"]) {
-	for (const outcome of ["success", "failure"]) {
-		test(`switching away from ${backend} ignores pending ${outcome} without settling the replacement`, async () => {
-			const h = createHarness({ backend });
-			h.render();
-			const replacement = backend === "pi" ? "dsh" : "pi";
-			h.render({ backend: replacement, projectId: "project-b" });
-			const retired = report("retired");
-			if (outcome === "success") h.requests[0].resolve(backend === "dsh" ? retired.models : retired);
-			else h.requests[0].reject(new Error("retired failure"));
-			await settle();
-			assertNoCatalog(h.render());
-			assert.equal(h.render().loading, true);
-			assert.equal(h.notices.length, 0);
-			const current = report("replacement");
-			h.requests[1].resolve(replacement === "dsh" ? current.models : current);
-			await settle();
-			assert.equal(h.render().models, current.models);
-			assert.equal(h.render().loading, false);
 			h.unmount();
 		});
 	}
@@ -267,26 +228,24 @@ test("manual refresh supersedes initial load and owns the mutually exclusive bus
 	h.unmount();
 });
 
-for (const backend of ["pi", "dsh"]) {
-	test(`current ${backend} failure remains visible and a manual retry can recover`, async () => {
-		const h = createHarness({ backend });
-		h.render();
-		const detail = backend === "dsh" ? "Error invoking remote method: DSH host is manually stopped" : "catalog unavailable";
-		h.requests[0].reject(new Error(detail));
-		await settle();
-		const failed = h.render();
-		assert.equal(failed.models.length, 0);
-		assert.equal(failed.report.ok, false);
-		assert.equal(failed.report.reason, backend === "dsh" ? "dsh-host-stopped" : "cli-failed");
-		assert.equal(failed.report.detail, backend === "dsh" ? "" : detail);
-		assert.deepEqual(h.notices, [[backend === "dsh" ? "localized:app.modelListFailDshStopped" : detail, 4000]]);
-		assert.equal(failed.loading, false);
-		failed.reload(true);
-		const recovered = report("recovered");
-		h.requests[1].resolve(backend === "dsh" ? recovered.models : recovered);
-		await settle();
-		assert.equal(h.render().models, recovered.models);
-		assert.equal(h.render().refreshing, false);
-		h.unmount();
-	});
-}
+test("current pi failure remains visible and a manual retry can recover", async () => {
+	const h = createHarness();
+	h.render();
+	const detail = "catalog unavailable";
+	h.requests[0].reject(new Error(detail));
+	await settle();
+	const failed = h.render();
+	assert.equal(failed.models.length, 0);
+	assert.equal(failed.report.ok, false);
+	assert.equal(failed.report.reason, "cli-failed");
+	assert.equal(failed.report.detail, detail);
+	assert.deepEqual(h.notices, [[detail, 4000]]);
+	assert.equal(failed.loading, false);
+	failed.reload(true);
+	const recovered = report("recovered");
+	h.requests[1].resolve(recovered);
+	await settle();
+	assert.equal(h.render().models, recovered.models);
+	assert.equal(h.render().refreshing, false);
+	h.unmount();
+});

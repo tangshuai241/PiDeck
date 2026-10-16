@@ -134,5 +134,5 @@ test("弹窗保存后回读状态表（徽章的开关态/间隔来自状态表�
 	// 保存成功分支里必须同时「清缓存 + 回读状态」。
 	const successBlock = dialog.match(/if \(result\.ok\) \{[\s\S]*?window\.setTimeout\(handleClose, 600\);/)?.[0] ?? "";
 	assert.match(successBlock, /invalidateAll\(\);/);
-	assert.match(successBlock, /void refreshProviderState\(props\.provider, props\.backend\);/);
+	assert.match(successBlock, /void refreshProviderState\(props\.provider, "pi"\);/);
 });

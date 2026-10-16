@@ -19,10 +19,6 @@ function createDevEnvironment({ platform = process.platform, env = process.env, 
 	if (platform === "linux" && nextEnv.PIDECK_DEV_ENABLE_SANDBOX !== "1" && nextEnv.ELECTRON_DISABLE_SANDBOX == null) {
 		nextEnv.ELECTRON_DISABLE_SANDBOX = "1";
 	}
-	// Windows DSH 沙箱 runner 的 CUI sidecar：dev 直接用本机 node.exe，不必先下载随包副本。
-	if (platform === "win32" && nextEnv.PIDECK_DSH_RUNNER_NODE == null) {
-		nextEnv.PIDECK_DSH_RUNNER_NODE = nodeExecPath;
-	}
 	return nextEnv;
 }
 
@@ -84,8 +80,7 @@ function checkElectronBinaryBeforeDev({ probe = probeElectronBinary, env = proce
 }
 
 function runDev() {
-	// 先构建本地 workspace 包（如 dsh-tool-pwsh-persistent 的 lib/），
-	// 否则 DSH host 启动时 require.resolve 命中缺失的 lib/index.js 会以 code=1 退出。
+	// 先构建本地 workspace 包（file: 依赖需要 lib/ 产物）。
 	require("node:child_process").execSync("npm run build:packages", {
 		cwd: path.join(__dirname, ".."),
 		stdio: "inherit",

@@ -13,7 +13,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  */
 const served = { requests: [], respond: null };
 
-const { createNetDownloader } = loadTsCommonJs("src/main/dsh/runtime/dshRuntimeIo.ts", {
+const { createNetDownloader } = loadTsCommonJs("src/main/archiveIo/archiveIoImpl.ts", {
 	stubs: {
 		electron: {
 			net: {

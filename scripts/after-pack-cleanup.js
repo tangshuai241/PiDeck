@@ -300,8 +300,8 @@ exports.default = async function (context) {
 								}
 							}
 						} else if (["test", "tests", "spec", "__tests__", "__snapshots__", "__mocks__"].includes(entry.name)) {
-							// 只删除明确的测试目录。嵌套 node_modules 仍可能承载版本无法提升的生产依赖
-							// （例如 DSH attachment-local 的 sharp），删除它会让重打包后的 asar 缺模块。
+							// 只删除明确的测试目录。嵌套 node_modules 仍可能承载版本无法提升的生产依赖，
+							// 删除它会让重打包后的 asar 缺模块。
 							try {
 								const testDirSize = await dirSize(full);
 								await rmDir(full);
@@ -355,7 +355,7 @@ exports.default = async function (context) {
 		// electron-builder 的 asarUnpack 是影子目录机制：asar 内保留完整副本，asar.unpacked 为镜像。
 		// require('@img/sharp-win32-x64/sharp.node') 解析命中 asar 内副本（虚拟路径），
 		// Electron dlopen 补丁会把 .node 复制到 %TEMP% 再加载，同目录 libvips DLL 不跟随 →
-		// ERR_DLOPEN_FAILED（DSH host 启动即退）。补丁改为 realpath 到 asar.unpacked 真实路径后再 require。
+		// ERR_DLOPEN_FAILED。补丁改为 realpath 到 asar.unpacked 真实路径后再 require。
 		let sharpIndexPatched = false;
 		const extractSharpIndex = path.join(extractDir, "node_modules", "@img", "sharp-win32-x64", "index.cjs");
 		if (fs.existsSync(extractSharpIndex)) {

@@ -1,20 +1,17 @@
 /**
  * 进程内存监控快照类型。
  *
- * 监控 pi agent 子进程 + 共享的 DSH host utilityProcess。
+ * 监控 pi agent 子进程。
  * Electron 自身进程的内存由用户自行在系统任务管理器/活动监视器中查看
  * （口径因平台/Chromium 版本而异，内置监控容易对不上，徒增困惑）。
  * 子进程不在 app metrics 里，由主进程按 pid 调系统命令查询内存
  * （Windows PowerShell PrivateMemorySize64 / Linux·macOS `ps -o rss`），缺失时为 undefined。
  */
 
-/** 进程监控里 DSH host 那一行的稳定 id（不是会话 agentId，停止走 host dispose）。 */
-export const DSH_HOST_MONITOR_ID = "dsh-host";
-
-export type ProcessMetricKind = "pi" | "dsh-host";
+export type ProcessMetricKind = "pi";
 
 export type AgentProcessMetric = {
-	/** pi agent 会话标识，或 DSH_HOST_MONITOR_ID */
+	/** pi agent 会话标识 */
 	agentId: string;
 	/** 行类型：缺省视为 pi（兼容旧快照） */
 	kind?: ProcessMetricKind;

@@ -59,24 +59,6 @@ test("does not disable Electron sandbox outside Linux", () => {
 	assert.equal(Object.hasOwn(env, "ELECTRON_DISABLE_SANDBOX"), false);
 });
 
-test("Windows dev injects the local node.exe as DSH runner sidecar", () => {
-	const env = createDevEnvironment({
-		platform: "win32",
-		env: { PATH: "C:\\Windows" },
-		nodeExecPath: "C:\\Program Files\\nodejs\\node.exe",
-	});
-	assert.equal(env.PIDECK_DSH_RUNNER_NODE, "C:\\Program Files\\nodejs\\node.exe");
-});
-
-test("Windows dev does not override an explicit DSH runner sidecar", () => {
-	const env = createDevEnvironment({
-		platform: "win32",
-		env: { PIDECK_DSH_RUNNER_NODE: "D:\\override\\node.exe" },
-		nodeExecPath: "C:\\Program Files\\nodejs\\node.exe",
-	});
-	assert.equal(env.PIDECK_DSH_RUNNER_NODE, "D:\\override\\node.exe");
-});
-
 test("runs electron-vite dev and forwards extra arguments", () => {
 	const invocation = getElectronViteInvocation({
 		nodeExecPath: "/usr/bin/node",

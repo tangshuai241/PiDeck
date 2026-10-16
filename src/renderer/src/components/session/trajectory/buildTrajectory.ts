@@ -9,7 +9,7 @@
  * - in-flight（running / pending）不伪造 duration：endedAt 留空，时间列显示为进行中。
  * - 历史 assistant/thinking 往往只有一个 timestamp（结束时刻）。轮内用相邻锚点
  *   回推区间，避免账本只剩工具有耗时；用户/过程事件仍是时间点，不编造。
- * - JSONL / DSH 过程事件按墙钟落入最近 turn；轮内顺序对齐 dsh-web layout.ts：
+ * - JSONL 过程事件按墙钟落入最近 turn；轮内顺序按以下规则：
  *   初始系统提示最先，其余按 seq，无 seq 退回墙钟。重试（llm/retry）是过程记录，
  *   不得因 timestamp=0 被插到轮首。
  * - 系统提示词 Pi 不落盘：可选的 extras.systemPrompt 仅作参考记录，不是当轮请求快照
@@ -20,7 +20,6 @@
 
 import type { ChatMessage } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
-import { toolViewDetail, toolViewInput, toolViewOutput, toolViewTitle, type DshToolViewEnvelope } from "./dshToolView";
 import { compareTrajectoryRecords, seqOfMessage, sortTurnRecords, wallTime } from "./trajectoryOrder";
 
 export { compareTrajectoryRecords };
@@ -440,13 +439,11 @@ export function buildTrajectory(messages: ChatMessage[], now = Date.now(), extra
 			const inFlight = isInFlightTool(message);
 			const name = toolNameOf(message);
 			const endedAt = inFlight ? undefined : durationMs !== undefined ? startedAt + durationMs : wallTime(message.timestamp);
-			// DSH 工具视图（host ToolEventView，dsh-web 同数据源）：call/result 视图
-			// 提供命令/输出/退出码/diff 等更完整的信息，标题用卡片头（如 "Write foo.txt"）。
-			const meta = message.meta as { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope; args?: unknown; [key: string]: unknown } | undefined;
-			const viewTitle = toolViewTitle(meta);
-			const viewDetail = toolViewDetail(meta);
-			const inputDetail = toolViewInput(meta);
-			const outputDetail = toolViewOutput(meta) ?? asString(message.meta?.detailText) ?? asString(message.meta?.result);
+			const meta = message.meta as { title?: unknown; detail?: unknown; args?: unknown; [key: string]: unknown } | undefined;
+			const viewTitle = asString(meta?.title);
+			const viewDetail = asString(meta?.detail);
+			const inputDetail = asString(message.meta?.inputDetail) ?? asString(meta?.args);
+			const outputDetail = asString(message.meta?.detailText) ?? asString(message.meta?.result);
 			pushRecord(current, {
 				id: message.id,
 				kind: "tool",

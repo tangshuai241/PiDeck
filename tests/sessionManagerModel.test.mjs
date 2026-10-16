@@ -72,52 +72,9 @@ test("sessionManagerRowKey: 用稳定记录 id，空 filePath 的 DSH 行不冲�
 	assert.equal(sessionManagerRowKey(summary({ id: "uuid-2", filePath: "b.jsonl" })), "uuid-2");
 });
 
-test("mergeManagerArchived: pi/DSH 合并并按时间倒序", () => {
-	const merged = mergeManagerArchived([{ summary: summary({ id: "p1", filePath: "a.jsonl", updatedAt: 100 }), originalPath: "C:\\proj\\a.jsonl" }], [{ dshSessionId: "session-x", cwd: "C:\\proj", archivedAt: 200 }]);
-	// VM 上下文的数组原型与测试 realm 不同，不能 deepEqual；按字符串断言
-	assert.equal(merged.map((row) => row.kind).join(","), "dsh,pi");
-	assert.equal(merged[0].kind === "dsh" && merged[0].item.dshSessionId, "session-x");
-	assert.equal(merged[1].kind === "pi" && merged[1].item.summary.id, "p1");
-	assert.equal(merged[1].kind === "pi" && merged[1].item.originalPath, "C:\\proj\\a.jsonl");
-});
-
 test("mergeManagerArchived: 空列表返回空数组", () => {
 	assert.equal(mergeManagerArchived([], []).length, 0);
 });
-
-test("managerArchivedDshLabel: 标题优先", () => {
-	const label = managerArchivedDshLabel({
-		kind: "dsh",
-		item: { dshSessionId: "session-x", cwd: "C:\\proj", archivedAt: 1, title: "打包体积优化" },
-	});
-	assert.equal(label, "打包体积优化");
-});
-
-test("managerArchivedDshLabel: 无标题回退 cwd 末段（比裸 id 可读）", () => {
-	const label = managerArchivedDshLabel({
-		kind: "dsh",
-		item: { dshSessionId: "session-x", cwd: "C:\\work\\my-project\\", archivedAt: 1 },
-	});
-	assert.equal(label, "my-project");
-});
-
-test("managerArchivedDshLabel: 标题为空白串按缺失处理", () => {
-	const label = managerArchivedDshLabel({
-		kind: "dsh",
-		item: { dshSessionId: "session-x", cwd: "D:/other", archivedAt: 1, title: "   " },
-	});
-	assert.equal(label, "other");
-});
-
-test("managerArchivedDshLabel: 标题与 cwd 均缺省才回退裸 id", () => {
-	const label = managerArchivedDshLabel({
-		kind: "dsh",
-		item: { dshSessionId: "session-last-resort", cwd: "", archivedAt: 1 },
-	});
-	assert.equal(label, "session-last-resort");
-});
-
-// ── worktree 家族与工作区标签 ──────────────────────────────────────────────
 
 test("worktreeFamilyProjects: 根项目 = 自己 + 全部子工作区", () => {
 	const projects = [project("root", "C:/work/repo"), project("wt-a", "C:/work/repo-wt-a", "root"), project("wt-b", "C:/work/repo-wt-b", "root"), project("other", "D:/other")];
@@ -211,11 +168,4 @@ test("archivedDshWorkspaceLabel: 同上（cwd 归属）", () => {
 	const family = [project("root", "C:/work/repo"), project("wt-a", "C:/work/repo-wt-a", "root")];
 	assert.equal(archivedDshWorkspaceLabel({ dshSessionId: "s1", cwd: "C:/work/repo", archivedAt: 1 }, family), undefined);
 	assert.equal(archivedDshWorkspaceLabel({ dshSessionId: "s2", cwd: "C:/work/repo-wt-a", archivedAt: 1 }, family), "repo-wt-a");
-});
-test("managerArchivedRowKey: pi 行用会话记录 id，DSH 行用 host 会话 id（两类不冲突）", () => {
-	const piRow = { kind: "pi", item: { summary: summary({ id: "rec-uuid", filePath: "a.jsonl" }) } };
-	const dshRow = { kind: "dsh", item: { dshSessionId: "session-dsh-1", cwd: "C:/work", archivedAt: 1 } };
-	assert.equal(managerArchivedRowKey(piRow), "rec-uuid");
-	assert.equal(managerArchivedRowKey(dshRow), "session-dsh-1");
-	assert.notEqual(managerArchivedRowKey(piRow), managerArchivedRowKey(dshRow), "两类行身份命名空间不应冲突");
 });

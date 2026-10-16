@@ -263,7 +263,6 @@ export type AppInfo = {
 	/** pi CLI 版本（探测失败/未安装时缺省，UI 显示 —）；进程生命周期内缓存。 */
 	piVersion?: string;
 	/** 当前启用的 DSH 运行时版本（bundled manifest）；未启用/开发态缺省。 */
-	dshRuntimeVersion?: string;
 	/** 内置 pi-ai 目录清单 source.packageVersion；不含 overlay。 */
 	piAiVersion?: string;
 	electronVersion?: string;

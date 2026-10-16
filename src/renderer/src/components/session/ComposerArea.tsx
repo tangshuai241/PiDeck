@@ -176,8 +176,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 			onInsertTemplateContent={composer.pickers.insertTemplateContent}
 			onInsertSkill={composer.pickers.insertSkillInvocation}
 			onInsertSkillContent={composer.pickers.insertSkillContent}
-			defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
-			defaultThinkingLevel={composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel}
+			defaultModel={composer.bootstrapDefaultModel}
+			defaultThinkingLevel={composer.bootstrapDefaultThinkingLevel}
 			modelThinkingLevels={composer.bootstrapModelThinkingLevels}
 		>
 			{(thinkingControl) => (
@@ -213,14 +213,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											turnCount={props.turnCount}
 											contextMeter={
 												composer.mode === "imagegen" ? null : (
-													<SessionContextMeter
-														state={composer.runtime?.state}
-														onCompact={composer.delivery.compact}
-														overflowRecoveryTarget={composer.delivery.overflowRecoveryTarget}
-														onOverflowRecovery={composer.delivery.onOverflowRecovery}
-														backend={composer.backend === "dsh" ? "dsh" : "pi"}
-														fallbackProvider={composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider}
-													/>
+													<SessionContextMeter state={composer.runtime?.state} onCompact={composer.delivery.compact} overflowRecoveryTarget={composer.delivery.overflowRecoveryTarget} onOverflowRecovery={composer.delivery.onOverflowRecovery} backend="pi" fallbackProvider={composer.bootstrapDefaultModel?.provider} />
 												)
 											}
 										/>
@@ -302,7 +295,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												gitInfo={composerFeatureVisible("gitBranch") ? props.gitInfo : undefined}
 												onSwitchBranch={props.onSwitchBranch}
 												record={composer.record}
-												defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
+												defaultModel={composer.bootstrapDefaultModel}
 												backend={composer.backend}
 												enhance={composerFeatureVisible("enhance") ? composer.enhance : undefined}
 												onChangeBackend={composer.changeBackend}

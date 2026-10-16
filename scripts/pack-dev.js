@@ -10,7 +10,7 @@
  *
  * 数据目录提示：便携版数据 = exe 同级 data/。打到 release-dev/ 后新便携版会用
  * release-dev/data/（全新空目录）；想沿用旧数据，把 release/data 拷过去再删掉
- * 旧的坏 runtime（release-dev/data/runtimes/dsh/0.1.1-rc.1），让新包重装修复版。
+ * 旧版本遗留的坏 runtime 目录，让新包重装修复版。
  */
 const { execSync } = require("node:child_process");
 const path = require("node:path");

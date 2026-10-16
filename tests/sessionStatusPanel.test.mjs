@@ -40,15 +40,13 @@ test("三语 i18n 同步新增 sessionStatus.* 文案", () => {
 	}
 });
 
-test("SessionView/SessionStartSurface：面板可见时只隐藏待办/文件/子代理三条，字面量与顺序不变", () => {
+test("SessionView/SessionStartSurface：面板可见时只隐藏待办/文件/子代理三条（排队/团队条已随 DSH 移除），字面量与顺序不变", () => {
 	const view = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
 	const start = readFileSync("src/renderer/src/components/session/SessionStartSurface.tsx", "utf8");
 	assert.match(view, /sessionStatusInSidebarAtomFamily\(sessionId\)/);
 	assert.match(view, /\{!statusInSidebar && <SessionTodoStrip sessionId=\{sessionId\} \/>\}/);
 	assert.match(view, /\{!statusInSidebar && <SessionFilesStrip /);
 	assert.match(view, /\{!statusInSidebar && <SessionSubagentsStrip /);
-	assert.match(view, /<SessionQueuedMessagesStrip sessionId=\{sessionId\} \/>\n/);
-	assert.match(view, /\n\s*<SessionTeamStrip sessionId=\{sessionId\} \/>/);
 	assert.match(view, /\n\s*<SessionGoalStrip sessionId=\{sessionId\} \/>/);
 	assert.match(view, /publishSessionLatestAgentRunAtom/);
 	assert.match(start, /sessionStatusInSidebarAtomFamily\(props\.sessionId\)/);

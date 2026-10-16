@@ -20,7 +20,6 @@ function retireCycle(h, change) {
 	if (change === "runtime") h.runtimes[SOURCE] = runtimeInfo({ agentId: "replacement", runtimeGeneration: 2 });
 	if (change === "generation") h.runtimes[SOURCE] = runtimeInfo({ runtimeGeneration: 2 });
 	if (change === "detach") h.runtimes[SOURCE] = undefined;
-	if (change === "backend") h.preferences[SOURCE].isDshSession = true;
 	if (change === "focus") h.focus(NEXT);
 }
 
@@ -28,7 +27,7 @@ for (const operation of ["model", "thinking"]) {
 	const shortcutId = operation === "model" ? "cycleModel" : "cycleThinking";
 	for (const waitingFor of ["catalog", "favorites"]) {
 		const pendingOptions = { ready: waitingFor !== "catalog", favoritesLoaded: waitingFor !== "favorites" };
-		for (const change of ["session", "away-and-back", "runtime", "generation", "detach", "backend", "focus"]) {
+		for (const change of ["session", "away-and-back", "runtime", "generation", "detach", "focus"]) {
 			test(`pending ${operation} cycle waiting for ${waitingFor} is discarded after ${change}`, () => {
 				const h = harness(pendingOptions);
 				h.shortcut(shortcutId);

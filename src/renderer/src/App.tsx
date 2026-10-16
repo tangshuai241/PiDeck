@@ -41,7 +41,6 @@ import {
 	imageGenConfigAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
-	dshRuntimeStatusAtom,
 	openSettingsAtom,
 	openAutomationModalAtom,
 	sessionRecordsAtom,
@@ -146,9 +145,6 @@ import type { SessionFilterPill } from "./sessionFilterPills";
 import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
-import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
-import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
-import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
@@ -450,7 +446,6 @@ export function App() {
 		refreshProjectSessions,
 		refreshFiles,
 		refreshProjectTree,
-		syncDshForeignSessionsIfEnabled,
 		beginFileTreeRequest,
 		isFileTreeRequestCurrent,
 	} = useProjectSync({
@@ -466,7 +461,6 @@ export function App() {
 			sessions: {
 				listCatalog: api.sessions.listCatalog,
 				onCatalogRefreshed: api.sessions.onCatalogRefreshed,
-				syncDshForeignSessions: api.sessions.syncDshForeignSessions,
 			},
 			files: {
 				list: (projectId: string, options?: { maxDepth?: number; directory?: string }) => api.files.list(projectId, options),
@@ -776,14 +770,6 @@ export function App() {
 	const scratchPad = useScratchPad(workspace);
 	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
 	const cuaApproval = useCuaApproval();
-	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
-	// 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
-	useDshRuntimeStatusSync();
-	// DSH runtime 安装进度同步：App 级订阅（常驻，不随 DshRuntimeSection 卸载），
-	// 保证切配置分页/关弹窗后进度仍保留；完成/失败时弹全局 toast。
-	useDshRuntimeInstallProgressSync();
-	// 存量 dsh 用户升级后 runtime 不在时给一次直达提示（有 dsh 会话才提示，只提示一次）。
-	useDshRuntimeMigrationNotice();
 
 	const activeProjectRuntimeCapabilities = useProjectRuntimeCapabilities(activeProjectId);
 	const activeProject = projects.find((project) => project.id === activeProjectId);
@@ -1130,7 +1116,7 @@ export function App() {
 		refreshProjectSessions,
 		api,
 		showToast,
-		// 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+		// 新建会话默认后端：跟随设置项（默认 pi）。
 		defaultBackend: effectiveAgentBackend,
 	});
 
@@ -1717,8 +1703,6 @@ export function App() {
 	async function addProject() {
 		const project = await api.projects.add();
 		if (!project) return;
-		// 先同步 DSH：新目录注册后，原先按 cwd 找不到项目的外部会话才能挂进来。
-		await syncDshForeignSessionsIfEnabled();
 		await refreshProjects();
 		setActiveProjectId(project.id);
 		await refreshProjectSessions(project.id);
@@ -1889,7 +1873,7 @@ export function App() {
 	);
 
 	// 侧栏会话归档/删除族收口到 useSidebarArchiveActions（删除/归档/恢复 + DSH 归档）
-	const { deleteSidebarSession, archiveSidebarSession, unarchiveSidebarSession, unarchiveDshSidebarSession, listArchivedSidebarSessions, deleteArchivedSidebarSession, listArchivedDshSidebarSessions, deleteArchivedDshSidebarSession, requestDeleteSidebarSession } = useSidebarArchiveActions({
+	const { deleteSidebarSession, archiveSidebarSession, unarchiveSidebarSession, listArchivedSidebarSessions, deleteArchivedSidebarSession, requestDeleteSidebarSession } = useSidebarArchiveActions({
 		activeProjectId,
 		showToast,
 		overlays,
@@ -2065,13 +2049,6 @@ export function App() {
 			listArchived: () => listArchivedSidebarSessions(),
 			deleteArchived: async (archivedPath) => {
 				await deleteArchivedSidebarSession(archivedPath);
-			},
-			unarchiveDsh: async (dshSessionId, projectId) => {
-				await unarchiveDshSidebarSession(dshSessionId, projectId);
-			},
-			listArchivedDsh: () => listArchivedDshSidebarSessions(),
-			deleteArchivedDsh: async (dshSessionId) => {
-				await deleteArchivedDshSidebarSession(dshSessionId);
 			},
 		},
 		agents: {

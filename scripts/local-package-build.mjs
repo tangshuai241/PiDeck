@@ -5,7 +5,7 @@
  * 的。交叉打包（--target-os/--target-arch）时闭包入口来自临时解析目录，其中 file:
  * 本地包是**指向仓库源码目录的符号链接**：
  *
- *   <tmp>/node_modules/dsh-tool-pwsh-persistent → <repo>/packages/dsh-tool-pwsh-persistent
+ *   <tmp>/node_modules/<local-pkg> → <repo>/packages/<local-pkg>
  *
  * 这条逻辑路径的祖先里没有仓库的 node_modules/.bin，于是构建脚本（tsc）在交叉模式
  * 下直接报 `'tsc' 不是内部或外部命令`。2026-09-22 v0.7.7 补发二次失败就是这一条：
@@ -14,8 +14,8 @@
  *
  * 所以 cwd 必须用 realpathSync(dir)：构建发生在包的真实目录（源码所在处），祖先链上
  * 自然有仓库 node_modules/.bin，且编译产物 lib/ 正好落回仓库包目录（归档需要它）。
- * 前提是仓库根装了完整 dev 依赖（tsc / @types/node / @deepseek-ai/* 类型）——见
- * .github/workflows/{release,publish-dsh-runtime}.yml 里「不做 --omit=dev」的注释。
+ * 前提是仓库根装了完整 dev 依赖（tsc / @types/node）——见 .github/workflows/release.yml
+ * 里「不做 --omit=dev」的注释。
  */
 import { realpathSync } from "node:fs";
 

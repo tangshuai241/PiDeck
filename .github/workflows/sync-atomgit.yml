@@ -184,7 +184,7 @@ jobs:
               sig=$(gh api "repos/${{ github.repository }}/releases/tags/${TAG}" \
                 --jq '[.assets[] | (.name + ":" + (.size | tostring))] | sort | join("|")' 2>/dev/null) || sig=""
               runtime_count=$(gh api "repos/${{ github.repository }}/releases/tags/${TAG}" \
-                --jq '[.assets[] | select(.name | startswith("dsh-runtime-") and endswith(".tgz"))] | length' 2>/dev/null) || runtime_count=0
+                --jq '[.assets[] | select(.name | endswith(".tgz"))] | length' 2>/dev/null) || runtime_count=0
               if [ -n "$sig" ] && [ "$sig" = "$last_sig" ] && [ "$runtime_count" -ge 6 ]; then
                 stable=$((stable + 1))
               else
