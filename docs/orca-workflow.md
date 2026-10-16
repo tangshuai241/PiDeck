@@ -70,7 +70,9 @@ orca worktree create --repo id:<repo_id> --name <task_name> --base-branch <base_
 
 创建回执不等于 setup 成功。核对实际准备终端的结束状态、退出码和日志；超时或失败时不派业务 Agent。默认终端配置也可能运行命令，必须确认没有意外写者。环境准备不能并发改共享 `node_modules`。
 
-准备成功后才在已有工作区启动：
+准备成功后才在已有工作区启动。用户指定模型时，先按当前 CLI 支持的方式落实 provider、完整 model ID 与思考档位；任务书中的模型名称不配置运行时。当前 Orca 的 Pi 启动不支持通过 `worker-start --model/--effort` 指定模型，须先核实执行端 Pi 的有效启动配置；无法落实时停止该派工并报告，不借用默认模型试跑，也不临时换通道。
+
+以下仅为派工命令骨架，不是指定模型的完整启动方案：
 
 ```text
 orca orchestration worker-start --task <task_id> --run <run_id> --worktree path:<task_path> --agent <agent_id> --json
@@ -78,7 +80,9 @@ orca orchestration worker-start --task <task_id> --run <run_id> --worktree path:
 
 已有工作区不会自动重跑 setup；文档任务可记录理由后显式 `--setup skip` 创建工作区。不假定本机的 `start-immediately` 已改成 `wait-for-setup`。
 
-启动返回非零时先读 failedStage/residualResources，报告并停止派工，不悄悄换启动方式。原生恢复按当版指南和用户决定执行。
+启动后以一次运行时证据核对实际 provider/model/思考档位与用户指定一致。回执 `model/effort: null` 表示未提供模型证据，不表示继承正确；`ready`、`input_accepted`、终端存活也不证明模型调用成功。不能据此报告「正在实现」。配置未变化且已有同一运行时的有效证据时，不重复核验。
+
+模型不符、provider 报错或启动返回非零时，停止该任务的继续投递与重试，记录实际错误；有 failedStage/residualResources 时一并读取。不得让失败任务长期以「执行中」代替故障报告，不悄悄换模型、供应商或启动通道。原生恢复按当版指南和用户决定执行。
 
 ### 3. 冻结候选与独立审查
 
