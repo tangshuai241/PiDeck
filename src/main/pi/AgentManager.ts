@@ -113,6 +113,8 @@ import {
 	shouldReloadMessagesAfterCompaction,
 } from "./agentUtils";
 import { updateActiveToolCalls, type ActiveToolCallState } from "../../shared/toolRuntimeState";
+import { decodeChartToolResult } from "../../shared/chartDecode";
+import { decodeCuaToolResult } from "../../shared/cuaDecode";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { SecurityStore } from "../security/SecurityStore";
 import type { ConfigManager } from "../config/ConfigManager";
@@ -5654,6 +5656,11 @@ export class AgentManager {
 			}
 			return undefined;
 		})();
+		// 图表成果：与历史通道共用同一个纯解码函数（只加装配，逻辑在 shared 模块）。
+		// 解码失败不上报额外错误：工具原文已经展示在工具详情里。
+		const chartOutcome = decodeChartToolResult(toolName, result);
+		// CUA 动作记录：MCP 工具的 details 会被 pi 覆盖，记录在文本结果里（与历史投影同一纯函数）。
+		const cuaRecord = decodeCuaToolResult(toolName, result);
 		const meta = {
 			status,
 			toolName,
@@ -5672,6 +5679,8 @@ export class AgentManager {
 			// diff 使用工具参数（oldText/newText 等）展示变动区域，无需完整文件快照。
 
 			...(askCard ? { _askCard: askCard } : {}),
+			// 专用图表结果解码失败：留下稳定原因码，工具详情据此给一句短说明（原文照常展示）。
+			...(chartOutcome.ok || chartOutcome.reason === "not-chart-tool" ? {} : { _chartDecodeReason: chartOutcome.reason }),
 		};
 
 		if (existing) {
@@ -5680,6 +5689,11 @@ export class AgentManager {
 			// 合并而非替换：重定向到投影版时保留其身份字段（entryId/_piDeckMsgSeq），
 			// 否则渲染层接缝去重与编辑/删除/重发定位会因 entryId 丢失而失效。
 			existing.meta = { ...(existing.meta ?? {}), ...meta };
+			// 图表成果是消息级字段（不在 meta）：只在本次解码成功时写入，
+			// 幂等更新不会把上一次的成果抹掉。
+			if (chartOutcome.ok) existing.chart = chartOutcome.artifact;
+			// CUA 记录是消息级字段：只在本次解码成功时写入，幂等更新不抹掉上一次。
+			if (cuaRecord) existing.cua = cuaRecord;
 			this.markMessagesDirtyFrom(agentId, existingToolIndex);
 		} else {
 			list.push({
@@ -5689,6 +5703,8 @@ export class AgentManager {
 				text,
 				timestamp: Date.now(),
 				meta,
+				...(chartOutcome.ok ? { chart: chartOutcome.artifact } : {}),
+				...(cuaRecord ? { cua: cuaRecord } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}

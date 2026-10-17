@@ -34,6 +34,7 @@ export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-ext-points.ts",
 	"pi-deck-request-size-recovery.ts",
 	"pi-deck-ask-question.ts",
+	"pi-deck-chart.ts",
 	"pi-deck-goal-mode.ts",
 	"pi-deck-model-trace.ts",
 	// 云端个人记忆先观察耗时；只有用户显式开启并提供私有连接配置才读取。

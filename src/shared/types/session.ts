@@ -1,6 +1,8 @@
 export type ChatRole = "user" | "assistant" | "tool" | "system" | "error";
 
 import type { VideoContent } from "./videogen";
+import type { ChartArtifact } from "./chart";
+import type { CuaActionRecord } from "./cua";
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 
@@ -35,6 +37,18 @@ export type ChatMessage = {
 	 * 历史会话/旧版本数据可能缺失，渲染层需回退启发式判定。
 	 */
 	stopReason?: string;
+	/**
+	 * 交互图表成果：来自 `render_chart` 工具结果的原生 `details.tpaChart`。
+	 * 实时通道（AgentManager）与历史通道（AgentMessageProjector）共用同一个纯解码函数。
+	 * 旧会话消息没有此字段时行为不变。
+	 */
+	chart?: ChartArtifact;
+	/**
+	 * CUA 动作记录：来自 cua_capture / cua_zoom / cua_click / cua_scroll / cua_type 的
+	 * 工具文本结果（MCP 工具的 details 会被 pi 覆盖，只有文本可持久化）。
+	 * 截图只存 `frame.screenshotRef`，图片本体走 `pideck-cua-img://` 按需加载。
+	 */
+	cua?: CuaActionRecord;
 };
 
 /**

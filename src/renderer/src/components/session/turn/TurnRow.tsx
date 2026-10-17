@@ -31,6 +31,7 @@ import { RetryStep } from "./RetryStep";
 import { ErrorStep } from "./ErrorStep";
 import { ToolStep } from "./ToolStep";
 import { ExtensionEntryStep } from "./ExtensionEntryStep";
+import { ChartArtifactCard } from "../chart/ChartArtifactCard";
 import { useTurnExecution } from "./useTurnExecution";
 import { BridgeGuiSlot, useBridgeThinkingLabel } from "../../bridge/BridgeSlot";
 import type { DiffFileHandler } from "../ToolCallComponents";
@@ -288,6 +289,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 		if (targetId) props.onDeleteMessage?.(targetId, messageEntryId(assistantMessages.at(-1)?.message));
 	};
 
+	// 图表成果（常显）与图表短状态：不随执行过程折叠。过程折叠容器是单一汇总按钮，
+	// 不拆成多段，因此图表统挂在折叠容器之后、最终回答之前，保持图与图之间的原始时序。
+	const chartItems = useMemo(() => displayItems.filter((item) => item.kind === "chart-artifact" || item.kind === "chart-pending"), [displayItems]);
+
 	return (
 		<article ref={rowRef} className={`turn-row mb-6 w-full min-w-0 max-w-full ${props.agentRunning && !isComplete ? "turn-row--running" : isComplete ? "turn-row--complete" : "turn-row--pending"} ${props.fresh ? "turn-row--fresh" : ""} ${props.topFresh ? "turn-row--top-fresh" : ""}`} data-message-id={run.id}>
 			<div className="flex min-w-0 flex-col gap-3">
@@ -401,6 +406,18 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 							)}
 						</CollapsibleContent>
 					</Collapsible>
+				)}
+
+				{/* 图表成果：常显卡片（工具过程折叠后仍在）；解码失败的不挂卡片，
+				   原因与原文由工具详情展示；生成中只给短状态。 */}
+				{chartItems.map((item) =>
+					item.kind === "chart-artifact" ? (
+						<ChartArtifactCard key={item.id} artifact={item.artifact} sessionId={props.sessionId} />
+					) : (
+						<p key={item.id} className="my-2 text-chat-detail text-text-tertiary">
+							{t("chart.pending")}
+						</p>
+					),
 				)}
 
 				{/* Live 正文：折叠容器外常显，确保流式 DOM 可采样、不被 Collapsible 卸载 */}

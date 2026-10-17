@@ -138,6 +138,15 @@
   --color-brand-amber: #6b7280;
   --color-brand-rose: #4b5563;
   --color-logo-green: #6b7280;
+  /* 图表系列色（对话内交互图表）：六个色相加亮暗各一套，按系列顺序循环使用。
+     只给色值，不指定系列语义；柱/线/面积/堆叠共用同一顺序，保证同一数据换图形后
+     颜色身份不变。对比度守卫见 tests/themeContrast.test.mjs 的图表行。 */
+  --color-chart-1: #2563eb;
+  --color-chart-2: #15803d;
+  --color-chart-3: #7c3aed;
+  --color-chart-4: #b45309;
+  --color-chart-5: #dc2626;
+  --color-chart-6: #0e7490;
   --color-logo-green-mid: #4b5563;
   --color-logo-green-deep: #374151;
   --color-danger: #b42318;
@@ -555,6 +564,13 @@
   --color-brand-rose: #9ca3af;
   --color-info: #60a5fa;
   --color-thinking: #818cf8;
+  /* 图表系列色暗色档：同色相提亮一档，保证深底上可辨（对比度守卫同上）。 */
+  --color-chart-1: #60a5fa;
+  --color-chart-2: #4ade80;
+  --color-chart-3: #a78bfa;
+  --color-chart-4: #fbbf24;
+  --color-chart-5: #f87171;
+  --color-chart-6: #22d3ee;
   /* 引用 chip 身份色暗色档：比浅色提亮一档，保证在深灰底上有足够辨识度
      （实测文字/底色 5.2~7.7:1，均达 AA）。 */
   --color-chip-file: #60a5fa;

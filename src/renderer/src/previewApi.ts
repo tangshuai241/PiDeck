@@ -1662,6 +1662,11 @@ export function createPreviewApi(): PiDesktopApi {
 			export: async () => false,
 		},
 
+		// 图表导出预览桩：预览模式没有主进程保存对话框，直接返回未落盘。
+		chart: {
+			exportFile: async () => ({ ok: false as const, error: "preview" }),
+		},
+
 		// 生图预览桩：预览模式不联网、无落盘图片，直接返回未配置 / 空图
 		imagegen: {
 			generate: async (_request) => ({ ok: false, error: "notConfigured" }),

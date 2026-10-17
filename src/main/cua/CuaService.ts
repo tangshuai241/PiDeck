@@ -17,10 +17,11 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { BrowserWindow } from "electron";
+import { desktopCapturer, type BrowserWindow } from "electron";
 import { CuaEngine } from "./CuaEngine";
 import { CuaGate } from "./CuaGate";
 import { CuaMcpHttpHost } from "./CuaMcpHttpHost";
+import { CuaScreen } from "./CuaScreen";
 import { ensureCuaMcpRegistered, unregisterCuaMcp } from "./CuaMcpRegistration";
 import { CuaIpcManager, type CuaIpcDeps } from "../ipc/cuaIpc";
 
@@ -34,12 +35,15 @@ export type CuaServiceDeps = {
 	 * 改设置无需重启/重接线。缺省视为关闭。
 	 */
 	getAutoApprove?: () => boolean;
+	/** 截图落盘（轨迹回看）：返回内容寻址引用；未注入时不落盘。 */
+	saveScreenshot?: (base64: string, mimeType: string) => Promise<string | null>;
 };
 
 export class CuaService {
 	private deps: CuaServiceDeps;
 	private gate: CuaGate;
 	private engine: CuaEngine;
+	private screen: CuaScreen;
 	private ipc: CuaIpcManager;
 	private host: CuaMcpHttpHost | null = null;
 	private running = false;
@@ -55,6 +59,20 @@ export class CuaService {
 			autoApprove: () => this.deps.getAutoApprove?.() ?? false,
 		});
 		this.engine = new CuaEngine({ defaultDelayMs: 80 }, this.gate);
+		this.screen = new CuaScreen({
+			saveScreenshot: deps.saveScreenshot,
+			// 旧 source id → Electron 显示 id（只在小尺寸缩略图请求上做一次映射，不参与截图）。
+			resolveDisplayIdFromSource: async (sourceId) => {
+				try {
+					if (!String(sourceId).startsWith("screen:")) return undefined;
+					const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
+					const matched = sources.find((source) => String(source.id) === String(sourceId));
+					return matched ? String(matched.display_id) : undefined;
+				} catch {
+					return undefined;
+				}
+			},
+		});
 
 		const ipcDeps: CuaIpcDeps = {
 			gate: this.gate,
@@ -83,6 +101,7 @@ export class CuaService {
 			{
 				engine: this.engine,
 				gate: this.gate,
+				screen: this.screen,
 				onLog: (level, message) => this.deps.log("cua", message, { level }),
 			},
 		);
@@ -133,6 +152,12 @@ export class CuaService {
 	/** Full teardown for app quit. */
 	async dispose(): Promise<void> {
 		await this.stop();
+		this.screen.dispose();
 		this.ipc.dispose();
+	}
+
+	/** 截图/局部查看装配（主进程装配层用来登记图片协议与帧存储）。 */
+	getScreen(): CuaScreen {
+		return this.screen;
 	}
 }

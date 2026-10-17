@@ -29,10 +29,18 @@ export type CuaEngineConfig = {
 	defaultDelayMs: number;
 };
 
+/** 动作发生时前台窗口的摘要（写进工具结果，供轨迹解释「点的是哪个窗口」）。 */
+export type CuaActionTargetWindow = {
+	title: string;
+	hwnd: number;
+	rect: { x: number; y: number; width: number; height: number };
+};
+
 export type CuaActionResult = {
 	sent: number;
 	error?: string;
 	gateDecision?: string;
+	target?: CuaActionTargetWindow;
 };
 
 export class CuaEngine {
@@ -154,7 +162,8 @@ export class CuaEngine {
 			}
 		}
 
-		return { sent: clickAt(x, y, button, display.width, display.height, display.x, display.y), gateDecision: "allowed" };
+		const sent = clickAt(x, y, button, display.width, display.height, display.x, display.y);
+		return { sent, gateDecision: "allowed", target: this.targetWindow() };
 	}
 
 	/**
@@ -179,7 +188,7 @@ export class CuaEngine {
 		const display = getVirtualDisplay();
 		const first = clickAt(x, y, button, display.width, display.height, display.x, display.y);
 		const second = clickAt(x, y, button, display.width, display.height, display.x, display.y);
-		return { sent: first + second, gateDecision: "allowed" };
+		return { sent: first + second, gateDecision: "allowed", target: this.targetWindow() };
 	}
 
 	async type(sessionId: string, params: { text?: string; key?: string; modifiers?: string[] }, options: CuaActionOptions = {}): Promise<CuaActionResult> {
@@ -189,7 +198,7 @@ export class CuaEngine {
 		}
 
 		if (params.text !== undefined) {
-			return { sent: typeUnicode(params.text), gateDecision: "allowed" };
+			return { sent: typeUnicode(params.text), gateDecision: "allowed", target: this.targetWindow() };
 		}
 
 		if (params.key !== undefined) {
@@ -202,7 +211,7 @@ export class CuaEngine {
 				if (mvk === undefined) throw new Error(`Unknown modifier: ${m}`);
 				return mvk;
 			});
-			return { sent: pressKeyCombo(vk, modVks), gateDecision: "allowed" };
+			return { sent: pressKeyCombo(vk, modVks), gateDecision: "allowed", target: this.targetWindow() };
 		}
 
 		return { sent: 0, error: "Either text or key must be provided" };
@@ -215,7 +224,8 @@ export class CuaEngine {
 		}
 
 		const display = getVirtualDisplay();
-		return { sent: scrollAt(x, y, deltaY, deltaX, display.width, display.height, display.x, display.y), gateDecision: "allowed" };
+		const sent = scrollAt(x, y, deltaY, deltaX, display.width, display.height, display.x, display.y);
+		return { sent, gateDecision: "allowed", target: this.targetWindow() };
 	}
 
 	// -------------------------------------------------------------------------
@@ -238,6 +248,17 @@ export class CuaEngine {
 	// -------------------------------------------------------------------------
 	// Internals
 	// -------------------------------------------------------------------------
+
+	/** 当前前台窗口摘要；窗口分析失败时不阻断动作本身，返回 undefined。 */
+	private targetWindow(): CuaActionTargetWindow | undefined {
+		try {
+			const info = this.getForegroundWindow();
+			if (!info) return undefined;
+			return { title: info.window.title, hwnd: info.window.hwnd, rect: info.window.rect };
+		} catch {
+			return undefined;
+		}
+	}
 
 	private hwndValue(hwnd: object): number {
 		return Number(koffiAddress(hwnd));

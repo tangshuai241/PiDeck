@@ -1,7 +1,7 @@
 import { memo, useState, type ReactNode } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Scissors, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
+import { BarChart3, Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Scissors, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
 import { countTextLines, getToolEditDiff, getToolFilePath, parseToolArgs, type ToolGroupItem } from "../app/AppUtils";
-import { t } from "../../i18n";
+import { t, type TranslationKey } from "../../i18n";
 import { formatAskTitle } from "../../utils/askUi";
 import { Badge } from "../ui-shadcn/badge";
 import { detectSubagentFailure } from "./subagentStatus";
@@ -21,6 +21,27 @@ import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
 
 export type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
+
+/** 图表解码失败的原因码 → 简短说明（与主进程 `_chartDecodeReason` 同口径）。 */
+const CHART_DECODE_REASON_KEYS: Record<string, TranslationKey> = {
+	"missing-details": "chart.decodeMissing",
+	"unsupported-version": "chart.decodeVersion",
+	"invalid-spec": "chart.decodeInvalidSpec",
+	"row-budget": "chart.decodeBudget",
+	"series-budget": "chart.decodeBudget",
+	"incompatible-kind": "chart.decodeIncompatible",
+};
+
+function chartDecodeReasonKey(message: ChatMessage): TranslationKey | undefined {
+	const reason = message.meta?._chartDecodeReason;
+	return typeof reason === "string" ? CHART_DECODE_REASON_KEYS[reason] : undefined;
+}
+
+/** 「查看图表」定位：滚到本轮的常显成果卡（图形只在卡片挂载一次）。 */
+function scrollToChartCard(chartId: string): void {
+	const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(chartId) : chartId;
+	document.querySelector(`[data-chart-id="${escaped}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 type AskCardSummary = {
 	question?: string;
@@ -369,6 +390,16 @@ export const ToolCard = memo(function ToolCard(props: {
 							</div>
 						) : (
 							<>
+								{/* 图表成果：工具详情只留定位入口与失败原因，不重复挂载图形。 */}
+								{props.message.chart ? (
+									<div className="mb-1.5">
+										<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-chat-detail text-text-secondary" onClick={() => scrollToChartCard(props.message.chart?.chartId ?? "")}>
+											<BarChart3 size={13} aria-hidden="true" />
+											{t("chart.viewChart")}
+										</Button>
+									</div>
+								) : null}
+								{chartDecodeReasonKey(props.message) ? <p className="mb-1.5 text-chat-detail text-text-tertiary">{t(chartDecodeReasonKey(props.message) ?? "chart.decodeInvalidSpec")}</p> : null}
 								{showDiff && diffTarget && (
 									// 文件工具内联 diff（issue-兼容期：edit/write 的工具卡直接看改动，
 									// 不必再点开右侧差异查看器）。折叠态渲染行；maxHeight 上限防长文件撑爆卡片。

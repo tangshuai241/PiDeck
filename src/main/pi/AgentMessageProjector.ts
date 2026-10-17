@@ -11,6 +11,8 @@ import {
 import { extractMessageText } from "./messageContent";
 import { asRecord } from "./agentUtils";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
+import { decodeChartToolResult } from "../../shared/chartDecode";
+import { decodeCuaToolResult } from "../../shared/cuaDecode";
 
 export type AgentMessageProjectorDeps = {
 	translate: (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
@@ -210,6 +212,11 @@ export class AgentMessageProjector {
 							}
 							return undefined;
 						})();
+						// 图表成果：从原生 toolResult 的 details.tpaChart 解码（与实时通道同一纯函数）。
+						// 解码失败不覆盖工具原文，也没有额外状态：工具详情照常展示文本结果。
+						const chartOutcome = decodeChartToolResult(toolName, result);
+						// CUA 动作记录：与实时通道共用同一个解码函数；解码失败只丢记录，不影响工具详情。
+						const cuaRecord = decodeCuaToolResult(toolName, result);
 						// entryIndex 已在上方 takeActiveEntryId 推进
 						return [
 							{
@@ -218,6 +225,8 @@ export class AgentMessageProjector {
 								role: "tool" as const,
 								text: `${isError ? "✗" : "✓"} ${toolName}`,
 								timestamp: typeof typed.timestamp === "number" ? typed.timestamp : Date.now(),
+								...(chartOutcome.ok ? { chart: chartOutcome.artifact } : {}),
+								...(cuaRecord ? { cua: cuaRecord } : {}),
 								meta: {
 									...(currentEntryId ? { entryId: currentEntryId } : {}),
 									_piDeckMsgSeq: index,
@@ -236,6 +245,8 @@ export class AgentMessageProjector {
 									// 历史会话不保存 originalContent（full file），diff 使用工具参数
 									//（oldText/newText）展示变动区域，避免会话文件体积膨胀。
 									...(askCard ? { _askCard: askCard } : {}),
+									// 与实时通道同口径：解码失败留下原因码，工具原文不受影响。
+									...(chartOutcome.ok || chartOutcome.reason === "not-chart-tool" ? {} : { _chartDecodeReason: chartOutcome.reason }),
 								},
 							},
 						];

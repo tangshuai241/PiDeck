@@ -358,6 +358,7 @@ import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
 import { registerScratchPadIpc } from "./ipc/scratchPadIpc";
+import { registerChartIpc } from "./ipc/chartIpc";
 import { registerDocumentWorkIpc } from "./ipc/documentWorkIpc";
 import { createDocumentWorkDomain, type DocumentWorkDomain } from "./document-work";
 import { isPathInsideAnyRoot } from "./document-work/DocumentWorkService";
@@ -383,6 +384,8 @@ import { ImageGenService } from "./imagegen/ImageGenService";
 import { ImageSessionStore } from "./imagegen/ImageSessionStore";
 import { ImageBlobStore } from "./imagegen/ImageBlobStore";
 import { registerImageGenImageProtocol } from "./imagegen/ImageGenImageProtocol";
+import { CuaFrameStore } from "./cua/CuaFrameStore";
+import { registerCuaFrameProtocol } from "./cua/CuaFrameProtocol";
 import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { registerVideoGenIpc } from "./ipc/videogenIpc";
 import { VideoGenConfigStore } from "./videogen/VideoGenConfigStore";
@@ -547,6 +550,8 @@ let soundAlertService: SoundAlertService | null = null;
 
 /** CUA（Computer Use Agent）服务；null = 未初始化 */
 let cuaService: CuaService | null = null;
+/** CUA 截图落盘（轨迹回看）；协议与 CuaService 共用同一实例。 */
+let cuaFrameStore: CuaFrameStore | null = null;
 /** 定时任务与自动化服务；null = 未初始化 */
 let automationStore: AutomationStore | null = null;
 let automationScheduler: AutomationScheduler | null = null;
@@ -2473,6 +2478,8 @@ function registerIpc() {
 	registerResourceImportIpc(resourceImportManager);
 
 	registerScratchPadIpc({ appLogger });
+	// 对话内图表导出（CSV / PNG）：用户选路径 + 受限写入，边界校验在 chartIpc。
+	registerChartIpc({ appLogger });
 
 	// TPA 独立文稿：输出根与材料路径都只能来自用户经系统选择器的授权结果。
 	registerDocumentWorkIpc({
@@ -2697,6 +2704,9 @@ function registerIpc() {
 	});
 	// pideck-img:// 必须在 app ready 后注册（scheme 特权声明在文件底部 ready 前完成）
 	registerImageGenImageProtocol(imageBlobStore);
+	// CUA 截图：单独目录（不参与生图孤儿回收）+ 数量上限；协议只读该目录。
+	cuaFrameStore = new CuaFrameStore({ getFramesPath: () => join(app.getPath("userData"), "cua", "frames") });
+	registerCuaFrameProtocol(cuaFrameStore);
 	registerImageGenIpc({
 		imageGen: new ImageGenService({
 			getProviderCredentials: async (provider) => {
@@ -3301,6 +3311,8 @@ protocol.registerSchemesAsPrivileged([
 	{ scheme: "pideck-sound", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
 	// 生图历史图片：渲染层 <img> 直接加载落盘 blob，避免把 base64 搬回渲染进程堆
 	{ scheme: "pideck-img", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
+	// CUA 截图（轨迹回看）：与生图分开目录与清理生命周期，见 main/cua/CuaFrameStore.ts
+	{ scheme: "pideck-cua-img", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
 ]);
 
 app
@@ -4621,6 +4633,8 @@ app
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
 			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
 			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
+			// CUA 截图单独落盘：轨迹记录只存 ref，base64 不进任何新增账本。
+			saveScreenshot: (base64, mimeType) => (cuaFrameStore ? cuaFrameStore.save(base64, mimeType) : Promise.resolve(null)),
 		});
 		if (settingsStore.get().cuaEnabled) {
 			void cuaService.start().catch((error) => {

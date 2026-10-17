@@ -1368,6 +1368,11 @@ const api = {
 		export: (draftPath: string) => ipcRenderer.invoke(ipcChannels.scratchPadExport, draftPath) as Promise<boolean>,
 	},
 
+	/** 对话内图表导出：只传内容与建议文件名，路径由用户在系统保存对话框里选。 */
+	chart: {
+		exportFile: (request: import("../shared/types/chart").ChartExportRequest) => ipcRenderer.invoke(ipcChannels.chartExport, request) as Promise<import("../shared/types/chart").ChartExportResult>,
+	},
+
 	// ── 生图：独立 imagegen.json 凭据 + OpenAI 兼容 /images/generations ──
 	imagegen: {
 		generate: (request: ImageGenRequest) => ipcRenderer.invoke(ipcChannels.imagegenGenerate, request) as Promise<ImageGenResult>,

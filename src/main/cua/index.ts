@@ -1,4 +1,26 @@
-export { captureScreen, frameToDataUrl, frameBase64Length, DEFAULT_MAX_LONG_EDGE, DEFAULT_QUALITY } from "./CuaFrame";
+export { captureScreen, cropNativeJpeg, frameToDataUrl, frameBase64Length, DEFAULT_MAX_LONG_EDGE, DEFAULT_QUALITY, THUMBNAIL_REQUEST_SIZE, type CaptureOptions, type Frame } from "./CuaFrame";
+export { listCuaDisplays, findCuaDisplay, type CuaDisplayInfo } from "./CuaDisplays";
+export {
+	imagePointToScreen,
+	screenPointToImage,
+	imageRectToScreenRect,
+	resolveScreenPoint,
+	clampImageRect,
+	imageRectToNativeRect,
+	cropFrameGeometry,
+	matchMonitorToDisplay,
+	describeFrameGeometry,
+	isValidGeometry,
+	type CuaFrameGeometry,
+	type CuaGeometryResult,
+	type CuaGeometryFailure,
+	type CuaImageRect,
+	type CuaMonitorRect,
+	type CuaPoint,
+	type CuaRect,
+} from "./CuaGeometry";
+export { CuaFrameRegistry, DEFAULT_FRAME_LIMIT, DEFAULT_FRAME_TTL_MS, type CuaRegisteredFrame, type CuaFrameRegistryOptions } from "./CuaFrames";
+export { CuaScreen, type CuaCaptureOptions, type CuaCaptureOutcome, type CuaZoomOptions, type CuaZoomOutcome, type CuaScreenDeps } from "./CuaScreen";
 export {
 	enumerateWindows,
 	moveMouseAbsolute,

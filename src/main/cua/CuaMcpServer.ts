@@ -16,6 +16,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CuaEngine } from "./CuaEngine";
 import type { CuaGate } from "./CuaGate";
+import type { CuaScreen } from "./CuaScreen";
 import { registerCuaTools } from "./CuaTools";
 
 /**
@@ -24,7 +25,7 @@ import { registerCuaTools } from "./CuaTools";
  * One instance per MCP session/transport: the SDK requires a 1:1 binding
  * between a Server and a connected transport.
  */
-export function createCuaMcpServer(engine: CuaEngine, gate: CuaGate): McpServer {
+export function createCuaMcpServer(engine: CuaEngine, gate: CuaGate, screen: CuaScreen): McpServer {
 	const server = new McpServer(
 		{ name: "pideck-cua", version: "0.1.0" },
 		{
@@ -34,7 +35,7 @@ export function createCuaMcpServer(engine: CuaEngine, gate: CuaGate): McpServer 
 		},
 	);
 
-	registerCuaTools(server, engine, gate);
+	registerCuaTools(server, engine, gate, screen);
 
 	return server;
 }

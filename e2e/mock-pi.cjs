@@ -131,6 +131,16 @@ let streamStep = 0;
 let streamChunks = [];
 let streamIntervalMs = 80;
 let streaming = false;
+/** 图表工具调用身份：E2E 断言 data-chart-id 用这些固定值（见 chartToolFixture）。 */
+const CHART_TOOL_CALL_ID = "tool-e2e-chart-1";
+const CHART_PIE_TOOL_CALL_ID = "tool-e2e-chart-pie";
+const CHART_REVISE_TOOL_CALL_ID = "tool-e2e-chart-2";
+/** 本轮发出的图表工具结果：由 appendSessionMessages 按顺序落盘（含 parentId 串联）。 */
+const pendingChartToolResults = [];
+/** CUA 工具结果（轨迹回看用例）：toolResult 条目由 appendSessionMessages 按 toolName 落盘。 */
+const pendingCuaToolResults = [];
+const CUA_TOOL_CALL_ID = "tool-e2e-cua-1";
+const CUA_FRAME_REF = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg";
 // steer/followUp 中途到达的 prompt 排队串行处理：真实 pi 也是单 run 语义，
 // 桌面端排队用例依赖「先到的先答、后到的接着答」的顺序性。
 const pendingPrompts = []; // { text, streamingBehavior }
@@ -286,6 +296,102 @@ if (sessionFile && fs.existsSync(sessionFile)) {
 }
 
 /** 把对话写成可被 SessionHistoryReader 分页读取的真实 JSONL（#113 3.2-9） */
+/**
+ * 图表工具结果（与真实 pi 扩展 `render_chart` 同形）：content 是模型可见摘要，
+ * details.tpaChart 是宿主编解码的完整数据。E2E：chart-card.spec.ts。
+ */
+function chartToolFixture({ toolCallId, kind = "bar", title = "月度支出", description = "人工费与材料费对比", parentChartId = null }) {
+	// 饼图只取单一系列且非负；柱/折线保留两类系列与「合法 0 / 缺失」两行。
+	const pie = kind === "pie";
+	const series = pie
+		? [{ key: "labor", label: "人工费", unit: "元" }]
+		: [
+				{ key: "labor", label: "人工费", unit: "元" },
+				{ key: "material", label: "材料费", unit: "元" },
+			];
+	const rows = [
+		{ month: "01", labor: 100, material: 80 },
+		{ month: "02", labor: 0, material: pie ? 0 : null },
+		{ month: "03", labor: 120, material: 90 },
+	];
+	const spec = {
+		schemaVersion: 1,
+		title,
+		description,
+		kind,
+		layout: "vertical",
+		stacked: false,
+		x: { key: "month", label: "月份", kind: "category" },
+		series,
+		rows,
+		sources: [{ label: "材料.xlsx", locator: "支出台账" }],
+	};
+	const chartId = `chart-${toolCallId}`;
+	return {
+		toolCallId,
+		result: {
+			content: [
+				{
+					type: "text",
+					text: `Chart ready: ${title}
+chartId: ${chartId}`,
+				},
+			],
+			details: { tpaChart: { chartId, ...(parentChartId ? { parentChartId } : {}), spec } },
+		},
+	};
+}
+
+function cuaToolFixture() {
+	// 与 CuaTools 真实返回同形：文本 JSON 里带 tpaCua 记录 + 截图引用（图片本体由 e2e fixture 预置到 userData）。
+	const at = Date.now();
+	const record = {
+		schemaVersion: 1,
+		action: "capture",
+		at,
+		durationMs: 420,
+		frame: {
+			frameId: "cua-frame-e2e-1",
+			displayId: "display-e2e",
+			sourceId: "screen:1:0",
+			screenRect: { x: 0, y: 0, width: 2560, height: 1440 },
+			imageWidth: 1280,
+			imageHeight: 720,
+			sourceWidth: 2560,
+			sourceHeight: 1440,
+			coordinateSpace: "image",
+			rotation: 0,
+			capturedAtMs: at,
+			screenshotRef: CUA_FRAME_REF,
+		},
+		receipt: { sent: 0, gate: "read-only" },
+		effect: "unverified",
+	};
+	return {
+		toolCallId: CUA_TOOL_CALL_ID,
+		toolName: "mcp__pideck-cua__cua_capture",
+		result: {
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						width: 1280,
+						height: 720,
+						displayId: "display-e2e",
+						frameId: "cua-frame-e2e-1",
+						screenRect: { x: 0, y: 0, width: 2560, height: 1440 },
+						coordinateSpace: "image",
+						screenshotRef: CUA_FRAME_REF,
+						tpaCua: record,
+					}),
+				},
+			],
+			// 真实 pi 的 MCP 适配层会把 details 覆盖成 {server, tool}；用例顺便锁定「记录只能来自文本」。
+			details: { server: "pideck-cua", tool: "cua_capture" },
+		},
+	};
+}
+
 function appendSessionMessages(userText, assistantText) {
 	ensureSessionFile();
 	if (!sessionFile) return;
@@ -320,13 +426,47 @@ function appendSessionMessages(userText, assistantText) {
 			message: { role: "user", content: [{ type: "text", text: userText }] },
 		}),
 	);
+	// 图表工具结果：与真实 pi 的 toolResult 条目同形（details 持久化，不发给模型），
+	// 历史恢复用例靠它把图表带回时间线。
+	let assistantParent = userId;
+	let entryOffset = 1;
+	for (const pending of pendingChartToolResults.splice(0, pendingChartToolResults.length)) {
+		const toolId = `e${nextEntrySeq++}`;
+		lines.push(
+			JSON.stringify({
+				type: "message",
+				id: toolId,
+				parentId: assistantParent,
+				timestamp: new Date(now + entryOffset).toISOString(),
+				message: { role: "toolResult", toolCallId: pending.toolCallId, toolName: "render_chart", content: pending.result.content, details: pending.result.details, isError: false, timestamp: now + entryOffset },
+			}),
+		);
+		assistantParent = toolId;
+		entryOffset += 1;
+	}
+	// CUA 工具结果：与图表同样落盘，历史恢复时轨迹仍能解出动作记录。
+	for (const pending of pendingCuaToolResults.splice(0, pendingCuaToolResults.length)) {
+		const toolId = `e${nextEntrySeq++}`;
+		lines.push(
+			JSON.stringify({
+				type: "message",
+				id: toolId,
+				parentId: assistantParent,
+				timestamp: new Date(now + entryOffset).toISOString(),
+				message: { role: "toolResult", toolCallId: pending.toolCallId, toolName: pending.toolName, content: pending.result.content, details: pending.result.details, isError: false, timestamp: now + entryOffset },
+			}),
+		);
+		assistantParent = toolId;
+		entryOffset += 1;
+	}
+
 	const assistantId = `e${nextEntrySeq++}`;
 	lines.push(
 		JSON.stringify({
 			type: "message",
 			id: assistantId,
-			parentId: userId,
-			timestamp: new Date(now + 1).toISOString(),
+			parentId: assistantParent,
+			timestamp: new Date(now + 2).toISOString(),
 			message: { role: "assistant", content: [{ type: "text", text: assistantText }] },
 		}),
 	);
@@ -529,6 +669,14 @@ function startStream(userText, options = {}) {
 	streaming = true;
 	const slow = userText.includes("SLOW");
 	streamIntervalMs = slow ? 220 : 80;
+	// CUA：推一次截图工具结果（文本里带 tpaCua + screenshotRef），供轨迹回看用例断言详情与截图。
+	if (userText.includes("CUA")) {
+		const fixture = cuaToolFixture();
+		emit({ type: "tool_execution_start", toolName: fixture.toolName, toolCallId: fixture.toolCallId, args: { maxLongEdge: 1280 } });
+		emit({ type: "tool_execution_end", toolName: fixture.toolName, toolCallId: fixture.toolCallId, result: fixture.result });
+		pendingCuaToolResults.push(fixture);
+	}
+
 	// BURST 模式：模拟真实 LLM 突发输出——前 6 个 chunk 慢速（250ms），
 	// 之后 15ms 密集推送（复现「开头吐字、后面蹦字」）。
 	const burst = userText.includes("BURST");
@@ -621,6 +769,35 @@ function startStream(userText, options = {}) {
 			args: { command: "ls" },
 		});
 		emit({ type: "tool_execution_end", toolCallId: "tool-e2e-1" });
+	}
+	// CHART：推 render_chart 工具的开始/结束帧（带 details.tpaChart），
+	// 与宿主实时解码路径对接；会话落盘由 appendSessionMessages 完成。
+	if (userText.includes("CHART")) {
+		// 每个标记只发一张图：连续改图用例需要「第一句生成原图、第二句才出修改图」，
+		// 同一句里出两张只能证明并列展示。
+		const fixtures = [];
+		if (userText.includes("CHART_PIE")) {
+			// CHART_PIE：单系列饼图，用来验证提示框给类别 + 单位 + 占比。
+			fixtures.push(chartToolFixture({ toolCallId: CHART_PIE_TOOL_CALL_ID, kind: "pie", title: "支出占比", description: "各类支出占比" }));
+		} else if (userText.includes("CHART_REVISE")) {
+			// CHART_REVISE：修改图用 parentChartId 关联第一轮的原图（旧图保留）。
+			fixtures.push(chartToolFixture({ toolCallId: CHART_REVISE_TOOL_CALL_ID, kind: "line", title: "月度支出（折线）", parentChartId: `chart-${CHART_TOOL_CALL_ID}` }));
+		} else {
+			fixtures.push(chartToolFixture({ toolCallId: CHART_TOOL_CALL_ID }));
+		}
+		for (const fixture of fixtures) {
+			emit({ type: "tool_execution_start", toolName: "render_chart", toolCallId: fixture.toolCallId, args: { title: fixture.result.details.tpaChart.spec.title, kind: fixture.result.details.tpaChart.spec.kind } });
+			emit({ type: "tool_execution_end", toolName: "render_chart", toolCallId: fixture.toolCallId, result: fixture.result });
+			pendingChartToolResults.push(fixture);
+		}
+	}
+
+	// CUA：推一次截图工具结果（文本里带 tpaCua + screenshotRef），供轨迹回看用例断言详情与截图。
+	if (userText.includes("CUA")) {
+		const fixture = cuaToolFixture();
+		emit({ type: "tool_execution_start", toolName: fixture.toolName, toolCallId: fixture.toolCallId, args: { maxLongEdge: 1280 } });
+		emit({ type: "tool_execution_end", toolName: fixture.toolName, toolCallId: fixture.toolCallId, result: fixture.result });
+		pendingCuaToolResults.push(fixture);
 	}
 
 	// BURST 模式：模拟真实 LLM 突发输出——前 6 个 chunk 慢速（250ms），

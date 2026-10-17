@@ -181,3 +181,20 @@ for (const { label, tokens } of PALETTES) {
 		assert.deepEqual(failures, [], `${label}主题对比度违规 ${failures.length} 处:\n${failures.join("\n")}`);
 	});
 }
+
+/**
+ * 图表系列色（非文字）：按 WCAG 图形对象标准 3:1，对对话卡片底逐个校验。
+ * 系列色只用于柱/线/面/扇区与图例色块，不承担正文阅读，因此不与正文的 4.5:1 同档。
+ */
+for (const { label, tokens } of PALETTES) {
+	test(`图表系列色对比度：${label}`, () => {
+		const failures = [];
+		const bg = resolve(tokens, "color-chat-card-bg");
+		for (let index = 1; index <= 6; index += 1) {
+			const fg = resolve(tokens, `color-chart-${index}`);
+			const ratio = contrast(fg, bg);
+			if (ratio < 3) failures.push(`  ✗ --color-chart-${index}=${fg} on ${bg}: ${ratio.toFixed(2)}:1 < 3:1`);
+		}
+		assert.deepEqual(failures, [], `${label}图表系列色违规 ${failures.length} 处:\n${failures.join("\n")}`);
+	});
+}

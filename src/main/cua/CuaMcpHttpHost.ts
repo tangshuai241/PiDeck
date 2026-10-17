@@ -20,6 +20,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { CuaEngine } from "./CuaEngine";
 import type { CuaGate } from "./CuaGate";
+import type { CuaScreen } from "./CuaScreen";
 import { createCuaMcpServer } from "./CuaMcpServer";
 
 export type CuaMcpHttpHostConfig = {
@@ -35,6 +36,8 @@ export type CuaMcpHttpHostConfig = {
 export type CuaMcpHttpHostDeps = {
 	engine: CuaEngine;
 	gate: CuaGate;
+	/** 截图/局部查看装配（帧缓存与几何）。 */
+	screen: CuaScreen;
 	onLog?: (level: "info" | "error", message: string) => void;
 };
 
@@ -200,7 +203,7 @@ export class CuaMcpHttpHost {
 				if (sid) this.transports.delete(sid);
 			};
 
-			const server = createCuaMcpServer(this.deps.engine, this.deps.gate);
+			const server = createCuaMcpServer(this.deps.engine, this.deps.gate, this.deps.screen);
 			await server.connect(transport);
 			await transport.handleRequest(req, res, parsedBody);
 			return;

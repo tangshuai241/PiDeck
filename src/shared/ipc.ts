@@ -3,6 +3,8 @@ export const ipcChannels = {
 	accountUsageSave: "account-usage:save",
 	accountUsageRemove: "account-usage:remove",
 	accountUsageRefresh: "account-usage:refresh",
+	/** 对话内图表导出（CSV / PNG）：用户选路径，主进程落盘。 */
+	chartExport: "chart:export",
 	sessionsGenerateTitle: "sessions:generate-title",
 	remoteCompanionStatus: "remote-companion:status",
 	remoteCompanionPair: "remote-companion:pair",

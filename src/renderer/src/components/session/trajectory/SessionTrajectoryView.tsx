@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtomValue } from "jotai";
-import { Loader2, Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, Wrench } from "lucide-react";
+import { Loader2, Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, MousePointerClick, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
+import type { CuaActionKind, CuaActionRecord } from "../../../../../shared/types/cua";
+import { cuaFrameUrl } from "../../../../../shared/types/cua";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
 import type { ModelTraceLogData } from "../../../../../shared/types/rpcLog";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../../atoms";
@@ -426,6 +428,115 @@ function CopyableBlock(props: { label?: string; text: string }) {
 	);
 }
 
+const CUA_ACTION_KEY: Record<CuaActionKind, "session.trajectory.cua.action.capture" | "session.trajectory.cua.action.zoom" | "session.trajectory.cua.action.click" | "session.trajectory.cua.action.scroll" | "session.trajectory.cua.action.type"> = {
+	capture: "session.trajectory.cua.action.capture",
+	zoom: "session.trajectory.cua.action.zoom",
+	click: "session.trajectory.cua.action.click",
+	scroll: "session.trajectory.cua.action.scroll",
+	type: "session.trajectory.cua.action.type",
+};
+
+function rectLabel(rect: { x: number; y: number; width: number; height: number }): string {
+	return `(${Math.round(rect.x)}, ${Math.round(rect.y)}) ${Math.round(rect.width)}×${Math.round(rect.height)}`;
+}
+
+/**
+ * CUA 动作回看：只读展示宿主记录下来的坐标、截图引用和回执。
+ *
+ * 刻意没有任何「再点一次」入口：输入已注入的语义只由 `receipt.sent` 表达，
+ * 界面效果必须靠后续截图或可读取状态确认（见 `effect`）。
+ */
+function CuaActionDetail(props: { record: CuaActionRecord }) {
+	const record = props.record;
+	const frame = record.frame;
+	const imageSrc = frame?.screenshotRef ? cuaFrameUrl(frame.screenshotRef) : null;
+	const input = record.input;
+	// capture/zoom 没有 input，但帧本身就是「图像坐标」的证据；点击/滚动优先用实际输入空间。
+	const space = input?.coordinateSpace === "image" || (!input?.coordinateSpace && frame) ? t("session.trajectory.cua.space.image") : input?.coordinateSpace === "screen" ? t("session.trajectory.cua.space.screen") : undefined;
+	const needsEffectNote = record.effect === "unverified" && (record.action === "click" || record.action === "scroll" || record.action === "type");
+	return (
+		<div className="mt-4 border-t border-border/60 pt-3" data-cua-action={record.action}>
+			<div className="mb-1 flex items-center gap-1 text-caption font-medium">
+				<MousePointerClick size={12} />
+				{t("session.trajectory.cua.title")} · {t(CUA_ACTION_KEY[record.action])}
+			</div>
+			<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption text-muted-foreground">
+				{record.target?.title ? (
+					<>
+						<dt>{t("session.trajectory.cua.target")}</dt>
+						<dd className="truncate text-foreground">{record.target.title}</dd>
+					</>
+				) : null}
+				{space ? (
+					<>
+						<dt>{t("session.trajectory.cua.coordinateSpace")}</dt>
+						<dd>{space}</dd>
+					</>
+				) : null}
+				{input?.imagePoint ? (
+					<>
+						<dt>{t("session.trajectory.cua.imagePoint")}</dt>
+						<dd className="tabular-nums">
+							({Number(input.imagePoint.x.toFixed(1))}, {Number(input.imagePoint.y.toFixed(1))})
+						</dd>
+					</>
+				) : null}
+				{input?.screenPoint ? (
+					<>
+						<dt>{t("session.trajectory.cua.screenPoint")}</dt>
+						<dd className="tabular-nums">
+							({Math.round(input.screenPoint.x)}, {Math.round(input.screenPoint.y)})
+						</dd>
+					</>
+				) : null}
+				{frame?.screenRect ? (
+					<>
+						<dt>{t("session.trajectory.cua.screenRect")}</dt>
+						<dd className="tabular-nums">{rectLabel(frame.screenRect)}</dd>
+					</>
+				) : null}
+				{frame?.imageWidth && frame?.imageHeight ? (
+					<>
+						<dt>{t("session.trajectory.cua.imageSize")}</dt>
+						<dd className="tabular-nums">
+							{frame.imageWidth}×{frame.imageHeight}
+							{frame.sourceWidth && frame.sourceHeight && (frame.sourceWidth !== frame.imageWidth || frame.sourceHeight !== frame.imageHeight) ? ` (−${frame.sourceWidth}×${frame.sourceHeight})` : ""}
+						</dd>
+					</>
+				) : null}
+				{frame?.crop ? (
+					<>
+						<dt>{t("session.trajectory.cua.crop")}</dt>
+						<dd className="tabular-nums">{rectLabel(frame.crop)}</dd>
+					</>
+				) : null}
+				{frame?.parentFrameId ? (
+					<>
+						<dt>{t("session.trajectory.cua.parentFrame")}</dt>
+						<dd className="truncate font-mono text-micro">{frame.parentFrameId}</dd>
+					</>
+				) : null}
+				{record.receipt ? (
+					<>
+						<dt>{t("session.trajectory.cua.receipt")}</dt>
+						<dd className="tabular-nums">
+							{t("session.trajectory.cua.sent")}: {record.receipt.sent ?? 0}
+							{record.receipt.gate ? ` · ${t("session.trajectory.cua.gate")}: ${record.receipt.gate}` : ""}
+							{record.receipt.error ? ` · ${record.receipt.error}` : ""}
+						</dd>
+					</>
+				) : null}
+			</dl>
+			{needsEffectNote ? <p className="mt-1 text-micro text-muted-foreground">{t("session.trajectory.cua.effectUnverified")}</p> : null}
+			<div className="mt-2">
+				<div className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{t("session.trajectory.cua.screenshot")}</div>
+				{imageSrc ? <img src={imageSrc} alt={t("session.trajectory.cua.screenshot")} className="max-h-64 w-full rounded-md border border-border/70 object-contain" /> : <p className="text-micro text-muted-foreground">{t("session.trajectory.cua.noScreenshot")}</p>}
+			</div>
+			<p className="mt-2 text-micro text-muted-foreground">{t("session.trajectory.cua.reviewOnly")}</p>
+		</div>
+	);
+}
+
 function TrajectoryInspector(props: {
 	record?: TrajectoryRecord;
 	runtimeState?: AgentRuntimeState;
@@ -609,6 +720,7 @@ function TrajectoryInspector(props: {
 				</button>
 			) : null}
 			{!record.inputDetail && !record.outputDetail && (record.detail || record.text) ? <CopyableBlock text={record.detail || record.text || ""} /> : null}
+			{record.cua ? <CuaActionDetail record={record.cua} /> : null}
 			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined || state.totalMs !== undefined) ? (
 				<div className="mt-4 border-t border-border/60 pt-3">
 					<div className="mb-1 flex items-center gap-1 text-caption font-medium">

@@ -10,6 +10,7 @@
  * AppUtils.ts，随重构逐步迁移至此；本模块只定义展示层新增类型，避免大爆炸。
  */
 import type { AgentRunItem, ErrorGroupItem, MessageItem, RetryGroupItem, ThinkingGroupItem, ToolGroupItem } from "../../app/AppUtils";
+import type { ChartArtifact } from "../../../../../shared/types";
 import type { ChatMessage } from "../../../../../shared/types";
 
 export type { AgentRunItem, ErrorGroupItem, MessageItem, RetryGroupItem, ThinkingGroupItem, ToolGroupItem };
@@ -23,4 +24,22 @@ export type TurnProcessEntry =
 	| { kind: "extension-entry"; id: string; messages: ChatMessage[] };
 
 /** 扁平展示序列中的一个节点。 */
-export type TurnDisplayItem = { kind: "process-entry"; entry: TurnProcessEntry } | { kind: "interim-answer"; id: string; message: ChatMessage } | { kind: "final-answer"; id: string; message: ChatMessage };
+export type TurnDisplayItem =
+	| { kind: "process-entry"; entry: TurnProcessEntry }
+	| {
+			/**
+			 * 图表成果：常显内容，不随执行过程折叠。
+			 * 与同一工具调用产生的 process-entry（工具摘要，可折叠）引用同一个 toolCallId，
+			 * 只有本项挂载图形；工具详情只保留摘要与「查看图表」定位入口。
+			 */
+			kind: "chart-artifact";
+			id: string;
+			artifact: ChartArtifact;
+	  }
+	| {
+			/** 图表工具正在运行：只显示短状态，收到完整有效结果后才挂载图形。 */
+			kind: "chart-pending";
+			id: string;
+	  }
+	| { kind: "interim-answer"; id: string; message: ChatMessage }
+	| { kind: "final-answer"; id: string; message: ChatMessage };

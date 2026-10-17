@@ -7,6 +7,8 @@ export * from "./types/focus";
 export * from "./types/agent";
 export * from "./types/alignment";
 export * from "./types/session";
+export * from "./types/chart";
+export * from "./types/cua";
 export * from "./types/terminal";
 export * from "./types/feishu";
 export * from "./types/settings";

@@ -103,6 +103,8 @@ export function groupTurnProcess(items: readonly TurnDisplayItem[]): TurnProcess
 
 	for (const item of items) {
 		if (item.kind === "final-answer") continue;
+		// 图表成果与图表短状态是常显内容，在大折叠栏外渲染：既不进过程组，也不切断相邻组。
+		if (item.kind === "chart-artifact" || item.kind === "chart-pending") continue;
 		if (item.kind === "interim-answer") {
 			// 原文非空不代表有正文；不可见消息不能切断相邻过程组。
 			if (!cleanAnswerText(item.message.text)) continue;

@@ -18,7 +18,7 @@
  *   不伪造区间；检查器凭 modelTrace.traceId 回读完整请求体。
  */
 
-import type { ChatMessage } from "../../../../../shared/types";
+import type { ChatMessage, CuaActionRecord } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
 import { compareTrajectoryRecords, seqOfMessage, sortTurnRecords, wallTime } from "./trajectoryOrder";
 
@@ -81,6 +81,8 @@ export type TrajectoryRecord = {
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 	/** modelRequest 记录的快照指针：检查器凭它回读完整请求体并展示体积/截断标记。 */
 	modelTrace?: { traceId: string; agentId?: string; messageCount?: number; toolCount?: number; payloadBytes?: number; truncated?: boolean };
+	/** CUA 动作记录（截图引用 + 坐标 + 回执）：轨迹检查器只读展示，不重放动作。 */
+	cua?: CuaActionRecord;
 };
 
 export type TrajectoryTurn = {
@@ -462,6 +464,7 @@ export function buildTrajectory(messages: ChatMessage[], now = Date.now(), extra
 				inputDetail,
 				outputDetail,
 				seq,
+				...(message.cua ? { cua: message.cua } : {}),
 			});
 			continue;
 		}

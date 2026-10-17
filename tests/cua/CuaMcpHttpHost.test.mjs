@@ -8,6 +8,15 @@ const { CuaMcpHttpHost } = loadTsCommonJs("src/main/cua/CuaMcpHttpHost.ts");
 const { CuaGate } = loadTsCommonJs("src/main/cua/CuaGate.ts");
 const { CuaEngine } = loadTsCommonJs("src/main/cua/CuaEngine.ts");
 
+// 截图装配在真实 Electron 里才可用（desktopCapturer）；这些用例只关心工具面与审批，
+// 用最小替身：显示器列表为空，帧缓存永远 miss。
+function makeScreen() {
+	return {
+		listDisplays: () => [],
+		getFrame: () => undefined,
+	};
+}
+
 async function connectClient(url, token) {
 	const transport = new StreamableHTTPClientTransport(new URL(url), {
 		requestInit: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
@@ -20,7 +29,7 @@ async function connectClient(url, token) {
 test("CUA MCP HTTP host exposes tools and denies writes without approval handler", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "test-token" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "test-token" }, { engine, gate, screen: makeScreen() });
 
 	const port = await host.start();
 	assert.ok(port > 0);
@@ -32,7 +41,7 @@ test("CUA MCP HTTP host exposes tools and denies writes without approval handler
 	try {
 		const tools = await client.listTools();
 		const names = tools.tools.map((t) => t.name).sort();
-		assert.deepStrictEqual(names, ["cua_capture", "cua_click", "cua_get_state", "cua_list_windows", "cua_scroll", "cua_type"]);
+		assert.deepStrictEqual(names, ["cua_capture", "cua_click", "cua_get_state", "cua_list_windows", "cua_scroll", "cua_type", "cua_zoom"]);
 
 		// cua_list_windows is read-only → works.
 		const listResult = await client.callTool({ name: "cua_list_windows", arguments: {} });
@@ -71,7 +80,7 @@ test("CUA MCP HTTP host honors the in-process approval handler (allow/deny)", as
 	});
 
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");
@@ -96,7 +105,7 @@ test("CUA MCP HTTP host honors the in-process approval handler (allow/deny)", as
 test("CUA MCP HTTP host rejects requests without a bearer token", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "secret" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "secret" }, { engine, gate, screen: makeScreen() });
 	const port = await host.start();
 
 	try {
@@ -114,7 +123,7 @@ test("CUA MCP HTTP host rejects requests without a bearer token", async () => {
 test("CUA MCP HTTP host returns 404 for unknown paths", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0 }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0 }, { engine, gate, screen: makeScreen() });
 	const port = await host.start();
 
 	try {
@@ -128,7 +137,7 @@ test("CUA MCP HTTP host returns 404 for unknown paths", async () => {
 test("capture schema rejects out-of-bounds quality/maxLongEdge", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");
@@ -147,7 +156,7 @@ test("capture schema rejects out-of-bounds quality/maxLongEdge", async () => {
 test("scroll schema clamps out-of-range wheel deltas", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");
@@ -163,7 +172,7 @@ test("scroll schema clamps out-of-range wheel deltas", async () => {
 test("type schema rejects text exceeding the length cap", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");
@@ -179,7 +188,7 @@ test("type schema rejects text exceeding the length cap", async () => {
 test("list_windows includeInvisible superset covers visible-only listing", async () => {
 	const gate = new CuaGate({ enabled: true });
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");
@@ -213,7 +222,7 @@ test("cua_click double=true hits the engine doubleClick path (single approval)",
 	});
 
 	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
-	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate, screen: makeScreen() });
 	await host.start();
 
 	const { client, transport } = await connectClient(host.getUrl(), "tok");

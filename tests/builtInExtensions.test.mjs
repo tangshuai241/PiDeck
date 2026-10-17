@@ -50,7 +50,10 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
 		// Alignment is an entry point; its state parser must be packaged but never injected as an extension.
-		assert.equal(BUILT_IN_EXTENSIONS.length, 19);
+		assert.equal(BUILT_IN_EXTENSIONS.length, 20);
+		// 图表工具是入口；它的契约镜像必须随包分发，但不作为独立扩展注入。
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-chart.ts"));
+		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-chart-contract.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-cloud-memory.ts"));
 		assert.ok(!BUILT_IN_EXTENSIONS.includes("pi-deck-cloud-memory-policy.ts"));
 		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-alignment-mode.ts"));

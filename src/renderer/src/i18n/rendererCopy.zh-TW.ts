@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 8d3f44a0ed59ae7fb26179206ed55183efca5214085c27d8d8ec1d50b31510ea（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 824522dda7d522a716b0f73bce403340d17cda5ad6d5d34c6e3fdc219dd4e442（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3255,6 +3255,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	// 已安装列表：内置扩展一行简介（ExtensionTableRow 按 source 映射 builtInExtDesc.*）
 	"config.builtInExtDesc.pi-deck-request-size-recovery": "請求體超限自動恢復：識別閘道器 413/請求體過大錯誤，徵得同意後臨時切換大上限模型壓縮會話再切回，解除無法傳送的死鎖。",
 	"config.builtInExtDesc.pi-deck-ask-question": "註冊 ask_question 工具：模型可通過統一的提問卡片向你提問（單選/多選/確認/輸入，多問題時以 Tab 展開），選擇題恆帶自定義輸入，回答回傳給模型。",
+	"config.builtInExtDesc.pi-deck-chart": "註冊 render_chart 工具：模型把已聚合好的資料畫成對話裡的互動圖表卡（柱狀/折線/面積/餅圖，可懸停、切系列、看資料表、放大與匯出），圖表隨原生工具結果持久化，重開會話仍可操作。",
 	"config.builtInExtDesc.pi-deck-goal-mode": "目標模式：圍繞一條目標自動續輪推進，直到完成、阻塞、暫停或到達輪次上限；狀態跨重啟可恢復。",
 	"config.builtInExtDesc.pi-deck-model-trace": "模型請求快照：把 Pi 實際發給供應商的請求體（系統提示詞/上下文訊息/工具表）記入 RPC 日誌的「模型」檢視，排查「模型到底收到了什麼」；快照只存本機，超限自動截斷。",
 	"config.builtInExtDesc.pi-deck-nul-redirect-fix": "NUL 重定向修復：bash 執行前把「> nul」等 Windows 重定向改寫為 /dev/null，避免 Git Bash 產生刪不掉的 nul 檔案。",
@@ -5820,6 +5821,30 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.trajectory.field.retryDelay": "重試延遲",
 	"session.trajectory.field.payload": "入參",
 	"session.trajectory.field.result": "結果",
+	// ===== CUA 动作回看（轨迹检查器只读展示，不重放输入） =====
+	"session.trajectory.cua.title": "電腦操作",
+	"session.trajectory.cua.action.capture": "截圖",
+	"session.trajectory.cua.action.zoom": "區域性檢視",
+	"session.trajectory.cua.action.click": "點選",
+	"session.trajectory.cua.action.scroll": "滾動",
+	"session.trajectory.cua.action.type": "輸入",
+	"session.trajectory.cua.target": "目標視窗",
+	"session.trajectory.cua.coordinateSpace": "座標空間",
+	"session.trajectory.cua.space.image": "截圖影像畫素",
+	"session.trajectory.cua.space.screen": "螢幕物理畫素",
+	"session.trajectory.cua.imagePoint": "影像座標",
+	"session.trajectory.cua.screenPoint": "螢幕座標",
+	"session.trajectory.cua.screenRect": "螢幕範圍",
+	"session.trajectory.cua.imageSize": "影像尺寸",
+	"session.trajectory.cua.crop": "裁剪區域",
+	"session.trajectory.cua.parentFrame": "來源幀",
+	"session.trajectory.cua.screenshot": "截圖",
+	"session.trajectory.cua.noScreenshot": "這張截圖沒有儲存（幀已過期或未落盤）",
+	"session.trajectory.cua.receipt": "執行回執",
+	"session.trajectory.cua.sent": "已傳送輸入",
+	"session.trajectory.cua.gate": "授權",
+	"session.trajectory.cua.effectUnverified": "已傳送輸入。介面效果需要後續截圖或狀態確認，收到回執不代表目標操作成功。",
+	"session.trajectory.cua.reviewOnly": "回看只展示已記錄的動作與截圖，不會重新執行點選或輸入。",
 	"voice.start": "開始語音輸入",
 	// ===== 提示词增强（输入框 ✦ 按钮） =====
 	"enhance.start": "增強提示詞",
@@ -6325,4 +6350,37 @@ export const zhTW: Record<TranslationKey, string> = {
 	"reading.historyNoLabels": "無書名與章節標籤",
 	"reading.historySourceUnreadable": "該來源當前不可讀。",
 	"reading.historySourceEmpty": "該來源沒有會話。",
+	// 对话内交互图表（render_chart）：卡片、图例、数据表与解码失败提示。
+	"chart.pending": "正在整理圖表…",
+	"chart.viewData": "檢視資料",
+	"chart.hideData": "收起資料",
+	"chart.zoom": "放大",
+	"chart.zoomHint": "放大檢視與卡片共用同一份資料；關閉後仍保留系列選擇。",
+	"chart.copyData": "複製資料",
+	"chart.saveImage": "儲存圖片",
+	"chart.saveCsv": "匯出 CSV",
+	"chart.exported": "已儲存",
+	"chart.exportFailed": "匯出失敗，請重試",
+	"chart.resetView": "恢復預設檢視",
+	"chart.kindGroup": "圖形",
+	"chart.kindBar": "柱狀圖",
+	"chart.kindLine": "折線圖",
+	"chart.kindArea": "面積圖",
+	"chart.kindPie": "餅圖",
+	"chart.stacked": "堆疊",
+	"chart.share": "佔比",
+	"chart.range": "範圍",
+	"chart.rangeStart": "起始行",
+	"chart.rangeEnd": "結束行",
+	"chart.rangeClear": "清除",
+	"chart.revision": "基於原圖修改",
+	"chart.allZeroPie": "所有數值都是零，沒有可畫的佔比；數值見下方資料表。",
+	"chart.sources": "來源：{list}",
+	"chart.dataTableCaption": "圖表資料：{title}",
+	"chart.viewChart": "檢視圖表",
+	"chart.decodeMissing": "沒有找到圖表資料，已保留工具輸出。",
+	"chart.decodeVersion": "圖表結果版本不受支援，已保留工具輸出。",
+	"chart.decodeInvalidSpec": "圖表結果不完整或格式不符，已保留工具輸出。",
+	"chart.decodeBudget": "圖表超出規模預算，請先聚合資料再生成。",
+	"chart.decodeIncompatible": "資料與該圖形不相容（如餅圖出現負值或多系列）。",
 };

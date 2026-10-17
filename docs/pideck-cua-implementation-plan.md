@@ -320,3 +320,28 @@ pi 的 `pi-mcp-adapter` 以 HTTP transport 连接（原生支持 `url` 字段）
 - `C:\Users\14012\.qoder-cn\tmp\zcodepro-probe\runtimes\zcode-cua\`
 - `docs/process-group-implementation-contract.md`
 - `docs/windows-quick-task.md`
+
+---
+
+## 10. C0–C2：截图几何、局部查看与轨迹回看（2026-10-17 实测后实现）
+
+C0 实测（本机 2 屏、125%/150% 混合 DPI、副屏物理原点 −2560）结论：
+`desktopCapturer` 的 `thumbnailSize` 是**请求框**，超过显示器分辨率会**放大**（8192 请求在
+2560×1440 屏上返回 8192×4608）；请求显示器物理尺寸才得到 1:1 原生图。
+Electron `screen` 给 DIP，`bounds × scaleFactor` 反推物理矩形会有 ±1px 误差（副屏实测 2561×1601
+vs 实际 2560×1600），因此显示器矩形取 Win32 `GetMonitorInfoW`。
+
+对应实现：
+
+- `CuaGeometry.ts`：图像↔屏幕↔物理矩形的纯换算、裁剪子帧、输入边界取整。
+- `CuaDisplays.ts` / `CuaWin32.enumerateMonitorRects()`：物理矩形 + DPI（含负原点）。
+- `CuaFrame.ts`：请求框 = 显示器物理尺寸；返回交付/原生尺寸与 source/display id；原生 JPEG 供裁剪。
+- `CuaFrames.ts` / `CuaScreen.ts`：最近帧缓存（LRU+TTL）与 `cua_zoom`（从原生图裁剪，不放大已缩小图）。
+- 工具面：`cua_capture` 返回 `frameId`/`screenRect`/`coordinateSpace` 等几何；`cua_click` /
+  `cua_scroll` 带 `frameId` 时按图像坐标换算，不带时保持绝对屏幕物理坐标；`cua_get_state`
+  增加 `displays`。
+- 轨迹：工具文本结果带 `tpaCua` 记录（共享解码 `src/shared/cuaDecode.ts`），截图经
+  `CuaFrameStore` 落盘到 `userData/cua/frames`，记录只存 `screenshotRef`，渲染层用
+  `pideck-cua-img://` 回看；轨迹检查器只读展示，不重放输入。
+
+实机验收与未验证组合见 `E:\A PI\cache\TPA-charts-20261017\C1-C2-实现与验证.md`。

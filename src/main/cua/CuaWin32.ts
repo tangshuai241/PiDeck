@@ -87,12 +87,17 @@ export function koffiAddress(value: unknown): bigint {
 
 let cachedUser32: ReturnType<Koffi["load"]> | null = null;
 let cachedKernel32: ReturnType<Koffi["load"]> | null = null;
+let cachedShcore: ReturnType<Koffi["load"]> | null = null;
 
 /** 惰性 DLL 句柄：win32 首次访问时加载；其它平台由 koffiStub 提供占位。 */
-function dll(name: "user32" | "kernel32"): ReturnType<Koffi["load"]> {
+function dll(name: "user32" | "kernel32" | "shcore"): ReturnType<Koffi["load"]> {
 	if (name === "user32") {
 		cachedUser32 ??= koffiLazy.load("user32.dll");
 		return cachedUser32;
+	}
+	if (name === "shcore") {
+		cachedShcore ??= koffiLazy.load("shcore.dll");
+		return cachedShcore;
 	}
 	cachedKernel32 ??= koffiLazy.load("kernel32.dll");
 	return cachedKernel32;
@@ -107,7 +112,7 @@ function dll(name: "user32" | "kernel32"): ReturnType<Koffi["load"]> {
  * 就是「模块一加载就崩」（2026-09-30 打包版启动失败：崩溃点看着在入口
  * `require("koffi")`，实际是本模块第一条绑定语句）。
  */
-function lazyDll(name: "user32" | "kernel32"): ReturnType<Koffi["load"]> {
+function lazyDll(name: "user32" | "kernel32" | "shcore"): ReturnType<Koffi["load"]> {
 	return new Proxy({} as ReturnType<Koffi["load"]>, {
 		get: (_target, prop) => {
 			const lib = dll(name);
@@ -221,6 +226,108 @@ export const GetCurrentThreadId = kernel32.func("uint32_t GetCurrentThreadId()")
 // EnumWindows callback prototype: return false to stop enumeration.
 const EnumWindowsProc = koffiLazy.proto("bool EnumWindowsProc(void *hWnd, intptr_t lParam)");
 export const EnumWindows = user32.func("bool EnumWindows(EnumWindowsProc *lpEnumFunc, intptr_t lParam)");
+
+// ---------------------------------------------------------------------------
+// Monitor enumeration（每显示器物理矩形）
+// ---------------------------------------------------------------------------
+
+/**
+ * `EnumDisplayMonitors` 回调。矩形参数用原始内存读，不用 koffi struct：
+ * koffi 对含数组字段的 struct 出参不写回（实测 MONITORINFO 的 rcMonitor/rcWork 恒为 0），
+ * 平铺标量字段的 `_Out_` struct 也拿不到 cbSize 回填（koffi 会把出参初始化成零，
+ * 而 GetMonitorInfoW 要求调用方先写好 cbSize=40）。原始 40 字节 Buffer 两种问题都没有。
+ */
+const MonitorEnumProc = koffiLazy.proto("bool MonitorEnumProc(void *hMonitor, void *hdc, int32_t *rect, intptr_t lParam)");
+export const EnumDisplayMonitors = user32.func("bool EnumDisplayMonitors(void *hdc, void *clip, MonitorEnumProc *lpfn, intptr_t lParam)");
+const GetMonitorInfoWRaw = user32.func("bool GetMonitorInfoW(void *hMonitor, void *monitorInfo)");
+
+/** shcore 的 GetDpiForMonitor：旧系统可能没有 shcore.dll，加载失败时 DPI 记为 0。 */
+let cachedGetDpiForMonitor: ReturnType<ReturnType<typeof lazyDll>["func"]> | null | undefined;
+function getDpiForMonitor(): ReturnType<ReturnType<typeof lazyDll>["func"]> | null {
+	if (cachedGetDpiForMonitor !== undefined) return cachedGetDpiForMonitor;
+	try {
+		cachedGetDpiForMonitor = lazyDll("shcore").func("int GetDpiForMonitor(void *hMonitor, int dpiType, _Out_ uint32_t *dpiX, _Out_ uint32_t *dpiY)");
+	} catch {
+		cachedGetDpiForMonitor = null;
+	}
+	return cachedGetDpiForMonitor;
+}
+
+/** Windows 的 MDT_EFFECTIVE_DPI。 */
+const MDT_EFFECTIVE_DPI = 0;
+/** MONITORINFO 固定 40 字节：cbSize(4) + rcMonitor(16) + rcWork(16) + dwFlags(4)。 */
+const MONITORINFO_SIZE = 40;
+
+export type MonitorRect = {
+	/** 屏幕物理像素矩形（虚拟桌面坐标，原点可为负）。 */
+	rect: { x: number; y: number; width: number; height: number };
+	/** 工作区物理矩形（去任务栏）。 */
+	work: { x: number; y: number; width: number; height: number };
+	primary: boolean;
+	/** GetDpiForMonitor 的 EFFECTIVE_DPI；取不到时为 0。 */
+	dpiX: number;
+	dpiY: number;
+};
+
+/**
+ * 枚举所有显示器的物理矩形与 DPI。
+ *
+ * 为什么不用 `screen.getAllDisplays().bounds × scaleFactor`：DIP 是物理值除以 DPI 再取整的
+ * 结果，反乘会带 ±1px 误差（本机副屏实测 2561×1601 vs 实际 2560×1600）。截图几何必须用这里的
+ * 物理矩形才能和 1:1 原生截图对齐。
+ *
+ * 非 Windows / 原生绑定不可用时返回空数组，由调用方降级并明确标注。
+ */
+export function enumerateMonitorRects(): MonitorRect[] {
+	if (!isWindows) return [];
+	const monitors: MonitorRect[] = [];
+	try {
+		EnumDisplayMonitors(
+			null,
+			null,
+			(hMonitor: unknown) => {
+				const buffer = Buffer.alloc(MONITORINFO_SIZE);
+				buffer.writeUInt32LE(MONITORINFO_SIZE, 0);
+				if (!GetMonitorInfoWRaw(hMonitor, buffer)) return true;
+				const dpiX = [0];
+				const dpiY = [0];
+				let dpiOk = false;
+				const getDpi = getDpiForMonitor();
+				if (getDpi) {
+					try {
+						getDpi(hMonitor, MDT_EFFECTIVE_DPI, dpiX, dpiY);
+						dpiOk = true;
+					} catch {
+						dpiOk = false;
+					}
+				}
+				monitors.push({
+					rect: {
+						x: buffer.readInt32LE(4),
+						y: buffer.readInt32LE(8),
+						width: buffer.readInt32LE(12) - buffer.readInt32LE(4),
+						height: buffer.readInt32LE(16) - buffer.readInt32LE(8),
+					},
+					work: {
+						x: buffer.readInt32LE(20),
+						y: buffer.readInt32LE(24),
+						width: buffer.readInt32LE(28) - buffer.readInt32LE(20),
+						height: buffer.readInt32LE(32) - buffer.readInt32LE(24),
+					},
+					primary: (buffer.readUInt32LE(36) & 1) !== 0,
+					dpiX: dpiOk ? dpiX[0] : 0,
+					dpiY: dpiOk ? dpiY[0] : 0,
+				});
+				return true;
+			},
+			0n,
+		);
+	} catch {
+		// 原生绑定缺失（koffi 降级）或旧系统没有 shcore：返回空表，调用方走降级路径。
+		return [];
+	}
+	return monitors;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

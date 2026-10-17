@@ -19,12 +19,24 @@
  */
 import type { AgentRunItem, ThinkingGroupItem } from "../../app/AppUtils";
 import type { ChatMessage } from "../../../../../shared/types";
+import { TPA_CHART_TOOL_NAME } from "../../../../../shared/types/chart.ts";
 import type { TurnDisplayItem } from "./types";
 // 显式 .ts 扩展名兼容 Node type stripping 直接加载的单测。
 import { cleanAnswerText } from "./answerText.ts";
 
 /* 思考步骤只去控制码，不应用正文的思考标签过滤。 */
 const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
+/**
+ * 图表工具消息的展示状态：`done`（已解码出成果）、`pending`（仍在运行，给短状态）、
+ * `none`（不是图表工具，或结果无法解码，交给工具详情）。
+ */
+function chartToolState(message: ChatMessage): "done" | "pending" | "none" {
+	const toolName = message.meta?.toolName;
+	if (typeof toolName !== "string" || toolName !== TPA_CHART_TOOL_NAME) return "none";
+	if (message.chart) return "done";
+	return message.meta?.status === "running" ? "pending" : "none";
+}
 
 function stripAnsi(text: string): string {
 	return text.replace(ANSI_RE, "");
@@ -75,6 +87,18 @@ export function buildTurnDisplay(
 				kind: "process-entry",
 				entry: { kind: "tool-entry", id: item.id, group: item },
 			});
+			// 图表成果：与工具摘要在同一个位置，但是常显项（不受 run 级折叠控制）。
+			// 仍在运行的工具只给一条短状态；解码失败的结果不在这里显示，
+			// 交由工具详情展示原因与原文。
+			for (const message of item.messages) {
+				if (message.chart) {
+					items.push({ kind: "chart-artifact", id: `chart-${message.id}`, artifact: message.chart });
+					continue;
+				}
+				if (chartToolState(message) === "pending") {
+					items.push({ kind: "chart-pending", id: `chart-pending-${message.id}` });
+				}
+			}
 			return;
 		}
 		if (item.kind === "retry-group") {
@@ -153,6 +177,8 @@ export function buildTurnDisplay(
 export function hasFoldableContent(items: TurnDisplayItem[]): boolean {
 	return items.some((item) => {
 		if (item.kind === "final-answer") return false;
+		// 图表成果与图表短状态都是常显内容：不因它们渲染汇总按钮。
+		if (item.kind === "chart-artifact" || item.kind === "chart-pending") return false;
 		// 清理后没有正文的 interim（live 骨架/错误占位/仅思考标签）不可折叠，
 		// 否则汇总栏会计入一条 AnswerOutput 实际不渲染的回复。
 		if (item.kind === "interim-answer") return !!cleanAnswerText(item.message.text);

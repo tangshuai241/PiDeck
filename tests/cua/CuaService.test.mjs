@@ -88,6 +88,13 @@ test("start failure leaves gate closed (fail closed)", async () => {
 				// 本用例只关心 gate 与注册失败路径，engine 不参与其余调用。
 				CuaEngine: class {},
 			},
+			"./CuaScreen": {
+				// 同上：CuaScreen → CuaDisplays → CuaWin32 会再跑一遍顶层 struct 注册，
+				// 真 koffi 跨 vm 缓存，第二次加载必报 Duplicate type name。
+				CuaScreen: class {
+					dispose() {}
+				},
+			},
 			"./CuaMcpRegistration": {
 				ensureCuaMcpRegistered: () => ({ written: false }),
 				unregisterCuaMcp: () => ({ removed: false }),

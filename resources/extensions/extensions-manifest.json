@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "18ca5c486b859e56c6e25c3f3da83bc754b8bc5b5fc4585b352015d068e68fd1",
-  "fileCount": 63,
+  "bundleSha256": "abfb0429131f2a6efa23f540028e3a0d8df0013f40cd5022e09f419cff43fa5c",
+  "fileCount": 65,
   "files": [
     {
       "name": "pi-deck-alignment-mode.ts",
@@ -18,6 +18,16 @@
       "name": "pi-deck-ask-question.ts",
       "sha256": "b6b604c09feccece07ac7307882876f2d0071190051cdf3d2d03cef47e2cfb00",
       "bytes": 13855
+    },
+    {
+      "name": "pi-deck-chart-contract.ts",
+      "sha256": "5d7ab9fc9c1b2bee3511929e04aa5b268940cfa1ab0786b681a88adeb5ea63e9",
+      "bytes": 9194
+    },
+    {
+      "name": "pi-deck-chart.ts",
+      "sha256": "5ab0aa8ac6d16c328ef4375762f96a1b1f942ee6f8ee424a59d9b1709a546e3f",
+      "bytes": 6191
     },
     {
       "name": "pi-deck-cloud-memory-capture-plan.ts",

@@ -50,6 +50,9 @@ export type SeedSettings = Record<string, unknown>;
 /** 测试文件可预置独立 imagegen.json，使首帧 Composer 读取真实供应商配置。 */
 export type SeedImageGenConfig = ImageGenConfigFile;
 
+/** 测试文件可预置 CUA 截图（轨迹回看）：ref 必须是白名单命名（64 hex + 图片扩展名）。 */
+export type SeedCuaFrame = { ref: string; bytes: Buffer };
+
 const repoRoot = resolve(__dirname, "..");
 
 /**
@@ -75,22 +78,33 @@ function normalizeSeeds<T>(name: string, value: readonly T[] | T | undefined, re
 }
 
 export const test = base.extend<
-	MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSessionFiles: SeedSessionFile[] | undefined; seedSettings: SeedSettings | undefined; seedImageGenConfig: SeedImageGenConfig | undefined; launchArgs: string[]; mockSessionInProject: boolean }
+	MockPiFixture & {
+		seedProjects: SeedProject[] | undefined;
+		seedFeishuBots: SeedFeishuBot[] | undefined;
+		seedSessionFiles: SeedSessionFile[] | undefined;
+		seedSettings: SeedSettings | undefined;
+		seedImageGenConfig: SeedImageGenConfig | undefined;
+		seedCuaFrames: SeedCuaFrame[] | undefined;
+		launchArgs: string[];
+		mockSessionInProject: boolean;
+	}
 >({
 	seedProjects: [undefined, { option: true }],
 	seedFeishuBots: [undefined, { option: true }],
 	seedSessionFiles: [undefined, { option: true }],
 	seedSettings: [undefined, { option: true }],
 	seedImageGenConfig: [undefined, { option: true }],
+	seedCuaFrames: [undefined, { option: true }],
 	// Exercise real startup intents with the same isolated profile and mock RPC backend.
 	launchArgs: [[], { option: true }],
 	mockSessionInProject: [false, { option: true }],
-	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig, launchArgs, mockSessionInProject }, use) => {
+	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig, seedCuaFrames, launchArgs, mockSessionInProject }, use) => {
 		// 先归一化（元组陷阱见 normalizeSeeds 注释）：非法值在启动 Electron 之前就报错，
 		// 避免用例因「种子项目凭空消失」在后面超时。
 		const projects = normalizeSeeds("seedProjects", seedProjects, "项目需含 id / name / path（用 makeSeedProject 生成）。");
 		const feishuBots = normalizeSeeds("seedFeishuBots", seedFeishuBots, "Bot 需含 id / name / appId。");
 		const sessionFiles = normalizeSeeds("seedSessionFiles", seedSessionFiles, "会话文件需含 projectPath / entries。");
+		const cuaFrames = normalizeSeeds("seedCuaFrames", seedCuaFrames, "CUA 截图需含 ref / bytes（ref 为 64 位十六进制 + 图片扩展名）。");
 		const userDataRoot = mkdtempSync(join(tmpdir(), "pideck-mockpi-"));
 		try {
 			// Windows 桌面端通过 cmd shim 调起自定义 pi（见 PiLocator.createInvocation），
@@ -125,6 +139,12 @@ export const test = base.extend<
 			);
 			if (seedImageGenConfig) {
 				writeFileSync(join(userDataRoot, "profile", "imagegen.json"), JSON.stringify(seedImageGenConfig));
+			}
+			// CUA 截图：轨迹回看走 pideck-cua-img:// 协议读 userData/cua/frames。
+			if (cuaFrames.length > 0) {
+				const framesDir = join(userDataRoot, "profile", "cua", "frames");
+				mkdirSync(framesDir, { recursive: true });
+				for (const frame of cuaFrames) writeFileSync(join(framesDir, frame.ref), frame.bytes);
 			}
 
 			// 可选：预置项目列表。ProjectStore.load 会保留种子项目并追加内置聊天项目。
