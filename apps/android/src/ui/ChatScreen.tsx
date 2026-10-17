@@ -15,6 +15,7 @@ import { Touch as Pressable, useReducedMotion } from "./Motion";
 import { typeScale } from "./typography";
 import { useChatViewport } from "../useChatViewport";
 import { pinKey } from "../mobilePreferences";
+import { captureChatCompletionBaseline, isPreexistingChatCompletion } from "../chatCompletion";
 import { PinnedMessagesSheet } from "./PinnedMessagesSheet";
 import { processIsOpen } from "../chatViewport";
 
@@ -68,7 +69,10 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 	const snapshot = s.snapshot;
 	// 已读规则与桌面一致：仅当应用在前台、本会话可见、结果在视口内，且不是「打开会话时已存在的
 	// 未读结果」时才确认。新结果在浏览中到达、用户点按未读提示或滚回底部都会触发确认。
+	// 选中会话时就用列表摘要记录基线：进入后才完成的结果应视为新结果并自动确认。
+	const selectedSummary = s.sessions.find((session) => session.id === s.selected);
 	const completionBaselineRef = useRef<{ sessionId?: string; completionId?: string }>({});
+	completionBaselineRef.current = captureChatCompletionBaseline(completionBaselineRef.current, { sessionId: s.selected, completionId: selectedSummary?.attention?.completion?.id });
 	const previousFollowingRef = useRef(viewport.following);
 	const [focusResultRequested, setFocusResultRequested] = useState(false);
 	useEffect(() => {
@@ -78,13 +82,7 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 		const becameFollowing = !previousFollowingRef.current && viewport.following;
 		previousFollowingRef.current = viewport.following;
 		if (!snapshot || !attention?.completionUnread || !attention.completion) return;
-		const baseline = completionBaselineRef.current;
-		if (baseline.sessionId !== snapshot.sessionId) {
-			// 首次看到该会话：把当前结果记为基线，打开会话本身不确认已读。
-			completionBaselineRef.current = { sessionId: snapshot.sessionId, completionId: attention.completion.id };
-			return;
-		}
-		const preexisting = baseline.completionId !== undefined && baseline.completionId === attention.completion.id;
+		const preexisting = isPreexistingChatCompletion(completionBaselineRef.current, snapshot.sessionId, attention.completion.id);
 		if (preexisting && !focusResultRequested && !becameFollowing) return;
 		if (!viewport.following || s.historyMode || AppState.currentState !== "active") return;
 		void s.client.acknowledge(snapshot.sessionId, attention.completion.id).catch(() => undefined);

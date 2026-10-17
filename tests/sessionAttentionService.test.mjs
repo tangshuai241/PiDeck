@@ -89,6 +89,21 @@ test("运行中不提前生成结果：直到收到该轮结束事件才写入�
 	});
 });
 
+test("退出运行或解绑运行时都会推送 running:false，客户端不会停留在“运行中”", async () => {
+	await withService(async ({ service, harness }) => {
+		harness.bind("a1", "s1");
+		const seen = [];
+		service.subscribe((summary) => seen.push(summary.running));
+		harness.setRuntimes([{ sessionId: "s1", status: "running" }]);
+		assert.equal(seen.at(-1), true);
+		harness.setRuntimes([{ sessionId: "s1", status: "idle" }]);
+		assert.equal(seen.at(-1), false, "进入空闲必须推送退出运行");
+		harness.setRuntimes([{ sessionId: "s1", status: "running" }]);
+		harness.setRuntimes([]);
+		assert.equal(seen.at(-1), false, "运行时解绑后同样推送退出运行");
+	});
+});
+
 test("仅启动进程不算一轮执行：starting → idle 不留下虚假结果", async () => {
 	await withService(async ({ service, harness, store }) => {
 		harness.bind("a1", "s1");

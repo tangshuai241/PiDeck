@@ -12,6 +12,9 @@ import { desktopApi } from "../desktopApi";
 
 export const sessionAttentionByIdAtom = atom<Record<string, SessionAttentionSummary>>({});
 
+/** 首次全量摘要是否已加载：加载前不记录已读基线，避免把启动时的旧未读当成新结果。 */
+export const sessionAttentionHydratedAtom = atom(false);
+
 /** 点击「未读结果」入口时的定位请求：打开会话后滚到最新结果（只在可见后确认已读）。 */
 export const sessionScrollToLatestRequestAtom = atom<{ sessionId: string; at: number } | null>(null);
 
@@ -20,6 +23,7 @@ export const sessionAttentionForSessionAtomFamily = atomFamily((sessionId: strin
 /** 应用级单点挂载：拉取全量摘要并订阅增量推送（App.tsx 调用一次）。 */
 export function useSessionAttentionSync(): void {
 	const setAttention = useSetAtom(sessionAttentionByIdAtom);
+	const setHydrated = useSetAtom(sessionAttentionHydratedAtom);
 	useEffect(() => {
 		let mounted = true;
 		void desktopApi.sessions
@@ -27,6 +31,7 @@ export function useSessionAttentionSync(): void {
 			.then((items) => {
 				if (!mounted) return;
 				setAttention(Object.fromEntries(items.map((item) => [item.sessionId, item])));
+				setHydrated(true);
 			})
 			.catch(() => undefined);
 		const unsubscribe = desktopApi.sessions.onAttentionChanged((summary) => {

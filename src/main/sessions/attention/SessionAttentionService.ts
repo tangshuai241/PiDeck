@@ -26,6 +26,8 @@ export type SessionAttentionServiceDeps = {
 export class SessionAttentionService {
 	private readonly listeners = new Set<(summary: SessionAttentionSummary) => void>();
 	private readonly published = new Map<string, string>();
+	/** 上一轮推送中处于 starting/running 的会话：状态退出时也要推一次 running:false。 */
+	private readonly activeSessions = new Set<string>();
 	private started = false;
 	private cleanups: Array<() => void> = [];
 
@@ -49,6 +51,7 @@ export class SessionAttentionService {
 		for (const cleanup of this.cleanups.splice(0)) cleanup();
 		this.deps.runtime.setAskChangeNotifier(undefined);
 		this.listeners.clear();
+		this.activeSessions.clear();
 	}
 
 	subscribe(listener: (summary: SessionAttentionSummary) => void): () => void {
@@ -97,14 +100,18 @@ export class SessionAttentionService {
 	}
 
 	private observeState(): void {
-		const active: string[] = [];
+		const active = new Set<string>();
 		for (const item of this.deps.runtime.listRuntimes()) {
 			if (item.status !== "running" && item.status !== "starting") continue;
-			active.push(item.sessionId);
+			active.add(item.sessionId);
 			// 只有真正执行（running）才开启一轮；仅仅启动进程（starting）随后空闲不应留下假结果。
 			if (item.status === "running") this.deps.store.beginRun(item.sessionId);
 		}
-		this.publish(active);
+		// 退出运行（idle/error/closed/解绑）也必须推送一次，否则客户端保留最后一次 running:true。
+		const changed = new Set([...active, ...this.activeSessions]);
+		this.activeSessions.clear();
+		for (const sessionId of active) this.activeSessions.add(sessionId);
+		this.publish(changed);
 	}
 
 	private onRunFinished(agentId: string, outcome: AgentRunOutcome): void {

@@ -22,7 +22,8 @@ import { chatContentWidthStyle } from "./chatContentWidth";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import type { TerminalDockSettings } from "../terminal/TerminalDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { sessionScrollToLatestRequestAtom, useSessionAttention } from "../../atoms/session-attention-atoms";
+import { captureCompletionBaseline } from "../../utils/sessionCompletionRead";
+import { sessionAttentionHydratedAtom, sessionScrollToLatestRequestAtom, useSessionAttention } from "../../atoms/session-attention-atoms";
 import { personalWorkbenchPageAtom } from "../../atoms/personal-workbench-atoms";
 import { useSessionCompletionRead } from "../../hooks/useSessionCompletionRead";
 import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, displayProjectDirectoryName, redistributeTerminalAgainstTimeline, shouldMountBottomComposer, sessionResizableGroupKey, sessionGroupDefaultLayout } from "../../rendererUtils";
@@ -199,6 +200,10 @@ export function SessionView({
 	// 且没有被个人工作台等功能页覆盖时才确认；结果身份由主进程校验。
 	const personalWorkbenchPage = useAtomValue(personalWorkbenchPageAtom);
 	const sessionAttention = useSessionAttention(sessionId);
+	const attentionHydrated = useAtomValue(sessionAttentionHydratedAtom);
+	// 基线只在摘要首次加载后记录一次：加载前到达的旧未读不能被误判为新结果。
+	const completionBaselineRef = useRef<{ sessionId?: string; completionId?: string }>({});
+	completionBaselineRef.current = captureCompletionBaseline(completionBaselineRef.current, { ready: attentionHydrated, sessionId, completionId: sessionAttention?.completion?.id });
 	// 从活动区点击未读结果：定位到最新结果（随后由可见性规则决定是否确认已读）。
 	const scrollToLatestRequest = useAtomValue(sessionScrollToLatestRequestAtom);
 	const setScrollToLatestRequest = useSetAtom(sessionScrollToLatestRequestAtom);
@@ -213,6 +218,8 @@ export function SessionView({
 	useSessionCompletionRead({
 		sessionId,
 		completionId: sessionAttention?.completionUnread ? sessionAttention.completion?.id : undefined,
+		baselineCompletionId: completionBaselineRef.current.completionId,
+		ready: attentionHydrated,
 		following: sessionTimeline.autoScroll,
 		paneVisible: !splitPane || focused,
 		covered: personalWorkbenchPage !== null,
