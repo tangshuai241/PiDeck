@@ -28,15 +28,19 @@ export class SessionAttentionService {
 	private readonly published = new Map<string, string>();
 	/** 上一轮推送中处于 starting/running 的会话：状态退出时也要推一次 running:false。 */
 	private readonly activeSessions = new Set<string>();
-	private started = false;
+	/** 同一次启动共享同一个读盘 Promise：并发 start() 不能先返回空列表。 */
+	private startPromise: Promise<void> | undefined;
 	private cleanups: Array<() => void> = [];
 
 	constructor(private readonly deps: SessionAttentionServiceDeps) {}
 
-	/** 读盘（含中断恢复）后开始订阅；重复调用无副作用。 */
-	async start(): Promise<void> {
-		if (this.started) return;
-		this.started = true;
+	/** 读盘（含中断恢复）后开始订阅；重复/并发调用等待同一次读盘完成。 */
+	start(): Promise<void> {
+		this.startPromise ??= this.startOnce();
+		return this.startPromise;
+	}
+
+	private async startOnce(): Promise<void> {
 		// 先订阅再读盘：加载窗口内的运行/提问变化不能被漏掉。
 		this.cleanups.push(this.deps.agents.addStateListener(() => this.observeState()));
 		this.cleanups.push(this.deps.agents.onAgentRunFinished((info) => this.onRunFinished(info.agentId, info.outcome)));

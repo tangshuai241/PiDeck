@@ -104,6 +104,44 @@ test("退出运行或解绑运行时都会推送 running:false，客户端不会
 	});
 });
 
+test("并发 start() 等待同一次读盘，不会先返回空列表（启动旧未读被误当新结果）", async () => {
+	let releaseLoad;
+	const entry = { completion: { id: "run-1", outcome: "failed", finishedAt: 1 } };
+	const store = {
+		load: () =>
+			new Promise((resolve) => {
+				releaseLoad = resolve;
+			}),
+		listEntries: () => [["s1", entry]],
+		get: (id) => (id === "s1" ? entry : undefined),
+		activeRunId: () => undefined,
+		beginRun: () => "run",
+		finishRun: () => undefined,
+		acknowledge: () => entry,
+	};
+	const agents = { list: () => [], addStateListener: () => () => undefined, onAgentRunFinished: () => () => undefined };
+	const runtime = { listRuntimes: () => [], listPendingUiRequests: () => [], getRuntimeBinding: () => undefined, setAskChangeNotifier: () => undefined };
+	const service = new SessionAttentionService({ agents, runtime, store });
+	try {
+		const first = service.start();
+		let secondDone = false;
+		const second = service.start().then(() => {
+			secondDone = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.equal(secondDone, false, "第二次 start() 必须等待同一次读盘");
+		releaseLoad();
+		await Promise.all([first, second]);
+		assert.equal(secondDone, true);
+		const summaries = service.list();
+		assert.equal(summaries.length, 1);
+		assert.equal(summaries[0].sessionId, "s1");
+		assert.equal(summaries[0].completionUnread, true);
+	} finally {
+		service.dispose();
+	}
+});
+
 test("仅启动进程不算一轮执行：starting → idle 不留下虚假结果", async () => {
 	await withService(async ({ service, harness, store }) => {
 		harness.bind("a1", "s1");
