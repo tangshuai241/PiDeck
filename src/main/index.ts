@@ -402,6 +402,9 @@ import { WhisperTranscriber } from "./voice/WhisperTranscriber";
 import { WhisperServerPool } from "./voice/WhisperServerPool";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
+import { registerSessionAttentionIpc } from "./ipc/sessionAttentionIpc";
+import { SessionAttentionService } from "./sessions/attention/SessionAttentionService";
+import { SessionAttentionStore } from "./sessions/attention/SessionAttentionStore";
 import { installRemoteCompanion } from "./remote/installRemoteCompanion";
 
 import { registerSystemIpc } from "./ipc/systemIpc";
@@ -4134,12 +4137,31 @@ app
 
 		compositeAgentGateway = new CompositeAgentGateway([agentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		// 会话状态摘要：运行/待回答从现有运行时派生，结果与已读落在 userData/session-attention.json。
+		const sessionAttentionStore = new SessionAttentionStore({
+			getFilePath: () => join(app.getPath("userData"), "session-attention.json"),
+			log: (level, message, detail) => {
+				if (level === "error") void appLogger.error("session-attention", message, detail);
+				else void appLogger.info("session-attention", message, detail);
+			},
+		});
+		const sessionAttentionService = new SessionAttentionService({ agents: agentManager, runtime: sessionRuntimeCoordinator, store: sessionAttentionStore });
+		quitCleanup.register("session-attention", async () => {
+			await sessionAttentionStore.flush();
+		});
+		void sessionAttentionService.start();
+		sessionAttentionService.subscribe((summary) => {
+			const window = mainWindow;
+			if (window && !window.isDestroyed()) window.webContents.send(ipcChannels.sessionsAttentionChanged, summary);
+		});
+		registerSessionAttentionIpc(sessionAttentionService);
 		const remoteCompanion = installRemoteCompanion({
 			catalog: sessionCatalog,
 			sessionForkCommands,
 			runtime: sessionRuntimeCoordinator,
 			agents: agentManager,
 			projects: projectStore,
+			attention: sessionAttentionService,
 			getDocuments: () => documentWorkDomain,
 			getAutomations: () => automationStore,
 			userDataPath: app.getPath("userData"),

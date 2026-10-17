@@ -79,6 +79,7 @@ import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus
 import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
+import type { SessionAttentionSummary } from "../shared/types/sessionAttention";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
 	YaoPromptListResult,
@@ -535,6 +536,18 @@ const api = {
 	},
 	sessions: {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,
+		/** 会话状态摘要：运行/待回答/最近结果/未读（桌面与手机共用）。 */
+		attentionList: () => ipcRenderer.invoke(ipcChannels.sessionsAttentionList) as Promise<SessionAttentionSummary[]>,
+		/** 结果进入可见区域后确认已读（只认当前结果身份）。 */
+		markAttentionRead: (input: { sessionId: string; completionId: string }) => ipcRenderer.invoke(ipcChannels.sessionsAttentionMarkRead, input) as Promise<SessionAttentionSummary>,
+		/** 状态摘要推送（只推受影响的会话）。返回退订函数。 */
+		onAttentionChanged: (listener: (summary: SessionAttentionSummary) => void) => {
+			const handler = (_event: unknown, summary: SessionAttentionSummary) => listener(summary);
+			ipcRenderer.on(ipcChannels.sessionsAttentionChanged, handler);
+			return () => {
+				ipcRenderer.removeListener(ipcChannels.sessionsAttentionChanged, handler);
+			};
+		},
 		listCatalog: (projectId: string, options?: { scan?: boolean }) => ipcRenderer.invoke(ipcChannels.sessionsCatalogList, projectId, options) as Promise<SessionRecord[]>,
 		/** 后台扫描完成推送：目录缓存已合并，监听方应以 scan:false 重新拉取。返回退订函数。 */
 		onCatalogRefreshed: (listener: (input: { projectId: string }) => void) => {

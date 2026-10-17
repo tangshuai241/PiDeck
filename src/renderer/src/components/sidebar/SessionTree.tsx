@@ -3,7 +3,7 @@ import { SidebarRemovalList, SidebarRemovalRow } from "./SidebarRemovalRow";
 import { ChevronDown, ChevronUp, Ellipsis, HatGlasses, Image as ImageIcon, Pin, Trash2 } from "lucide-react";
 import { useAtomValue } from "jotai";
 import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../../shared/types";
-import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
+import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, type ProjectChildItem } from "../../agentListDisplay";
 import { compareSessionsForSortMode } from "../../sessionSortModes";
 import { sessionRecordToSummary } from "../../atoms";
 import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
@@ -62,17 +62,6 @@ function formatCodexSubagentName(session: SessionSummary) {
 
 function formatPiSubagentName(session: SessionSummary) {
 	return session.name || t("app.piSubagent");
-}
-
-/**
- * 复用 Tab 栏的状态点语义，并把点绑定到具体 Agent/历史会话行。
- * 没有 runtime 的历史记录传入 undefined，因此纯打开记录不会被误标成已启动。
- */
-function renderRuntimeStatusDot(status?: string | null) {
-	const dotClass = sessionStatusDotClass(status);
-	if (!dotClass) return null;
-	const label = status === "idle" ? t("app.statusIdle") : status === "error" ? t("app.statusError") : status === "running" || status === "starting" || status === "pending" || status === "waiting" ? t("app.statusRunning") : undefined;
-	return <span className={cn("size-1.5 shrink-0 rounded-full", dotClass, status === "error" ? "" : "animate-pulse")} aria-label={label} title={label} />;
 }
 
 export function SessionTree(props: { project: Project; sessions: readonly SessionRecord[]; agents: readonly AgentTab[]; currentSessionId?: string; controller: SidebarController; actions: SidebarActions; nested?: boolean; visibleChildCount?: number; onShowMore?: () => void }) {
@@ -273,7 +262,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 								}
 								{...(agentSession ? sessionDragProps(agentSession.id) : {})}
 							>
-								{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={child.agent.status} sessionId={agentSession?.id} /> : renderRuntimeStatusDot(child.agent.status)}
+								<SessionActivityIndicator status={child.agent.status} sessionId={agentSession?.id} />
 								<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 									<div className="conversation-title flex min-w-0 items-center gap-1.5">
 										{/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题；
@@ -332,7 +321,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 							onDoubleClick={props.actions.sessions.simpleNavigation ? undefined : () => openSession(child.session.id, "permanent")}
 							{...sessionDragProps(child.session.id)}
 						>
-							{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtimeSnapshot?.status} sessionId={child.session.id} /> : renderRuntimeStatusDot(runtimeSnapshot?.status)}
+							<SessionActivityIndicator status={runtimeSnapshot?.status} sessionId={child.session.id} />
 							{pinned && <Pin className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
 							<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
@@ -407,7 +396,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 									>
 										<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 											<div className="conversation-title flex min-w-0 items-center gap-1.5">
-												{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtime?.status} sessionId={session.id} /> : renderRuntimeStatusDot(runtime?.status)}
+												<SessionActivityIndicator status={runtime?.status} sessionId={session.id} />
 												{/* 草稿会话：选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
 												<TitleScrollText text={session.title} className="font-medium" />
 												<SessionBackendMark backend={session.backend} />

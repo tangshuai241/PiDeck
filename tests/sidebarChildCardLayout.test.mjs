@@ -81,16 +81,13 @@ test("session status indicators stay on the concrete session row", () => {
 	assert.match(agentListDisplay, /if \(!status \|\| status === "detached"\) return undefined/);
 	// SessionTree 不再渲染带文本的状态徽标；无 runtime 的历史记录不显示状态点。
 	assert.doesNotMatch(sessionTree, /\/agent-status-indicator/);
-	assert.match(sessionTree, /function renderRuntimeStatusDot/);
-	assert.match(sessionTree, /sessionStatusDotClass\(status\)/);
-	assert.match(sessionTree, /renderRuntimeStatusDot\(child\.agent\.status\)/);
-	assert.match(sessionTree, /renderRuntimeStatusDot\(runtimeSnapshot\?\.status\)/);
-	// Tab 同样未启动不显示徽章，已启动按状态映射渲染（beui AnimatedBadge 替换裸圆点）。
-	assert.match(tabBar, /import \{ sessionStatusBadge \} from "\.\.\/\.\.\/utils\/sessionStatusBadge"/);
-	assert.match(tabBar, /const badge = sessionStatusBadge\(status, \{/);
-	assert.match(tabBar, /AnimatedBadge/);
-	assert.match(tabBar, /badge &&/);
-	assert.doesNotMatch(tabBar, /dotClass &&/);
+	// 侧栏各行与 Tab 栏共用同一个状态指示器（运行/待回答/未读/已停止同一套规则）。
+	assert.match(sessionTree, /<SessionActivityIndicator status=\{child\.agent\.status\} sessionId=\{agentSession\?\.id\} \/>/);
+	assert.match(sessionTree, /<SessionActivityIndicator status=\{runtimeSnapshot\?\.status\} sessionId=\{child\.session\.id\} \/>/);
+	assert.doesNotMatch(sessionTree, /renderRuntimeStatusDot/);
+	assert.match(tabBar, /import \{ SessionActivityIndicator \} from "\.\/SessionActivityIndicator"/);
+	assert.match(tabBar, /<SessionActivityIndicator status=\{status\} sessionId=\{sessionId\}/);
+	assert.doesNotMatch(tabBar, /sessionStatusBadge/);
 });
 
 test("project children use spacing without connector lines and chat uses the shared row", () => {

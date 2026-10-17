@@ -109,6 +109,12 @@ export const ipcChannels = {
 	/** 回复快捷操作：用系统默认程序打开规则文件（路径由主进程解析，渲染层不传路径） */
 	replyActionsOpenFile: "reply-actions:open-file",
 	sessionsList: "sessions:list",
+	/** 会话状态摘要：运行/待回答/最近结果/未读，桌面与手机共用。 */
+	sessionsAttentionList: "sessions:attention-list",
+	/** 确认某条结果已读：只认当前结果身份，旧结果的迟到确认不生效。 */
+	sessionsAttentionMarkRead: "sessions:attention-mark-read",
+	/** 状态摘要推送：一次变化只推受影响的会话。 */
+	sessionsAttentionChanged: "sessions:attention-changed",
 	/** Session-first catalog APIs. */
 	sessionsCatalogList: "sessions:catalog-list",
 	/** 后台扫描完成后主进程 → 渲染层的推送（目录缓存已合并，渲染层应重新拉取）。 */

@@ -20,6 +20,8 @@ export class RemoteCompanionService {
 	private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	private readonly feed: RemoteSessionFeed;
 	private unsubscribe: (() => void) | undefined;
+	private unsubscribeAttention: (() => void) | undefined;
+	private attentionTimer: ReturnType<typeof setTimeout> | undefined;
 	private stopped = false;
 	private authenticated = false;
 	private challenge = "";
@@ -46,6 +48,12 @@ export class RemoteCompanionService {
 		this.config = await this.deps.config.read();
 		if (this.config?.enabled) this.connect();
 		this.unsubscribe = this.deps.gateway.subscribe?.((sessionId) => this.feed.invalidate(sessionId));
+		// 运行/待回答/已读变化：刷新已打开会话快照，并在同一节流窗口内推一次列表摘要，
+		// 让未打开的会话也能在手机上显示待回答与未读结果。
+		this.unsubscribeAttention = this.deps.gateway.subscribeAttention?.((sessionId) => {
+			this.feed.invalidate(sessionId);
+			this.scheduleSessions();
+		});
 	}
 	status(): RemoteCompanionStatus {
 		return { configured: !!this.config, enabled: this.config?.enabled ?? false, connected: this.socket?.readyState === WebSocket.OPEN, paired: !!this.config?.phone, deviceName: this.config?.phone?.name, ...(this.error ? { error: this.error } : {}) };
@@ -97,6 +105,10 @@ export class RemoteCompanionService {
 		this.disconnect();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.unsubscribeAttention?.();
+		this.unsubscribeAttention = undefined;
+		if (this.attentionTimer) clearTimeout(this.attentionTimer);
+		this.attentionTimer = undefined;
 		this.feed.dispose();
 	}
 	private disconnect(): void {
@@ -149,6 +161,16 @@ export class RemoteCompanionService {
 			if (!this.stopped && this.config?.enabled) this.reconnectTimer = setTimeout(() => this.connect(), Math.min(30_000, 1000 * 2 ** Math.min(this.retry++, 5)) + Math.floor(Math.random() * 500));
 		});
 	}
+	/** 状态摘要变化合并为一次列表推送（≤120ms），避免流式期间每个事件都带整张列表。 */
+	private scheduleSessions(): void {
+		if (this.attentionTimer || !this.authenticated) return;
+		this.attentionTimer = setTimeout(() => {
+			this.attentionTimer = undefined;
+			if (!this.authenticated || this.socket?.readyState !== WebSocket.OPEN) return;
+			this.send({ kind: "sessions", sessions: this.deps.gateway.list() });
+		}, 120);
+	}
+
 	private send(value: unknown): void {
 		if (this.key && this.socket?.readyState === WebSocket.OPEN) this.socket.send(seal(value, this.key, random));
 	}
@@ -210,10 +232,8 @@ export class RemoteCompanionService {
 					return { kind: "response" as const, id: request.id, ok: true };
 				}
 				if (request.method === "session.read" && request.sessionId) {
-					// Only an explicit phone read may activate a session. Passive feed refreshes
-					// must not restart a process that was stopped on the computer.
-					await this.deps.gateway.snapshot(request.sessionId, true);
-					this.selected = request.sessionId;
+					// 查看/重连只恢复查看状态：历史从会话文件读取，绝不在这里启动 Pi 进程。
+					// 用户显式发送时才由 session.send 取得/激活目标运行时。
 					return { kind: "response" as const, id: request.id, ok: true, result: await this.feed.synchronize(request.sessionId, request.cursor) };
 				}
 				const result = await this.deps.gateway.execute(request);

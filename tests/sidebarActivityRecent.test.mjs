@@ -251,7 +251,7 @@ describe("最近会话区渲染契约", () => {
 	test("分段顺序：活动行在上、最近会话在下，两段各自成区（下半部分常驻）", () => {
 		const paneStart = activeSessionsTree.indexOf('"active-sessions-pane');
 		const listStart = activeSessionsTree.indexOf('"active-sessions-list');
-		const activeRowsIndex = activeSessionsTree.indexOf("liveRows.map(");
+		const activeRowsIndex = activeSessionsTree.indexOf("liveRows.map(({");
 		const recentPaneIndex = activeSessionsTree.indexOf('"recent-sessions-pane', activeRowsIndex);
 		const recentIndex = activeSessionsTree.indexOf("<RecentSessionsSection", activeRowsIndex);
 		const simpleStart = activeSessionsTree.indexOf("if (props.recentOnly)");
@@ -339,10 +339,10 @@ describe("最近会话区渲染契约", () => {
 		assert.match(recentSessionsSection, /if\s*\(\s*props\.rows\.length === 0\s*\)\s*return null/);
 	});
 
-	test("只有活动区与最近区都空时才显示整页空态", () => {
-		assert.match(activeSessionsTree, /if\s*\(\s*liveRows\.length === 0\s*&&\s*!hasRecent\s*\)/);
-		// 活动区为空但最近区有数据时，改用一行提示顶替活动区，不占满高度
-		assert.match(activeSessionsTree, /liveRows\.length === 0 \?/);
+	test("只有活动区、最近区与状态摘要都空时才显示整页空态", () => {
+		assert.match(activeSessionsTree, /if\s*\(\s*liveRows\.length === 0\s*&&\s*!hasRecent\s*&&\s*attentionRows\.length === 0\s*\)/);
+		// 活动区为空但有未读/待回答摘要时，摘要在行内渲染；两段都空时用一行提示顶替活动区，不占满高度
+		assert.match(activeSessionsTree, /liveRows\.length === 0 && detachedAttentionRows\.length === 0 \?/);
 	});
 
 	test("最近会话跨项目展示：活动页挂载时按需预加载尚未扫描的项目 catalog", () => {

@@ -35,30 +35,23 @@ test("motion dependency and ease helpers available", () => {
 
 // ===== 会话 Tab 栏接入 =====
 
-test("session tab uses AnimatedBadge instead of raw pulse dot", () => {
+test("session tab uses the shared status indicator (running spins, waiting stays static)", () => {
 	const source = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
-	const statusSource = readFileSync("src/renderer/src/utils/sessionStatusBadge.ts", "utf8");
-	assert.match(source, /import \{ AnimatedBadge \} from "\.\.\/motion\/animated-badge";/);
-	assert.match(source, /import \{ sessionStatusBadge \} from "\.\.\/\.\.\/utils\/sessionStatusBadge";/);
-	// 旧的裸圆点渲染已移除
-	assert.doesNotMatch(source, /size-1\.5 shrink-0 rounded-full/);
-	// AnimatedBadge 自身关闭脉冲；停止操作图标仍可使用独立的 animate-pulse 提示进行中。
-	assert.match(source, /pulse=\{false\}/);
-	// 新渲染：bare 裸图标模式（无胶囊）+ [&_svg] 缩图标 + 运行中黄色覆盖
-	assert.match(source, /<AnimatedBadge/);
-	assert.match(source, /size="sm"/);
-	assert.match(source, /bare/);
-	assert.match(source, /pulse=\{false\}/);
-	assert.match(source, /\[&_svg\]:h-2\.5 \[&_svg\]:w-2\.5/);
-	assert.match(statusSource, /text-amber-500 dark:text-amber-400/);
-	// 状态映射（颜色语义：启动蓝旋转 / 运行黄旋转 / 未启动白 / 失败红）
-	assert.match(statusSource, /export function sessionStatusBadge\(/);
-	assert.match(statusSource, /case "error":\s*\n\s*return \{ status: "danger" \};/);
-	assert.match(statusSource, /case "idle":\s*\n\s*return \{ status: "neutral" \};/);
-	assert.match(statusSource, /case "starting":\s*\n\s*return \{ status: "loading" \};/);
-	assert.match(statusSource, /case "running":\s*\n\s*case "pending":\s*\n\s*case "waiting":\s*\n\s*return \{\s*\n\s*status: "loading",/);
-	assert.match(statusSource, /if \(!status \|\| status === "detached"\) return undefined;/);
-	assert.match(source, /const badge = sessionStatusBadge\(status, \{/);
+	const indicator = readFileSync("src/renderer/src/components/session/SessionActivityIndicator.tsx", "utf8");
+	const presentation = readFileSync("src/renderer/src/utils/sessionStatusPresentation.ts", "utf8");
+	// Tab 不再自建徽章映射：与侧栏/项目列表共用 SessionActivityIndicator。
+	assert.match(source, /import \{ SessionActivityIndicator \} from "\.\/SessionActivityIndicator";/);
+	assert.match(source, /<SessionActivityIndicator status=\{status\} sessionId=\{sessionId\} busy=\{/);
+	assert.doesNotMatch(source, /sessionStatusBadge/);
+	assert.doesNotMatch(source, /<AnimatedBadge/);
+	// 统一规则：运行优先 → 待回答 → 未读结果；待回答不渲染旋转图标。
+	assert.match(presentation, /export function presentSessionStatus/);
+	assert.match(presentation, /kind: "running"/);
+	assert.match(presentation, /kind: "waiting"/);
+	assert.match(presentation, /kind: "unread"/);
+	assert.match(indicator, /presentSessionStatus\(/);
+	assert.match(indicator, /presentation\.kind === "running"[\s\S]*?LoaderCircle/);
+	assert.match(indicator, /presentation\.kind === "waiting"[\s\S]*?bg-warning/);
 	// 激活指示条（tab 下方弧形横条）已移除
 	assert.doesNotMatch(source, /session-tabs-indicator/);
 	assert.doesNotMatch(source, /measureIndicator/);
@@ -79,9 +72,11 @@ test("session tab active background is instant (no shared-layout slide between t
 	assert.match(source, /\{tab\.active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
 });
 
-test("sidebar SessionTree still uses its own status dot (unchanged)", () => {
+test("sidebar SessionTree shares the same status indicator as tabs", () => {
 	const source = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
-	assert.match(source, /sessionStatusDotClass/);
+	assert.match(source, /import \{ SessionActivityIndicator \} from "\.\.\/session\/SessionActivityIndicator";/);
+	assert.match(source, /<SessionActivityIndicator status=\{runtime\?\.status\} sessionId=\{session\.id\} \/>/);
+	assert.doesNotMatch(source, /sessionStatusDotClass/);
 });
 
 test("tab dropdown menu: no switch-to item, state-based disable with visible gray", () => {

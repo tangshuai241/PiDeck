@@ -81,6 +81,16 @@ export type PendingBackgroundAsk = {
 const BACKGROUND_ASK_METHODS = ["select", "confirm", "input", "editor", "batch_ask"];
 
 /**
+ * 提问摘要：单题取请求标题；批量题标题为空时取第一题的问题（与活动区待回答入口一致）。
+ * 先过 formatAskTitle，避免把 Plan/安全确认的内部标记或 JSON 展示成问题。
+ */
+export function summarizeAskRequest(request: { title: string; batchQuestions?: ReadonlyArray<{ question: string }> }): string | undefined {
+	const first = request.batchQuestions?.[0]?.question;
+	const summary = formatAskTitle(request.title || first || "");
+	return summary || undefined;
+}
+
+/**
  * 从全局 runtimeUi 快照筛出所有待提醒的 Ask（pending/responding × Ask 方法）。
  * 纯函数、不依赖 React/i18n，巡检 hook 只负责 toast 去重与展示。
  */
@@ -92,7 +102,7 @@ export function collectPendingBackgroundAsks(sessionRuntimeUiById: Record<string
 				result.push({
 					key: `${sessionId}:${runtimeUi.runtimeGeneration}:${request.requestId}`,
 					sessionId,
-					requestTitle: request.title,
+					requestTitle: summarizeAskRequest(request),
 				});
 			}
 		}

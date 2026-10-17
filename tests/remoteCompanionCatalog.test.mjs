@@ -93,26 +93,41 @@ test("host settings reject invalid keys and insecure relay URLs", () => {
 });
 test("passive synchronization cannot restart a stopped desktop runtime", async () => {
 	let activations = 0;
+	let sent;
 	const entry = { id: "s", projectId: "p", title: "Existing", updatedAt: 1 };
+	const target = { sessionId: "s", agentId: "a", runtimeGeneration: 3 };
+	const attention = { summaryFor: () => ({ sessionId: "s", running: false, pendingQuestionCount: 0, completionUnread: false }), subscribe: () => () => undefined };
 	const gateway = createRemoteSessionGateway({
 		catalog: { get: () => entry },
 		projects: {},
 		agents: {},
+		attention,
 		getDocuments: () => null,
 		runtime: {
 			getRuntimeMessages: () => undefined,
-			getTarget: () => undefined,
+			getTarget: () => (activations > 0 ? target : undefined),
 			listPendingUiRequests: () => [],
 			activateRuntime: async () => {
 				activations++;
 				return { ok: true };
 			},
+			send: async (input) => {
+				sent = input;
+				return { accepted: true, delivery: "accepted" };
+			},
 		},
 	});
 	await gateway.snapshot("s");
-	assert.equal(activations, 0);
+	assert.equal(activations, 0, "查看历史不启动进程");
 	await gateway.execute({ id: "read", method: "session.read", sessionId: "s" });
-	assert.equal(activations, 1);
+	assert.equal(activations, 0, "被动读取不启动进程");
 	await gateway.snapshot("s");
+	assert.equal(activations, 0);
+
+	// 显式发送才激活，并在同一目标上派发。
+	const response = await gateway.execute({ id: "send", method: "session.send", sessionId: "s", text: "继续" });
+	assert.equal(response.ok, true);
 	assert.equal(activations, 1);
+	assert.equal(sent.expectedRuntime.agentId, "a");
+	assert.equal(response.result.target.runtimeGeneration, 3);
 });

@@ -35,7 +35,7 @@ export function HomeScreen(p: Props) {
 	const project = p.tab === "project";
 	const tasks = p.tab === "tasks";
 	const projects = p.tab === "projects";
-	const filtered = p.sessions.filter((session) => (!project || session.projectId === p.project?.id) && (!onlyActive || session.active) && `${session.title} ${session.project}`.toLowerCase().includes(query.toLowerCase()));
+	const filtered = p.sessions.filter((session) => (!project || session.projectId === p.project?.id) && (!onlyActive || session.active || session.attention?.running) && `${session.title} ${session.project}`.toLowerCase().includes(query.toLowerCase()));
 	const notify = (message: string) => Alert.alert(c.brand, message);
 	return (
 		<View style={{ flex: 1 }}>
@@ -164,19 +164,39 @@ export function HomeScreen(p: Props) {
 							<Text style={{ color: p.colors.secondary, fontSize: 14, textAlign: "center" }}>{!p.connected ? c.unpaired : project || query || onlyActive ? c.noMatches : c.noWorkspaceChats}</Text>
 						</Pressable>
 					}
-					renderItem={({ item }) => (
-						<Pressable accessibilityRole="button" onPress={() => p.openSession(item.id)} style={{ minHeight: 58, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderWidth: 1, borderColor: p.colors.border, borderRadius: 12, backgroundColor: p.colors.surface }}>
-							<View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-								<Text numberOfLines={1} style={{ flex: 1, color: p.colors.text, fontSize: 13, lineHeight: 19, fontWeight: "400" }}>
-									{item.title || c.unnamed}
+					renderItem={({ item }) => {
+						const attention = item.attention;
+						const outcome = attention?.completion?.outcome;
+						// 列表状态与桌面同一套摘要：待回答优先，其次未读结果，再是运行/已停止。
+						const statusLine = attention?.questionCount
+							? `${c.awaitingAnswer}${attention.question ? ` · ${attention.question}` : ""}`
+							: attention?.completionUnread
+								? outcome === "failed"
+									? c.failedResult
+									: outcome === "interrupted"
+										? c.interruptedResult
+										: c.unreadResult
+								: attention?.running
+									? c.runningNow
+									: outcome === "aborted"
+										? c.stoppedResult
+										: undefined;
+						return (
+							<Pressable accessibilityRole="button" onPress={() => p.openSession(item.id)} style={{ minHeight: 58, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderWidth: 1, borderColor: p.colors.border, borderRadius: 12, backgroundColor: p.colors.surface }}>
+								<View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+									<Text numberOfLines={1} style={{ flex: 1, color: p.colors.text, fontSize: 13, lineHeight: 19, fontWeight: "400" }}>
+										{item.title || c.unnamed}
+									</Text>
+									{attention?.questionCount ? <View style={{ width: 7, height: 7, borderRadius: 5, backgroundColor: p.colors.primary }} /> : null}
+									{!attention?.questionCount && attention?.completionUnread ? <View style={{ width: 7, height: 7, borderRadius: 5, backgroundColor: outcome === "failed" || outcome === "interrupted" ? p.colors.danger : p.colors.primary }} /> : null}
+									{!attention?.questionCount && !attention?.completionUnread && (attention?.running || item.active) ? <View style={{ width: 7, height: 7, borderRadius: 5, backgroundColor: p.colors.success }} /> : null}
+								</View>
+								<Text numberOfLines={1} style={{ color: p.colors.secondary, fontSize: 11, lineHeight: 16, marginTop: 3 }}>
+									{statusLine ? `${item.project} · ${statusLine}` : item.project}
 								</Text>
-								{item.active && <View style={{ width: 7, height: 7, borderRadius: 5, backgroundColor: p.colors.success }} />}
-							</View>
-							<Text numberOfLines={1} style={{ color: p.colors.secondary, fontSize: 11, lineHeight: 16, marginTop: 3 }}>
-								{item.project}
-							</Text>
-						</Pressable>
-					)}
+							</Pressable>
+						);
+					}}
 				/>
 			)}
 			<View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 15, paddingTop: 6, paddingBottom: 4 }}>

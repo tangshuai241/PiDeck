@@ -6,6 +6,16 @@ import type { AlignmentState } from "./alignment";
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 
 /**
+ * 一轮执行的结束分类，由 AgentManager 生命周期统一判定：
+ * - succeeded：agent_settled（或 get_state 兜底确认无工作）；
+ * - failed：自动重试耗尽 / agent_end 携带最终错误；
+ * - aborted：用户主动停止（abort / 关闭运行时）；
+ * - interrupted：进程意外退出，执行未正常收尾。
+ * 会话级持久化与未读判定在 session attention 域完成。
+ */
+export type AgentRunOutcome = "succeeded" | "failed" | "aborted" | "interrupted";
+
+/**
  * 运行时后端：pi（stdio JSON-RPC）、
  * imagegen（生图，无 LLM agent、无 pi 会话文件，历史独立存 ImageSessionStore）
  * 或 videogen（生视频，同为直连供应商 API 的无 agent 后端，历史独立存 VideoSessionStore）。

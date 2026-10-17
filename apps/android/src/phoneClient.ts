@@ -372,11 +372,21 @@ export class PhoneClient {
 			this.streamBuffers.delete(sessionId);
 		}
 	}
+	/** 显式发送是激活入口：没有运行时目标时由主机激活，拿到新目标后并入当前视图。 */
 	async send(snapshot: RemoteSnapshot, text: string, model?: ModelChoice): Promise<void> {
 		if (model && !this.capabilities.has("session.model")) throw new Error("UPDATE_REQUIRED");
-		if (!snapshot.target) throw new Error("RUNTIME_UNAVAILABLE");
-		await this.request("session.send", { sessionId: snapshot.sessionId, target: snapshot.target, text, ...(model ? { model } : {}) });
+		const result = await this.request("session.send", { sessionId: snapshot.sessionId, ...(snapshot.target ? { target: snapshot.target } : {}), text, ...(model ? { model } : {}) });
+		if (isRecord(result) && result.accepted === true && result.target) {
+			const target = parseTarget(result.target);
+			const current = this.snapshots.get(snapshot.sessionId) ?? snapshot;
+			this.publishSnapshot({ ...current, target });
+		}
 	}
+	/** 结果已进入可见区域：绑定当前结果身份确认已读（另一端随即清除同一结果的未读）。 */
+	async acknowledge(sessionId: string, completionId: string): Promise<void> {
+		await this.request("attention.ack", { sessionId, completionId });
+	}
+
 	async abort(snapshot: RemoteSnapshot): Promise<void> {
 		await this.request("session.abort", { sessionId: snapshot.sessionId, target: snapshot.target });
 	}

@@ -5,8 +5,6 @@ import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessi
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
-import { AnimatedBadge } from "../motion/animated-badge";
-import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
 import { canRunSessionAction, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { Button } from "../ui-shadcn/button";
@@ -932,14 +930,9 @@ function SessionTab(props: {
 	const tabProject = useAtomValue(projectByIdAtomFamily(record?.projectId ?? ""));
 	const workspaceName = tabProject ? displayProjectDirectoryName(tabProject) : undefined;
 	const status = runtime?.status;
-	// 状态徽章语义与侧栏 SessionTree 状态点一致（idle=蓝、running/starting=黄、error=红）；
-	// 重启/停止/重载进行中时统一显示 loading（旋转）；未启动（无 runtime）且无操作不显示徽章，
-	// 避免把“未运行”误读成某种状态。
-	const badge = sessionStatusBadge(status, {
-		isRestarting: props.isRestarting,
-		isStopping: props.isStopping,
-		isReloading: props.isReloading,
-	});
+	// 状态显示与侧栏共用同一规则（SessionActivityIndicator）：运行=旋转，待回答=静态标记，
+	// 未读结果=结果类型图标；重启/停止/重载进行中仍以运行中呈现操作反馈。
+	const statusBusy = props.isRestarting || props.isStopping || props.isReloading;
 	const title = sessionDisplayName(record?.title, record?.forked) || t("common.untitled");
 	// DSH/生图徽标与计划/目标模式 chip 都是不可压缩的固定宽度内容。
 	// 上限收窄史：峰值 208/256 → 176/224（用户反馈「Tab 变长了」）→ 116/148（再收 1/3）
@@ -1036,11 +1029,7 @@ function SessionTab(props: {
 						>
 							{/* 内容包装：relative z-10 抬到灰色背景面板之上（背景面板是 absolute，按层序会在内容下）。 */}
 							<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5">
-								{badge && (
-									// beui AnimatedBadge bare 模式：去掉胶囊边框/背景，仅保留图标滚动/旋转动画；
-									// 图标经 [&_svg] 稳定选择器缩到 10px；运行中通过 colorClass 覆盖成黄色旋转。
-									<AnimatedBadge status={badge.status} size="sm" bare pulse={false} className={cn("[&_svg]:h-2.5 [&_svg]:w-2.5", badge.colorClass)} aria-hidden="true" />
-								)}
+								<SessionActivityIndicator status={status} sessionId={sessionId} busy={statusBusy} />
 								{pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
 								{/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
 								{(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}

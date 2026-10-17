@@ -11,6 +11,7 @@
  */
 import type { AgentTab, Project, SessionRecord } from "../../../../shared/types";
 import { isDisplayableSessionRecord } from "../../utils/sessionRecordDisplay";
+import type { SessionAttentionSummary } from "../../../../shared/types/sessionAttention";
 
 /** 活动行：一个已绑定 runtime 的 Agent。 */
 export type ActiveSessionRow = {
@@ -130,4 +131,70 @@ export function collectRecentActivityRows(input: { catalog: ActivityCatalog; act
 /** 「加载更多」后的可见条数：一次一页，并封顶总数（总数可能因会话删除而变小）。 */
 export function growRecentVisible(current: number, totalCount: number): number {
 	return Math.min(current + RECENT_SESSIONS_PAGE_SIZE, Math.max(0, totalCount));
+}
+
+/** 活动区筛选：全部 / 待回答 / 未读结果 / 运行中 / 最近。 */
+export type ActivityFilter = "all" | "pending" | "unread" | "running" | "recent";
+
+/** 带会话状态摘要的活动行（可能没有运行时：未读结果、进程退出后的待回答记录也要能找到）。 */
+export type AttentionActivityRow = {
+	projectId: string;
+	session: SessionRecord;
+	agent?: AgentTab;
+	sortAt: number;
+	attention: SessionAttentionSummary;
+};
+
+/**
+ * 从目录会话 + 状态摘要收集「有关注信息」的会话行。
+ * 摘要由主进程下发（只包含运行/待回答/结果记录的会话），这里只做展示过滤与排序，
+ * 不自行推断已读；排序沿用会话更新时间倒序，不引入新的自动重排。
+ */
+export function collectAttentionActivityRows(catalog: ActivityCatalog, attention: Readonly<Record<string, SessionAttentionSummary>>): AttentionActivityRow[] {
+	const agentsById = new Map(catalog.agents.map((agent) => [agent.id, agent]));
+	const rows: AttentionActivityRow[] = [];
+	for (const sessions of Object.values(catalog.sessionsByProject)) {
+		for (const session of sessions) {
+			const summary = attention[session.id];
+			if (!summary) continue;
+			if (!summary.running && summary.pendingQuestionCount === 0 && !summary.completionUnread && summary.completion?.outcome !== "aborted") continue;
+			const boundAgentId = catalog.runtimeBySessionId[session.id]?.agentId;
+			const agent = boundAgentId ? agentsById.get(boundAgentId) : undefined;
+			rows.push({
+				projectId: session.projectId,
+				session,
+				...(agent ? { agent } : {}),
+				sortAt: session.updatedAt,
+				attention: summary,
+			});
+		}
+	}
+	rows.sort((left, right) => right.sortAt - left.sortAt);
+	return rows;
+}
+
+export function matchesActivityFilter(row: AttentionActivityRow, filter: ActivityFilter): boolean {
+	switch (filter) {
+		case "pending":
+			return row.attention.pendingQuestionCount > 0;
+		case "unread":
+			return row.attention.completionUnread;
+		case "running":
+			return row.attention.running;
+		default:
+			return true;
+	}
+}
+
+/** 筛选条数量：按会话计数（一个会话多道题仍算一个待回答会话）。 */
+export function countAttentionActivity(rows: readonly AttentionActivityRow[]): { pending: number; unread: number; running: number } {
+	let pending = 0;
+	let unread = 0;
+	let running = 0;
+	for (const row of rows) {
+		if (row.attention.pendingQuestionCount > 0) pending += 1;
+		if (row.attention.completionUnread) unread += 1;
+		if (row.attention.running) running += 1;
+	}
+	return { pending, unread, running };
 }

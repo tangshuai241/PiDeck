@@ -59,6 +59,10 @@ async function harness(confirmDevice, action, persist = async () => {}) {
 	let commands = 0;
 	let state = "unpaired";
 	let snapshot;
+	let sessions = [];
+	let activations = 0;
+	let unread = false;
+	const attentionListeners = new Set();
 	const receipts = [];
 	const changes = new Set();
 	let disconnectOnSend = false;
@@ -69,8 +73,15 @@ async function harness(confirmDevice, action, persist = async () => {}) {
 			changes.add(listener);
 			return () => changes.delete(listener);
 		},
-		list: () => [{ id: "session", title: "test", project: "test", backend: "pi", updatedAt: 1, active: true }],
-		snapshot: async () => ({ sessionId: "session", target, messages: [...messages], questions: [], busy: false, revision: messages.length, hasOlder: false }),
+		subscribeAttention: (listener) => {
+			attentionListeners.add(listener);
+			return () => attentionListeners.delete(listener);
+		},
+		list: () => [{ id: "session", title: "test", project: "test", backend: "pi", updatedAt: 1, active: true, attention: { running: false, questionCount: 0, completionUnread: unread, ...(unread ? { completion: { id: "run-1", outcome: "failed", finishedAt: 2 } } : {}) } }],
+		snapshot: async (_sessionId, activate) => {
+			if (activate) activations++;
+			return { sessionId: "session", target, messages: [...messages], questions: [], busy: false, revision: messages.length, hasOlder: false };
+		},
 		execute: async (request) => {
 			if (request.method === "session.read") return { kind: "response", id: request.id, ok: true, result: await gateway.snapshot() };
 			if (request.method === "session.send") {
@@ -98,6 +109,7 @@ async function harness(confirmDevice, action, persist = async () => {}) {
 	phone.subscribe((event) => {
 		if (event.kind === "state") state = event.state;
 		if (event.kind === "snapshot") snapshot = event.snapshot;
+		if (event.kind === "sessions") sessions = event.sessions;
 		if (event.kind === "receipt") receipts.push(event);
 	});
 	try {
@@ -109,6 +121,12 @@ async function harness(confirmDevice, action, persist = async () => {}) {
 			gateway,
 			state: () => state,
 			snapshot: () => snapshot,
+			sessions: () => sessions,
+			activations: () => activations,
+			notifyAttention: () => {
+				unread = true;
+				for (const listener of attentionListeners) listener("session");
+			},
 			commands: () => commands,
 			config: () => config,
 			receipts,
@@ -149,6 +167,26 @@ test("real local sockets pair, encrypt, read and send through the host gateway",
 			await until(() => h.state() !== "connected");
 			await assert.rejects(h.phone.send(h.snapshot(), "blocked"));
 			assert.equal(h.commands(), 1);
+		},
+	),
+);
+
+test("passive read and reconnect never activate the runtime; attention updates reach the list", { timeout: 15_000 }, async () =>
+	harness(
+		async () => true,
+		async (h) => {
+			await until(() => h.state() === "connected");
+			await h.phone.select("session");
+			assert.equal(h.activations(), 0, "打开历史只读会话文件，不启动 Pi 进程");
+			h.pause();
+			await until(() => h.state() === "offline");
+			h.resume();
+			await until(() => h.state() === "connected" && h.snapshot()?.messages.length === 1);
+			assert.equal(h.activations(), 0, "自动重连只恢复查看状态");
+			assert.equal(h.commands(), 0);
+			h.notifyAttention();
+			await until(() => h.sessions().some((session) => session.attention?.completionUnread === true));
+			assert.equal(h.sessions()[0].attention.completion.outcome, "failed");
 		},
 	),
 );

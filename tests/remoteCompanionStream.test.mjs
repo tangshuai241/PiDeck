@@ -56,6 +56,18 @@ test("append deltas reconstruct body and reasoning; duplicates do not duplicate 
 	assert.throws(() => applyPatch(before, { ...patch, previous: 2, cursor: { epoch: "epoch", sequence: 3 } }), /STREAM_GAP/);
 	assert.throws(() => applyPatch(before, { ...patch, sessionId: "other" }), /STREAM_RESET_REQUIRED/);
 });
+test("attention changes travel in stream patches (waiting → answered/acknowledged)", () => {
+	const before = snapshot([], { attention: { running: true, questionCount: 1, question: "选择框架", completionUnread: false } });
+	const next = snapshot([], { attention: { running: false, questionCount: 0, completionUnread: true, completion: { id: "run-1", outcome: "succeeded", finishedAt: 2 } } });
+	next.cursor = { epoch: "epoch", sequence: 2 };
+	const patch = parsePatch(diffSnapshots(before, next, { epoch: "epoch", sequence: 2 }));
+	assert.equal(patch.attention.questionCount, 0);
+	const result = applyPatch(before, patch);
+	assert.equal(result.attention.completionUnread, true);
+	assert.equal(result.attention.completion.outcome, "succeeded");
+	assert.equal(result.attention.question, undefined);
+});
+
 test("rewrites and tool status changes replace the authoritative row instead of appending", () => {
 	const before = snapshot([{ id: "t", role: "tool", text: "read", timestamp: 1, tool: { name: "read", status: "running", detail: "half" } }]);
 	const next = snapshot([{ id: "t", role: "tool", text: "done", timestamp: 2, tool: { name: "read", status: "done", detail: "full" } }]);

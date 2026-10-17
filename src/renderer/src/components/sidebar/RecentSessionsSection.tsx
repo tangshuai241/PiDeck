@@ -2,7 +2,6 @@ import { ChevronDown, ChevronUp, Ellipsis } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { sessionRecordToSummary } from "../../atoms/session-selectors";
 import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
-import { sessionStatusDotClass } from "../../agentListDisplay";
 import { hasPendingAskForSession } from "../../utils/askUi";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -153,7 +152,7 @@ function RecentSessionRowItem(props: { row: RecentSessionRow; projectName?: stri
 				>
 					<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 						<div className="conversation-title flex min-w-0 items-center gap-1.5">
-							{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtime?.status} sessionId={sessionId} /> : runtime && <span className={cn("size-1.5 shrink-0 rounded-full", sessionStatusDotClass(runtime.status))} aria-hidden="true" />}
+							<SessionActivityIndicator status={runtime?.status} sessionId={sessionId} />
 							<TitleScrollText text={displayTitle} className={runtime ? "font-medium" : "font-normal text-muted-foreground/90"} />
 							{(row.session.backend === "dsh" || row.session.backend === "imagegen" || row.session.backend === "acp") && <SessionBackendMark backend={row.session.backend} />}
 							{pendingAsk && <PendingAskBadge count={1} />}

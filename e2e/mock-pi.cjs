@@ -164,6 +164,34 @@ const ASK_MARKERS = {
 			],
 		}),
 	},
+	// 真机验收用：一次性覆盖五种题型（单选/多选/确认/输入/编辑）。
+	// 别名 ASKBATCHFULL / askbatchfull 供 adb input text 不便输入下划线的场景。
+	ASKBATCHFULL: {
+		method: "input",
+		title: JSON.stringify({
+			__piDeckBatchAsk: 1,
+			questions: [
+				{ id: "f1", type: "select", question: "选择框架", options: ["React", "Vue"] },
+				{ id: "f2", type: "multi_select", question: "选择运行时", options: ["Node", "Deno", "Bun"] },
+				{ id: "f3", type: "confirm", question: "启用 TypeScript？" },
+				{ id: "f4", type: "input", question: "项目名", placeholder: "my-app", prefill: "demo-app" },
+				{ id: "f5", type: "editor", question: "补充说明", placeholder: "多行内容" },
+			],
+		}),
+	},
+	askbatchfull: {
+		method: "input",
+		title: JSON.stringify({
+			__piDeckBatchAsk: 1,
+			questions: [
+				{ id: "f1", type: "select", question: "选择框架", options: ["React", "Vue"] },
+				{ id: "f2", type: "multi_select", question: "选择运行时", options: ["Node", "Deno", "Bun"] },
+				{ id: "f3", type: "confirm", question: "启用 TypeScript？" },
+				{ id: "f4", type: "input", question: "项目名", placeholder: "my-app", prefill: "demo-app" },
+				{ id: "f5", type: "editor", question: "补充说明", placeholder: "多行内容" },
+			],
+		}),
+	},
 };
 let pendingAsk = null; // { requestId, method, title, marker }
 let askAnswerLog = []; // 记录每次 ask 的答案，供 E2E 主进程侧断言

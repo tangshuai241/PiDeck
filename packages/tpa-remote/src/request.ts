@@ -49,7 +49,7 @@ export function parseRequest(value: unknown, challenge: string, now = Date.now()
 			throw new Error("INVALID_REQUEST");
 		return { ...base, task: { name: task.name.trim(), prompt: task.prompt, projectId: task.projectId, trigger: task.trigger, hour: task.hour, minute: task.minute } };
 	}
-	if (!["session.read", "session.history", "message.read", "session.send", "session.abort", "session.fork", "ui.respond", "artifacts.list", "artifact.read"].includes(value.method) || !identity(value.sessionId)) throw new Error("INVALID_REQUEST");
+	if (!["session.read", "session.history", "message.read", "session.send", "session.abort", "session.fork", "ui.respond", "attention.ack", "artifacts.list", "artifact.read"].includes(value.method) || !identity(value.sessionId)) throw new Error("INVALID_REQUEST");
 	base.sessionId = value.sessionId;
 	if (value.method === "message.read") {
 		if (
@@ -72,7 +72,7 @@ export function parseRequest(value: unknown, challenge: string, now = Date.now()
 	}
 	if (value.method === "session.read" && value.cursor !== undefined) base.cursor = parseCursor(value.cursor);
 	if (value.method === "session.send") {
-		if (typeof value.text !== "string" || !value.text.trim() || value.text.length > 20_000 || !value.target) throw new Error("INVALID_REQUEST");
+		if (typeof value.text !== "string" || !value.text.trim() || value.text.length > 20_000) throw new Error("INVALID_REQUEST");
 		base.text = value.text;
 	}
 	if (value.target !== undefined) {
@@ -90,6 +90,10 @@ export function parseRequest(value: unknown, challenge: string, now = Date.now()
 		if (typeof value.artifactId !== "string" || !/^[a-f0-9]{64}$/.test(value.artifactId) || typeof value.offset !== "number" || !Number.isSafeInteger(value.offset) || value.offset < 0 || value.offset > 10_000_000) throw new Error("INVALID_REQUEST");
 		base.artifactId = value.artifactId;
 		base.offset = value.offset;
+	}
+	if (value.method === "attention.ack") {
+		if (!identity(value.completionId)) throw new Error("INVALID_REQUEST");
+		base.completionId = value.completionId;
 	}
 	if (value.method === "ui.respond") {
 		if (!base.target || !identity(value.questionId) || (typeof value.answer !== "string" && typeof value.answer !== "boolean") || (typeof value.answer === "string" && value.answer.length > 20_000)) throw new Error("INVALID_REQUEST");

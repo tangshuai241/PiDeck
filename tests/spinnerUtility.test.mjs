@@ -60,12 +60,14 @@ test("renderer spinner call sites do not bypass the shared utility", () => {
 	assert.deepEqual(legacyUses, [], "replace legacy spinner classes with animate-pideck-spin so reduced-motion applies everywhere");
 });
 
-test("title-tab loading badge delegates rotation to the shared utility", () => {
+test("title-tab running indicator delegates rotation to the shared utility", () => {
 	const badge = readFileSync("src/renderer/src/components/motion/animated-badge.tsx", "utf8");
 	const tabBar = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
+	const indicator = readFileSync("src/renderer/src/components/session/SessionActivityIndicator.tsx", "utf8");
 
-	assert.match(tabBar, /<AnimatedBadge[\s\S]*?status=\{badge\.status\}/);
-	assert.match(badge, /status === "loading" && !icon[\s\S]*?className="inline-flex animate-pideck-spin"/, "the title-tab loading badge must keep the shared spinner active under reduced motion");
+	assert.match(tabBar, /<SessionActivityIndicator[\s\S]*?sessionId=\{sessionId\}/);
+	assert.match(indicator, /presentation\.kind === "running"[\s\S]*?animate-pideck-spin/, "running state must use the shared spinner under reduced motion");
+	assert.match(badge, /status === "loading" && !icon[\s\S]*?className="inline-flex animate-pideck-spin"/);
 	assert.doesNotMatch(badge, /status === "loading" && !reduce && !icon/);
 });
 

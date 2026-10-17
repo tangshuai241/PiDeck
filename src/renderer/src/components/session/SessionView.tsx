@@ -22,6 +22,9 @@ import { chatContentWidthStyle } from "./chatContentWidth";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import type { TerminalDockSettings } from "../terminal/TerminalDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
+import { sessionScrollToLatestRequestAtom, useSessionAttention } from "../../atoms/session-attention-atoms";
+import { personalWorkbenchPageAtom } from "../../atoms/personal-workbench-atoms";
+import { useSessionCompletionRead } from "../../hooks/useSessionCompletionRead";
 import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, displayProjectDirectoryName, redistributeTerminalAgainstTimeline, shouldMountBottomComposer, sessionResizableGroupKey, sessionGroupDefaultLayout } from "../../rendererUtils";
 import { projectByIdAtomFamily, publishSessionLatestAgentRunAtom, sessionRecordByIdAtomFamily, sessionStatusInSidebarAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
@@ -192,6 +195,29 @@ export function SessionView({
 	// 从会话记录解析 projectId → 项目目录名；无记录（匿名会话等）时省略。
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const project = useAtomValue(projectByIdAtomFamily(sessionRecord?.projectId ?? ""));
+	// 结果已读：只有当前会话可见（分屏时本栏有焦点）、应用在前台、时间线跟随底部，
+	// 且没有被个人工作台等功能页覆盖时才确认；结果身份由主进程校验。
+	const personalWorkbenchPage = useAtomValue(personalWorkbenchPageAtom);
+	const sessionAttention = useSessionAttention(sessionId);
+	// 从活动区点击未读结果：定位到最新结果（随后由可见性规则决定是否确认已读）。
+	const scrollToLatestRequest = useAtomValue(sessionScrollToLatestRequestAtom);
+	const setScrollToLatestRequest = useSetAtom(sessionScrollToLatestRequestAtom);
+	const handledScrollRequestRef = useRef(0);
+	const focusResultRequested = Boolean(scrollToLatestRequest && scrollToLatestRequest.sessionId === sessionId && scrollToLatestRequest.at > handledScrollRequestRef.current);
+	useEffect(() => {
+		if (!focusResultRequested || !scrollToLatestRequest) return;
+		handledScrollRequestRef.current = scrollToLatestRequest.at;
+		sessionTimeline.scrollToBottom();
+		setScrollToLatestRequest(null);
+	}, [focusResultRequested, scrollToLatestRequest, sessionTimeline, setScrollToLatestRequest]);
+	useSessionCompletionRead({
+		sessionId,
+		completionId: sessionAttention?.completionUnread ? sessionAttention.completion?.id : undefined,
+		following: sessionTimeline.autoScroll,
+		paneVisible: !splitPane || focused,
+		covered: personalWorkbenchPage !== null,
+		focusRequested: focusResultRequested,
+	});
 	const projectName = project ? displayProjectDirectoryName(project) : undefined;
 	// 垂直轴只分两段：时间线列（对话 + 固有高度输入栏）| 终端。
 	// 输入栏不再占 Group 百分比——窗口缩放时时间线吸收全部余量，待办/改文件

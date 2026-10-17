@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, LayoutAnimation, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, AppState, FlatList, LayoutAnimation, Text, View } from "react-native";
 import { ArrowLeft, Ellipsis, Folder, MessagesSquare, Pin } from "lucide-react-native";
 import type { CompanionController } from "../useCompanion";
 import type { Palette } from "../theme";
@@ -62,6 +62,33 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 	const pins = s.selected ? (s.preferences.pins[s.selected] ?? []) : [];
 	const current = s.sessions.find((session) => session.id === s.selected);
 	const connected = s.connection === "connected";
+	const attention = s.snapshot?.attention;
+	const statusLine = attention?.questionCount ? `${c.awaitingAnswer}${attention.question ? ` · ${attention.question}` : ""}` : attention?.completionUnread && attention.completion ? attention.completion.outcome === "failed" ? c.failedResult : attention.completion.outcome === "interrupted" ? c.interruptedResult : c.unreadResult : attention?.running ? c.runningNow : attention?.completion?.outcome === "aborted" ? c.stoppedResult : undefined;
+	// 结果进入可见区域才算已读：应用在前台、非历史浏览、列表跟随底部。
+	const snapshot = s.snapshot;
+	// 已读规则与桌面一致：仅当应用在前台、本会话可见、结果在视口内，且不是「打开会话时已存在的
+	// 未读结果」时才确认。新结果在浏览中到达、用户点按未读提示或滚回底部都会触发确认。
+	const completionBaselineRef = useRef<{ sessionId?: string; completionId?: string }>({});
+	const previousFollowingRef = useRef(viewport.following);
+	const [focusResultRequested, setFocusResultRequested] = useState(false);
+	useEffect(() => {
+		setFocusResultRequested(false);
+	}, [s.selected]);
+	useEffect(() => {
+		const becameFollowing = !previousFollowingRef.current && viewport.following;
+		previousFollowingRef.current = viewport.following;
+		if (!snapshot || !attention?.completionUnread || !attention.completion) return;
+		const baseline = completionBaselineRef.current;
+		if (baseline.sessionId !== snapshot.sessionId) {
+			// 首次看到该会话：把当前结果记为基线，打开会话本身不确认已读。
+			completionBaselineRef.current = { sessionId: snapshot.sessionId, completionId: attention.completion.id };
+			return;
+		}
+		const preexisting = baseline.completionId !== undefined && baseline.completionId === attention.completion.id;
+		if (preexisting && !focusResultRequested && !becameFollowing) return;
+		if (!viewport.following || s.historyMode || AppState.currentState !== "active") return;
+		void s.client.acknowledge(snapshot.sessionId, attention.completion.id).catch(() => undefined);
+	}, [snapshot, attention, viewport.following, s.historyMode, s.client, focusResultRequested]);
 	return (
 		<View style={{ flex: 1 }}>
 			<View style={{ minHeight: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, gap: 8 }}>
@@ -74,9 +101,19 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 					</Text>
 					<View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
 						<Folder size={15} color={colors.secondary} />
-						<Text numberOfLines={1} style={{ ...typeScale.caption, color: colors.secondary }}>
-							{current?.project || c.projectFallback}
-						</Text>
+						<Pressable
+							accessibilityRole="button"
+							disabled={!attention?.completionUnread}
+							onPress={() => {
+								viewport.latest();
+								setFocusResultRequested(true);
+							}}
+							style={{ alignSelf: "flex-start", maxWidth: "100%" }}
+						>
+							<Text numberOfLines={1} style={{ ...typeScale.caption, color: attention?.completionUnread ? colors.primary : colors.secondary }}>
+								{statusLine ? `${current?.project || c.projectFallback} · ${statusLine}` : current?.project || c.projectFallback}
+							</Text>
+						</Pressable>
 					</View>
 				</View>
 				{!!pins.length && (
@@ -165,7 +202,16 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 								disabled={!connected || s.working}
 								answer={(value) => {
 									const snapshot = s.snapshot;
-									if (snapshot) void s.perform(() => s.client.answer(snapshot, question.requestId, value));
+									if (!snapshot) return;
+									void s.perform(async () => {
+										try {
+											await s.client.answer(snapshot, question.requestId, value);
+										} catch (error) {
+											// 确定拒绝（问题已被桌面回答/运行时变化）：刷新快照移除过期提问，命令已结算。
+											await s.client.select(snapshot.sessionId).catch(() => undefined);
+											throw error;
+										}
+									});
 								}}
 							/>
 						))}
@@ -205,7 +251,7 @@ export function ChatScreen({ controller: s, colors, back, settings, sessions, fi
 				}}
 				connected={connected}
 				busy={s.snapshot?.busy ?? false}
-				disabled={s.working || !s.snapshot?.target || s.error === "DELIVERY_UNKNOWN"}
+				disabled={s.working || s.error === "DELIVERY_UNKNOWN"}
 				project={current?.project}
 				model={s.preferences.model?.name || current?.model}
 				settings={settings}

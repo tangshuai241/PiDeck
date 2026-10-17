@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 06a0bd69d6f0c6d87d9a388979757db8fd8c005cfd4673bb2566914b3ef79e4d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8d3f44a0ed59ae7fb26179206ed55183efca5214085c27d8d8ec1d50b31510ea（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -258,6 +258,19 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.pendingConfirmation": "待確認",
 	"sidebar.pendingConfirmationCount": "待確認 ({count})",
 	"sidebar.pendingConfirmationHint": "該專案有 {count} 個待確認的提問",
+	"sidebar.activityAll": "全部",
+	"sidebar.activityPending": "待回答",
+	"sidebar.activityUnread": "未讀結果",
+	"sidebar.activityRunning": "執行中",
+	"sidebar.activityRecent": "最近",
+	"sidebar.activityPendingHint": "{count} 個會話等待回答",
+	"sidebar.activityUnreadHint": "{count} 個會話有未讀結果",
+	"sidebar.activityRunningHint": "{count} 個會話正在執行",
+	"sidebar.activityQuestions": "{count} 個問題",
+	"sidebar.activityEmptyPending": "沒有等待回答的會話",
+	"sidebar.activityEmptyUnread": "沒有未讀結果",
+	"sidebar.activityEmptyRunning": "沒有執行中的會話",
+	"sidebar.activityOpenHint": "開啟會話",
 	"app.chatProject": "聊天",
 	"pagination.label": "分頁",
 	"pagination.page": "第 {page} 頁",
@@ -1495,6 +1508,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.statusRunning": "執行中",
 	"app.statusStarting": "啟動中",
 	"app.statusError": "失敗",
+	"app.statusWaiting": "待回答",
+	"app.statusUnreadSucceeded": "已完成 · 未讀",
+	"app.statusUnreadFailed": "失敗 · 未讀",
+	"app.statusUnreadInterrupted": "已中斷 · 未讀",
+	"app.statusStopped": "已停止",
 	"app.highAgentCountTitle": "執行的 Agent 有點多，給電腦減減負吧",
 	"app.highAgentCountBody": "當前有 {count} 個 Agent 處於啟用狀態，記憶體佔用會隨之明顯上升。暫時用不上的話，可以在左側列表對藍色（空閒）狀態的會話點選右鍵 → 選擇「關閉 Agent」釋放記憶體。別擔心，關閉不會丟失會話記錄，隨時都能重新開啟，工作也會更輕快。",
 	"app.highAgentCountSnooze": "本次不再提醒",

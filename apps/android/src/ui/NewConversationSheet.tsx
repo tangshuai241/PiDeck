@@ -36,7 +36,7 @@ export function NewConversationSheet({
 	const [draft, setDraft] = useState("");
 	const [selecting, setSelecting] = useState(false);
 	const row = (label: string, content: React.ReactNode) => (
-		<View style={{ minHeight: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 10, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, gap: 8, backgroundColor: colors.muted }}>
+		<View style={{ minHeight: 40, borderWidth: 1, borderColor: colors.border, borderRadius: 10, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, gap: 6, backgroundColor: colors.muted }}>
 			<Text style={{ width: 54, color: colors.secondary, fontSize: 12 }}>{label}</Text>
 			<View style={{ flex: 1, minWidth: 0 }}>{content}</View>
 		</View>
@@ -105,7 +105,7 @@ export function NewConversationSheet({
 					</View>
 				</View>,
 			)}
-			<View style={{ marginTop: 12, marginHorizontal: -17 }}>
+			<View style={{ marginTop: 8, marginHorizontal: -17 }}>
 				<ReferenceComposer
 					model={model}
 					chooseModel={chooseModel}

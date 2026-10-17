@@ -5,7 +5,10 @@ export type RemoteModel = { provider: string; id: string; name: string };
 export type RemoteProject = { id: string; name: string; path: string };
 export type RemoteTaskInput = { name: string; projectId: string; prompt: string; trigger: "daily" | "manual"; hour: number; minute: number };
 export type RemoteTask = { id: string; name: string; projectId: string; prompt: string; schedule: string; enabled: boolean; nextRunAt?: number };
-export type RemoteSession = { id: string; title: string; project: string; backend: string; updatedAt: number; active: boolean; projectId?: string; projectPath?: string; model?: string; thinkingLevel?: string };
+/** 会话状态摘要（与桌面共用同一份事实）：运行 / 待回答 / 最近结果 / 未读。 */
+export type RemoteCompletion = { id: string; outcome: "succeeded" | "failed" | "aborted" | "interrupted"; finishedAt: number };
+export type RemoteAttention = { running: boolean; questionCount: number; question?: string; completion?: RemoteCompletion; completionUnread: boolean };
+export type RemoteSession = { id: string; title: string; project: string; backend: string; updatedAt: number; active: boolean; projectId?: string; projectPath?: string; model?: string; thinkingLevel?: string; attention?: RemoteAttention };
 export type RemoteTool = { name: string; status: "running" | "done" | "error"; detail: string; durationMs?: number; callId?: string };
 export type RemoteMessage = {
 	id: string;
@@ -26,11 +29,30 @@ export type RemoteMessage = {
 export type MessageChannel = "text" | "thinking" | "tool";
 export type RemoteMessagePart = { messageId: string; channel: MessageChannel; text: string; offset: number; nextOffset: number | null; total: number; version: string };
 export type RemoteHistoryPage = { messages: RemoteMessage[]; nextBefore: number | null; nextBeforeEntryId?: string };
-export type RemoteQuestion = RuntimeTarget & { requestId: string; method: string; title: string; options?: string[] };
+export type RemoteBatchQuestion = {
+	id: string;
+	type: "select" | "multi_select" | "confirm" | "input" | "editor";
+	question: string;
+	options?: Array<string | { label: string; value?: string; description?: string }>;
+	allowOther?: boolean;
+	placeholder?: string;
+	prefill?: string;
+};
+export type RemoteQuestion = RuntimeTarget & {
+	requestId: string;
+	method: string;
+	title: string;
+	options?: string[];
+	placeholder?: string;
+	prefill?: string;
+	allowOther?: boolean;
+	batchQuestions?: RemoteBatchQuestion[];
+	batchReview?: boolean;
+};
 export type StreamCursor = { epoch: string; sequence: number };
-export type RemoteSnapshot = { sessionId: string; target?: RuntimeTarget; messages: RemoteMessage[]; questions: RemoteQuestion[]; busy: boolean; revision: number; hasOlder: boolean; cursor?: StreamCursor };
+export type RemoteSnapshot = { sessionId: string; target?: RuntimeTarget; messages: RemoteMessage[]; questions: RemoteQuestion[]; busy: boolean; revision: number; hasOlder: boolean; cursor?: StreamCursor; attention?: RemoteAttention };
 export type MessageDelta = { id: string; text?: string; thinking?: string; timestamp: number; thinkingStartedAt?: number; thinkingEndedAt?: number };
-export type RemotePatch = { kind: "stream"; sessionId: string; cursor: StreamCursor; previous: number; target?: RuntimeTarget; upserts: RemoteMessage[]; deltas: MessageDelta[]; removed: string[]; order: string[]; questions: RemoteQuestion[]; busy: boolean; hasOlder: boolean };
+export type RemotePatch = { kind: "stream"; sessionId: string; cursor: StreamCursor; previous: number; target?: RuntimeTarget; upserts: RemoteMessage[]; deltas: MessageDelta[]; removed: string[]; order: string[]; questions: RemoteQuestion[]; busy: boolean; hasOlder: boolean; attention?: RemoteAttention };
 export type RemoteSync = { kind: "sync"; snapshot?: RemoteSnapshot; patches: RemotePatch[] };
 export type Pairing = { v: 1; relay: string; room: string; token: string; key: string; hostKey: string; expiresAt: number };
 export type RemoteArtifact = { id: string; sessionId: string; title: string; fileName: string; version: number; bytes: number; digest: string };
@@ -52,6 +74,7 @@ export type Request = {
 	title?: string;
 	task?: RemoteTaskInput;
 	commandId?: string;
+	completionId?: string;
 	before?: number;
 	beforeEntryId?: string;
 	messageId?: string;

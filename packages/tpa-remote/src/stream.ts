@@ -1,5 +1,5 @@
 import { isRecord } from "./crypto.ts";
-import { parseSnapshot } from "./projection.ts";
+import { parseRemoteAttention, parseSnapshot } from "./projection.ts";
 import { parseCursor } from "./cursor.ts";
 import type { MessageDelta, RemoteMessage, RemotePatch, RemoteSnapshot, StreamCursor } from "./types.ts";
 
@@ -42,6 +42,7 @@ export function diffSnapshots(previous: RemoteSnapshot, next: RemoteSnapshot, cu
 		questions: next.questions,
 		busy: next.busy,
 		hasOlder: next.hasOlder,
+		attention: next.attention,
 	};
 }
 
@@ -63,7 +64,7 @@ export function applyPatch(snapshot: RemoteSnapshot, patch: RemotePatch): Remote
 		if (!row) throw new Error("STREAM_GAP");
 		return row;
 	});
-	return parseSnapshot({ ...snapshot, target: patch.target, cursor: patch.cursor, revision: patch.cursor.sequence, messages, questions: patch.questions, busy: patch.busy, hasOlder: patch.hasOlder });
+	return parseSnapshot({ ...snapshot, target: patch.target, cursor: patch.cursor, revision: patch.cursor.sequence, messages, questions: patch.questions, busy: patch.busy, hasOlder: patch.hasOlder, ...(patch.attention ? { attention: patch.attention } : {}) });
 }
 
 /** Strict decoding bounds malformed or oversized relay payloads before projection. */
@@ -106,5 +107,5 @@ export function parsePatch(value: unknown): RemotePatch {
 			...(typeof delta.thinkingEndedAt === "number" ? { thinkingEndedAt: delta.thinkingEndedAt } : {}),
 		};
 	});
-	return { kind: "stream", sessionId: value.sessionId, cursor: parseCursor(value.cursor), previous: value.previous, target: base.target, upserts: base.messages, deltas, removed: strings(value.removed), order: strings(value.order), questions: base.questions, busy: base.busy, hasOlder: base.hasOlder };
+	return { kind: "stream", sessionId: value.sessionId, cursor: parseCursor(value.cursor), previous: value.previous, target: base.target, upserts: base.messages, deltas, removed: strings(value.removed), order: strings(value.order), questions: base.questions, busy: base.busy, hasOlder: base.hasOlder, ...(base.attention ? { attention: base.attention } : {}) };
 }

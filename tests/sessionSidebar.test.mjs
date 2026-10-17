@@ -436,11 +436,11 @@ test("sidebar uses one persisted project accordion without duplicating current p
 	// 已启动的会话行复用 Tab 栏蓝/黄/红状态点，而不是回退到项目头像。
 	assert.doesNotMatch(sessionTree, /\?\? \"bg-muted-foreground\/50\"/);
 	assert.doesNotMatch(sessionTree, /\?\? \"bg-border\"/);
-	assert.match(sessionTree, /function renderRuntimeStatusDot/);
-	assert.match(sessionTree, /if \(!dotClass\) return null/);
-	assert.match(sessionTree, /sessionStatusDotClass\(status\)/);
-	assert.match(sessionTree, /renderRuntimeStatusDot\(child\.agent\.status\)/);
-	assert.match(sessionTree, /renderRuntimeStatusDot\(runtimeSnapshot\?\.status\)/);
+	// 统一状态指示器：未启动不渲染（指示器对 none 返回 null），已启动按运行/待回答/未读规则显示。
+	assert.match(sessionTree, /import \{ SessionActivityIndicator \} from "\.\.\/session\/SessionActivityIndicator"/);
+	assert.match(sessionTree, /<SessionActivityIndicator status=\{child\.agent\.status\} sessionId=\{agentSession\?\.id\} \/>/);
+	assert.match(sessionTree, /<SessionActivityIndicator status=\{runtimeSnapshot\?\.status\} sessionId=\{child\.session\.id\} \/>/);
+	assert.doesNotMatch(sessionTree, /renderRuntimeStatusDot/);
 	assert.match(sessionTree, /display\.visibleChildren\.map\(renderChild\)/);
 	assert.match(sessionTree, /renderSubagents\(groupKey, child\.codexSubagents, child\.piSubagents\)/);
 });
@@ -531,8 +531,8 @@ test("activity page keeps failed/stopped agents visible (error/closed)", () => {
 	// 活动页是 runtime 会话入口：catalog 只含 runtime 绑定的 Agent（detached 已被排除），
 	// 因此不能按 isLiveRuntimeStatus 过滤——否则 error/closed 的失败会话在活动页消失。
 	assert.doesNotMatch(activeTree, /isLiveRuntimeStatus\(agent\.status\)/);
-	// 终态 Agent 仍以状态点区分（error=红点），行主体与 live 行共用同一渲染路径。
-	assert.match(activeTree, /sessionStatusDotClass\(agent\.status\)/);
+	// 终态 Agent 仍以状态指示区分（error=红点），行主体与 live 行共用同一渲染路径。
+	assert.match(activeTree, /<SessionActivityIndicator status=\{agent\.status\} sessionId=\{sessionId\} \/>/);
 	// 右键/重启入口不区分 live：失败会话也能从活动页菜单重启。
 	assert.match(activeTree, /openMenu\(\{ kind: "agent", agentId: agent\.id/);
 });

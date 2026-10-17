@@ -207,7 +207,7 @@ type DispatchLease = SessionRuntimeBinding & {
 	leaseId: number;
 };
 
-class SessionRuntimeCommandError extends Error {
+export class SessionRuntimeCommandError extends Error {
 	constructor(
 		readonly code: SessionCommandErrorCode,
 		message: string,
@@ -297,6 +297,8 @@ export class SessionRuntimeCoordinator {
 	private readonly preferenceMutationTails = new Map<string, Promise<void>>();
 	private readonly lastRequestedThinkingBySession = new Map<string, { agentId: string; level: string }>();
 	private detachedNotifier: SessionRuntimeDetachNotifier | undefined;
+	/** 待回答集合变化推送（会话状态摘要订阅）：只传受影响的 sessionId。 */
+	private askChangeNotifier: ((sessionId: string) => void) | undefined;
 
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
@@ -394,6 +396,18 @@ export class SessionRuntimeCoordinator {
 	 */
 	setDetachedNotifier(notifier: SessionRuntimeDetachNotifier | undefined): void {
 		this.detachedNotifier = notifier;
+	}
+
+	/** 待回答请求增删后通知状态摘要域（桌面/手机共用摘要）。 */
+	setAskChangeNotifier(notifier: ((sessionId: string) => void) | undefined): void {
+		this.askChangeNotifier = notifier;
+	}
+
+	private notifyAskChanged(sessionId: string): void {
+		if (!this.askChangeNotifier) return;
+		try {
+			this.askChangeNotifier(sessionId);
+		} catch {}
 	}
 
 	/**
@@ -1012,6 +1026,7 @@ export class SessionRuntimeCoordinator {
 		const key = this.uiRequestKey(event.sessionId, requestId);
 		if (event.payload.completed === true) {
 			this.pendingUiRequests.delete(key);
+			this.notifyAskChanged(event.sessionId);
 			return;
 		}
 		if (!isInteractiveUiMethod(event.payload.method)) return;
@@ -1032,6 +1047,7 @@ export class SessionRuntimeCoordinator {
 			batchQuestions,
 			batchReview,
 		});
+		this.notifyAskChanged(event.sessionId);
 
 		// 任何会话收到 Ask 类请求都触发桌面通知：不再按聚焦会话/窗口焦点过滤，
 		// 只要 Agent 在提问就提醒（是否真正弹出由 askNotificationEnabled 设置门控）。
@@ -1055,20 +1071,24 @@ export class SessionRuntimeCoordinator {
 	async respondToUi(input: SessionUiResponseInput): Promise<void> {
 		const binding = this.getRuntimeBinding(input.agentId);
 		if (!binding || binding.sessionId !== input.sessionId || binding.runtimeGeneration !== input.runtimeGeneration || this.agentIdBySession.get(input.sessionId) !== input.agentId) {
-			throw new Error("Session runtime binding changed before UI response");
+			// 确定拒绝：运行时已变化，回答没有送达；远程端据此结算命令，不当作「送达未知」。
+			throw new SessionRuntimeCommandError("SESSION_RUNTIME_CHANGED", "Session runtime binding changed before UI response");
 		}
 		const key = this.uiRequestKey(input.sessionId, input.requestId);
 		const pending = this.pendingUiRequests.get(key);
 		if (!pending || pending.agentId !== input.agentId || pending.runtimeGeneration !== input.runtimeGeneration) {
-			throw new Error("Session UI request is not pending");
+			// 确定拒绝：问题已被处理（桌面先答/取消），旧回答不应重发也不应保留未决回执。
+			throw new SessionRuntimeCommandError("SESSION_COMMAND_FAILED", "Session UI request is not pending");
 		}
 		this.pendingUiRequests.delete(key);
 		try {
 			await this.agents.sendUIResponse(input.agentId, input.requestId, input.response);
 		} catch (error) {
 			this.pendingUiRequests.set(key, pending);
+			this.notifyAskChanged(input.sessionId);
 			throw error;
 		}
+		this.notifyAskChanged(input.sessionId);
 	}
 
 	/**
@@ -2227,11 +2247,14 @@ export class SessionRuntimeCoordinator {
 	}
 
 	private clearPendingUiRequests(sessionId: string, agentId?: string): void {
+		let changed = false;
 		for (const [key, pending] of this.pendingUiRequests) {
 			if (pending.sessionId === sessionId && (!agentId || pending.agentId === agentId)) {
 				this.pendingUiRequests.delete(key);
+				changed = true;
 			}
 		}
+		if (changed) this.notifyAskChanged(sessionId);
 	}
 
 	private pruneDeliveryCache(): void {

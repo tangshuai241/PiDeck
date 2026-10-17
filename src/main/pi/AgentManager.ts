@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import type {
 	AgentBackend,
 	AgentGatewayCapability,
+	AgentRunOutcome,
 	AgentRuntimeState,
 	AgentTab,
 	AppSettings,
@@ -402,6 +403,11 @@ export class AgentManager {
 	private readonly uiGate: ExtensionUiGate;
 	/** 成功空闲（settled）回调：供 PetStateBridge 等主进程内部模块订阅，携带完成 Agent 身份。 */
 	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/**
+	 * 一轮执行结束（成功/失败/停止/中断）回调：供会话状态摘要域持久化「最近结果」。
+	 * 只传 agentId 与分类，sessionId 由订阅方经运行时绑定反查，生命周期模块不掺会话知识。
+	 */
+	private readonly runFinishedListeners = new Set<(info: { agentId: string; outcome: AgentRunOutcome }) => void>();
 	/** 项目信任闸（trust.json 决策/弹窗/超时）：见 projectTrustGate.ts（Wave 4C 迁出）。 */
 	private readonly projectTrust: ProjectTrustGate;
 	/**
@@ -4067,6 +4073,8 @@ export class AgentManager {
 	async stop(agentId: string) {
 		const runtime = this.agents.get(agentId);
 		if (!runtime) return;
+		// 终止一轮仍在进行的执行：保留「已停止」结果类型，由会话摘要域标记为已读（不产生完成提醒）。
+		if (runtime.tab.status === "running" || runtime.tab.status === "starting") this.notifyAgentRunFinished(agentId, "aborted");
 		void this.appLogger?.info("agent", "Agent stopped (user initiated)", {
 			agentId,
 			projectId: runtime.tab.projectId,
@@ -4126,6 +4134,14 @@ export class AgentManager {
 		};
 	}
 
+	/** 订阅一轮执行的结束分类（成功/失败/停止/中断）：会话状态摘要据此记录最近结果。 */
+	onAgentRunFinished(listener: (info: { agentId: string; outcome: AgentRunOutcome }) => void): () => void {
+		this.runFinishedListeners.add(listener);
+		return () => {
+			this.runFinishedListeners.delete(listener);
+		};
+	}
+
 	/** 装配层注入：仅 PiDeck 自动命名经已验证 marker 写回 catalog；source 标记来源（#266）。 */
 	setAutomaticTitleChangedHandler(handler: (agentId: string, title: string, source: AutomaticTitleSource) => void): void {
 		this.onAutomaticTitleChanged = handler;
@@ -4154,6 +4170,14 @@ export class AgentManager {
 		for (const listener of this.settledListeners) {
 			try {
 				listener({ agentId, title });
+			} catch {}
+		}
+	}
+
+	private notifyAgentRunFinished(agentId: string, outcome: AgentRunOutcome) {
+		for (const listener of this.runFinishedListeners) {
+			try {
+				listener({ agentId, outcome });
 			} catch {}
 		}
 	}
@@ -4396,6 +4420,7 @@ export class AgentManager {
 				})
 				.catch(() => {
 					tab.status = "closed";
+					this.notifyAgentRunFinished(agentId, "interrupted");
 					void this.appLogger?.error("agent", "Agent reattach after abort-window exit failed", {
 						agentId,
 						code: payload.code,
@@ -4425,6 +4450,7 @@ export class AgentManager {
 				})
 				.catch(() => {
 					tab.status = "closed";
+					this.notifyAgentRunFinished(agentId, "interrupted");
 					void this.appLogger?.error("agent", "Agent auto-restart failed", {
 						agentId,
 						code: payload.code,
@@ -4437,6 +4463,7 @@ export class AgentManager {
 			return;
 		}
 		tab.status = "closed";
+		this.notifyAgentRunFinished(agentId, "interrupted");
 		// 非 0 退出且还没写过错误卡时，补一条可排查信息（避免用户只看到 closed）。
 		if (payload.code !== 0 && payload.code !== null) {
 			const runtime = this.agents.get(agentId);
@@ -4484,6 +4511,7 @@ export class AgentManager {
 				})
 				.catch(() => {
 					runtime.tab.status = "closed";
+					this.notifyAgentRunFinished(agentId, "interrupted");
 					this.addLocalizedMessage(agentId, "error", "diagnostic.processReconnectFailed", "Agent 进程意外退出，自动重连失败");
 					void this.appLogger?.error("agent", "Agent reattach after abort-window exit failed (reattach path)", {
 						agentId,
@@ -4515,6 +4543,7 @@ export class AgentManager {
 				})
 				.catch(() => {
 					runtime.tab.status = "closed";
+					this.notifyAgentRunFinished(agentId, "interrupted");
 					this.addLocalizedMessage(agentId, "error", "diagnostic.processReconnectFailed", "Agent 进程意外退出，自动重连失败");
 					void this.appLogger?.error("agent", "Agent reattach auto-restart failed", {
 						agentId,
@@ -4528,6 +4557,7 @@ export class AgentManager {
 			return;
 		}
 		runtime.tab.status = "closed";
+		this.notifyAgentRunFinished(agentId, "interrupted");
 		// 最终停止（无重连路径）：统一清理该 agent 的运行态键。
 		// 异常退出（非 0 码）与正常退出在此汇合，warn 记录退出码便于与 exit 事件区分。
 		void this.appLogger?.warn("agent", "Agent process exited; no reconnect (reattach path)", {
@@ -4775,6 +4805,7 @@ export class AgentManager {
 			// 不被后续 agent_settled 覆盖，确保侧边栏状态显示失败标记。
 			if (!typed.success && runtime && !this.recentlyAborted.has(agentId)) {
 				runtime.tab.status = "error";
+				this.notifyAgentRunFinished(agentId, "failed");
 				const reason = typed.finalError ?? typed.errorMessage ?? "API 请求失败";
 				this.addMessage(agentId, "error", `请求失败：${String(reason)}`);
 				// 自动重试最终失败：原因只写会话气泡无法离线排查，这里同步留痕 applog。
@@ -4938,6 +4969,7 @@ export class AgentManager {
 				// 否则会被误置为 idle 触发"所有任务完成"通知。
 				// 例外：用户主动 abort 的回合不置终态（进程还活着，见上方 abortedTurn 注释）。
 				if (runtime && !abortedTurn) runtime.tab.status = "error";
+				if (runtime && !abortedTurn) this.notifyAgentRunFinished(agentId, "failed");
 				// agent_end 携带错误且不重试：错误原文（API 400/模型报错等）必须进 applog，
 				// 会话气泡只面向用户，排查时依赖这里的结构化记录。
 				void this.appLogger?.error("agent", "Agent run ended with error", {
@@ -4954,6 +4986,7 @@ export class AgentManager {
 				this.addDetailedErrorMessage(agentId, typeof topMsg?.errorMessage === "string" ? topMsg.errorMessage : typeof typed.error === "string" ? typed.error : undefined);
 				// 与上一分支同款 abort 例外：终止回合不把活进程标成终态。
 				if (runtime && !abortedTurn) runtime.tab.status = "error";
+				if (runtime && !abortedTurn) this.notifyAgentRunFinished(agentId, "failed");
 				// 与上一分支同款留痕：无显式错误文本时也记下 stopReason 与最后一条
 				// error 消息的 errorMessage，避免「会话失败但原因未知」完全不可追溯。
 				void this.appLogger?.error("agent", "Agent run ended with error", {
@@ -5024,6 +5057,10 @@ export class AgentManager {
 				}
 				// 成功空闲（settled）后才算完成：通知宠物等内部模块携带标题，供「{title} 已完成」气泡使用。
 				if (!isAbortSettled) this.notifyAgentSettled(agentId, runtime.tab.title);
+				this.notifyAgentRunFinished(agentId, isAbortSettled ? "aborted" : "succeeded");
+			} else if (runtime && runtime.tab.status === "error") {
+				// 最终失败也以 settled 收尾（自动重试耗尽时状态已置 error）：补齐失败结果。
+				this.notifyAgentRunFinished(agentId, "failed");
 			}
 		}
 
@@ -5877,6 +5914,7 @@ export class AgentManager {
 		void this.emitRuntimeState(agentId);
 		// 兜底确认无工作也算成功空闲：与 agent_settled 一样通知完成（PetStateBridge 侧有去重冷却）。
 		this.notifyAgentSettled(agentId, runtime.tab.title);
+		this.notifyAgentRunFinished(agentId, this.recentlyAborted.has(agentId) ? "aborted" : "succeeded");
 	}
 
 	private requireRuntime(agentId: string) {

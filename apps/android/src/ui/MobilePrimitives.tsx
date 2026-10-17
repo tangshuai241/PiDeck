@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Search, X } from "lucide-react-native";
 import Svg, { Path } from "react-native-svg";
+import { KeyboardFrame } from "./KeyboardFrame";
 import type { Palette } from "../theme";
 import { c } from "../copy";
 
@@ -67,22 +68,28 @@ export function BottomSheet({ open, close, colors, title, children, scrollKey }:
 	const reduced = useReducedMotion();
 	return (
 		<Modal visible={open} transparent animationType={reduced ? "none" : "slide"} onRequestClose={close}>
-			<View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#00000080" }}>
+			<View style={{ flex: 1, backgroundColor: "#00000080" }}>
 				<Pressable accessibilityRole="button" accessibilityLabel={c.close} onPress={close} style={StyleSheet.absoluteFill} />
-				<View accessibilityViewIsModal style={{ maxHeight: "88%", backgroundColor: colors.background, borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 18, paddingBottom: 16 }}>
-					<View style={{ alignSelf: "center", width: 32, height: 4, borderRadius: 8, backgroundColor: colors.secondary, opacity: 0.45, marginTop: 10, marginBottom: 12 }} />
-					{title && (
-						<View style={{ minHeight: 26, marginBottom: 10, justifyContent: "center" }}>
-							<Text style={{ textAlign: "center", color: colors.text, fontSize: 15, fontWeight: "600" }}>{title}</Text>
-							<Pressable accessibilityRole="button" accessibilityLabel={c.close} onPress={close} style={{ position: "absolute", right: -4, top: -12, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
-								<X size={23} color={colors.secondary} />
-							</Pressable>
+				{/* Modal 是独立窗口，外层 KeyboardAvoidingView 管不到它：在弹层内部再收一次
+				    键盘高度，否则新建对话的输入框会被键盘完全遮住（真机反馈）。 */}
+				<KeyboardFrame>
+					<View style={{ flex: 1, justifyContent: "flex-end" }}>
+						<View accessibilityViewIsModal style={{ maxHeight: "88%", backgroundColor: colors.background, borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 18, paddingBottom: 16 }}>
+							<View style={{ alignSelf: "center", width: 32, height: 4, borderRadius: 8, backgroundColor: colors.secondary, opacity: 0.45, marginTop: 10, marginBottom: 12 }} />
+							{title && (
+								<View style={{ minHeight: 26, marginBottom: 10, justifyContent: "center" }}>
+									<Text style={{ textAlign: "center", color: colors.text, fontSize: 15, fontWeight: "600" }}>{title}</Text>
+									<Pressable accessibilityRole="button" accessibilityLabel={c.close} onPress={close} style={{ position: "absolute", right: -4, top: -12, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+										<X size={23} color={colors.secondary} />
+									</Pressable>
+								</View>
+							)}
+							<ScrollView key={scrollKey} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8 }}>
+								{children}
+							</ScrollView>
 						</View>
-					)}
-					<ScrollView key={scrollKey} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8 }}>
-						{children}
-					</ScrollView>
-				</View>
+					</View>
+				</KeyboardFrame>
 			</View>
 		</Modal>
 	);

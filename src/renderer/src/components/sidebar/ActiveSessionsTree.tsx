@@ -1,12 +1,15 @@
 import { recentSessionActivityAtom } from "../../atoms/recent-session-atoms";
 import { Ellipsis } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAtomValue } from "jotai";
-import { sessionStatusDotClass } from "../../agentListDisplay";
+import { useAtomValue, useSetAtom } from "jotai";
 import { sessionRecordToSummary } from "../../atoms";
+import { sessionAttentionByIdAtom, sessionScrollToLatestRequestAtom } from "../../atoms/session-attention-atoms";
 import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
 import { hasPendingAskForSession } from "../../utils/askUi";
 import { t } from "../../i18n";
+import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
+import { SessionAttentionLabel } from "../session/SessionAttentionLabel";
+import { ActivityFilterBar } from "./ActivityFilterBar";
 import { cn } from "../../lib/utils";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
@@ -17,7 +20,7 @@ import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { formatRelativeTime } from "../../utils/relativeTime";
-import { RECENT_SESSIONS_INITIAL_VISIBLE, collectActiveSessionRows, collectRecentActivityRows, growRecentVisible } from "./activitySessionsModel";
+import { RECENT_SESSIONS_INITIAL_VISIBLE, collectActiveSessionRows, collectAttentionActivityRows, collectRecentActivityRows, countAttentionActivity, growRecentVisible, matchesActivityFilter, type ActivityFilter } from "./activitySessionsModel";
 import { RecentSessionsSection } from "./RecentSessionsSection";
 
 /** 活动页行样式：与 SessionTree 会话行同尺寸同圆角，但选中底不需要（活动页行不持久）。 */
@@ -36,9 +39,8 @@ const rowMoreActionsClass = "row-more-actions pointer-events-none absolute top-1
  * error/closed 是运行失败或已停止但 Tab 未关——保留它们才能从活动页直接重启/重载失败会话，
  * 而不是让失败会话在活动页消失、只能去 chats 历史页翻。
  *
- * 布局：上下两个独立滚动区（上半活动行 / 下半「最近会话」）——用户要求最近会话固定
- * 在侧栏面板下半部分。活动行可能很多，若共用一个滚动容器，要一路滚到底才能看到
- * 最近会话；反过来「加载更多」也会把活动行顶出视野。两半各占 1fr、各自滚动。
+ * 布局：筛选条固定在上方；「全部」时上下两个独立滚动区（上半活动行 / 下半「最近会话」）。
+ * 待回答 / 未读结果 / 运行中筛选改为跨项目会话列表，进程退出后仍能从摘要找到会话。
  */
 export function ActiveSessionsTree(props: { controller: SidebarController; actions: SidebarActions; currentSessionId?: string; recentOnly?: boolean }) {
 	const { controller } = props;
@@ -85,6 +87,17 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 		ensureCatalogsLoaded(pending);
 	}, [ensureCatalogsLoaded, prewarmProjectIds]);
 
+	const attentionById = useAtomValue(sessionAttentionByIdAtom);
+	const requestScrollToLatest = useSetAtom(sessionScrollToLatestRequestAtom);
+	// 状态摘要 → 活动行：待回答/未读结果不依赖进程是否仍在，筛选入口据此跨项目列出会话。
+	const attentionRows = useMemo(() => collectAttentionActivityRows(controller.catalog, attentionById), [controller.catalog, attentionById]);
+	const attentionCounts = useMemo(() => countAttentionActivity(attentionRows), [attentionRows]);
+	const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+	const filteredAttentionRows = useMemo(() => attentionRows.filter((row) => matchesActivityFilter(row, activityFilter)), [attentionRows, activityFilter]);
+	const liveSessionIds = useMemo(() => new Set(liveRows.map((row) => row.record?.id).filter((id): id is string => Boolean(id))), [liveRows]);
+	// 进程已结束但仍有未读结果/待回答记录的会话：补在活动行下方，保证退出后仍能从这里找到。
+	const detachedAttentionRows = useMemo(() => attentionRows.filter((row) => !liveSessionIds.has(row.session.id)), [attentionRows, liveSessionIds]);
+
 	const hasRecent = recent.rows.length > 0;
 	if (props.recentOnly)
 		return (
@@ -104,7 +117,7 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 
 	// 两段都空才是真正的空态；只有活动区空时用一行提示顶替，
 	// 不能让 h-full 空态占满高度把下方「最近」挤出视野。
-	if (liveRows.length === 0 && !hasRecent) {
+	if (liveRows.length === 0 && !hasRecent && attentionRows.length === 0) {
 		return (
 			<div className="active-sessions-empty flex h-full min-h-0 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
 				<div className="text-caption text-muted-foreground">{t("app.sidebarActiveEmpty")}</div>
@@ -113,82 +126,10 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 	}
 
 	return (
-		/* h-full：两半必须在侧栏可视高度内分配，否则下半个滚动区会被内容顶出屏幕。 */
+		/* h-full：筛选条固定，列表区在侧栏可视高度内滚动。 */
 		<div className="active-sessions-pane flex h-full min-h-0 flex-col">
-			{/* 上半：活动行。行数多时只滚这里，「最近会话」不会被挤下去。 */}
-			<div className="active-sessions-list flex min-h-0 flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
-				{liveRows.length === 0 ? <div className="px-2 py-1.5 text-caption text-muted-foreground">{t("app.sidebarActiveEmpty")}</div> : null}
-				{liveRows.map(({ agent, projectId, record, sortAt }) => {
-					const sessionId = record?.id;
-					const selected = sessionId === props.currentSessionId;
-					const summary = record ? sessionRecordToSummary(record) : undefined;
-					const displayTitle = summary?.name || agent.title;
-					const project = controller.catalog.projects.find((p) => p.id === projectId);
-					const pendingAsk = hasPendingAskForSession(sessionId, sessionRuntimeUiById);
-					// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
-					const openSession = (tabMode?: "preview" | "permanent") => {
-						if (sessionId) void props.actions.sessions.open(projectId, sessionId, tabMode);
-					};
-					return (
-						<div
-							key={agent.id}
-							className="group/row relative mt-0.5 flex min-h-8 items-center"
-							onContextMenu={(event) => {
-								event.preventDefault();
-								void controller.openMenu({ kind: "agent", agentId: agent.id, x: event.clientX, y: event.clientY });
-							}}
-						>
-							<SessionHoverCard session={record ?? summary} title={displayTitle} projectName={project?.name} status={agent.status} disabled={Boolean(controller.menu)}>
-								<button
-									type="button"
-									className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
-									onClick={() => openSession()}
-									onDoubleClick={props.actions.sessions.simpleNavigation ? undefined : () => openSession("permanent")}
-									draggable={Boolean(sessionId)}
-									onDragStart={(event) => {
-										if (!sessionId) return;
-										event.dataTransfer.effectAllowed = "move";
-										event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
-										event.dataTransfer.setData("text/plain", sessionId);
-										props.actions.sessions.beginDrag?.(sessionId);
-									}}
-									onDragEnd={() => props.actions.sessions.endDrag?.()}
-								>
-									<span className={cn("size-1.5 shrink-0 rounded-full", sessionStatusDotClass(agent.status))} aria-hidden="true" />
-									<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
-										<div className="conversation-title flex min-w-0 items-center gap-1.5">
-											{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
-											<TitleScrollText text={displayTitle} className="font-medium" />
-											<SessionBackendMark backend={agent.backend} />
-											{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
-											{pendingAsk && <PendingAskBadge count={1} />}
-											{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
-											<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">{formatRelativeTime(sortAt)}</span>
-										</div>
-									</div>
-								</button>
-							</SessionHoverCard>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								className={cn(rowMoreActionsClass, controller.menu?.kind === "agent" && controller.menu.agentId === agent.id && "pointer-events-auto opacity-100")}
-								aria-label={t("sidebar.moreActions")}
-								title={t("sidebar.moreActions")}
-								onClick={(event) => {
-									event.stopPropagation();
-									const rect = event.currentTarget.getBoundingClientRect();
-									void controller.openMenu({ kind: "agent", agentId: agent.id, x: rect.right, y: rect.bottom });
-								}}
-							>
-								<Ellipsis size={14} aria-hidden="true" />
-							</Button>
-						</div>
-					);
-				})}
-			</div>
-			{/* 下半：最近会话常驻面板下半部分，自带滚动（与上半各自独立）。 */}
-			{hasRecent && (
+			<ActivityFilterBar value={activityFilter} counts={attentionCounts} onChange={setActivityFilter} />
+			{activityFilter === "recent" ? (
 				<div className="recent-sessions-pane flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
 					<RecentSessionsSection
 						controller={controller}
@@ -201,6 +142,164 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 						onCollapse={() => setRecentVisibleCount(RECENT_SESSIONS_INITIAL_VISIBLE)}
 					/>
 				</div>
+			) : activityFilter !== "all" ? (
+				<div className="activity-filtered-sessions flex min-h-0 flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+					{filteredAttentionRows.length === 0 ? (
+						<div className="px-2 py-1.5 text-caption text-muted-foreground">{t(activityFilter === "pending" ? "sidebar.activityEmptyPending" : activityFilter === "unread" ? "sidebar.activityEmptyUnread" : "sidebar.activityEmptyRunning")}</div>
+					) : (
+						filteredAttentionRows.map((row) => {
+							const selected = row.session.id === props.currentSessionId;
+							const summary = sessionRecordToSummary(row.session);
+							const title = summary?.name || row.session.title;
+							const project = controller.catalog.projects.find((item) => item.id === row.projectId);
+							return (
+								<SessionHoverCard key={row.session.id} session={row.session} title={title} projectName={project?.name} status={row.agent?.status} disabled={Boolean(controller.menu)}>
+									<button
+										type="button"
+										className={cn(activeRowClass, "min-h-8", selected && "bg-bg-active text-foreground")}
+										title={t("sidebar.activityOpenHint")}
+										onClick={() => {
+											// 未读结果：打开后定位到最新结果，再按「实际可见」确认已读。
+											if (row.attention.completionUnread) requestScrollToLatest({ sessionId: row.session.id, at: Date.now() });
+											void props.actions.sessions.open(row.projectId, row.session.id);
+										}}
+									>
+										<SessionActivityIndicator status={row.agent?.status} sessionId={row.session.id} />
+										<div className="conversation-body min-w-0 flex-1">
+											<div className="conversation-title flex min-w-0 items-center gap-1.5">
+												<TitleScrollText text={title} className="font-medium" />
+												<SessionAttentionLabel sessionId={row.session.id} attention={row.attention} status={row.agent?.status} />
+												<span className="shrink-0 text-caption tabular-nums text-muted-foreground">{formatRelativeTime(row.sortAt)}</span>
+											</div>
+										</div>
+									</button>
+								</SessionHoverCard>
+							);
+						})
+					)}
+				</div>
+			) : (
+				<>
+					{/* 上半：活动行。行数多时只滚这里，「最近会话」不会被挤下去。 */}
+					<div className="active-sessions-list flex min-h-0 flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+						{liveRows.length === 0 && detachedAttentionRows.length === 0 ? <div className="px-2 py-1.5 text-caption text-muted-foreground">{t("app.sidebarActiveEmpty")}</div> : null}
+						{liveRows.map(({ agent, projectId, record, sortAt }) => {
+							const sessionId = record?.id;
+							const selected = sessionId === props.currentSessionId;
+							const summary = record ? sessionRecordToSummary(record) : undefined;
+							const displayTitle = summary?.name || agent.title;
+							const project = controller.catalog.projects.find((p) => p.id === projectId);
+							const pendingAsk = hasPendingAskForSession(sessionId, sessionRuntimeUiById);
+							const attention = sessionId ? attentionById[sessionId] : undefined;
+							// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
+							const openSession = (tabMode?: "preview" | "permanent") => {
+								if (sessionId) void props.actions.sessions.open(projectId, sessionId, tabMode);
+							};
+							return (
+								<div
+									key={agent.id}
+									className="group/row relative mt-0.5 flex min-h-8 items-center"
+									onContextMenu={(event) => {
+										event.preventDefault();
+										void controller.openMenu({ kind: "agent", agentId: agent.id, x: event.clientX, y: event.clientY });
+									}}
+								>
+									<SessionHoverCard session={record ?? summary} title={displayTitle} projectName={project?.name} status={agent.status} disabled={Boolean(controller.menu)}>
+										<button
+											type="button"
+											className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
+											onClick={() => openSession()}
+											onDoubleClick={props.actions.sessions.simpleNavigation ? undefined : () => openSession("permanent")}
+											draggable={Boolean(sessionId)}
+											onDragStart={(event) => {
+												if (!sessionId) return;
+												event.dataTransfer.effectAllowed = "move";
+												event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
+												event.dataTransfer.setData("text/plain", sessionId);
+												props.actions.sessions.beginDrag?.(sessionId);
+											}}
+											onDragEnd={() => props.actions.sessions.endDrag?.()}
+										>
+											<SessionActivityIndicator status={agent.status} sessionId={sessionId} />
+											<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
+												<div className="conversation-title flex min-w-0 items-center gap-1.5">
+													{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
+													<TitleScrollText text={displayTitle} className="font-medium" />
+													<SessionBackendMark backend={agent.backend} />
+													{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
+													{pendingAsk && <PendingAskBadge count={1} />}
+													{!pendingAsk && <SessionAttentionLabel sessionId={sessionId} attention={attention} status={agent.status} />}
+													{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
+													<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">{formatRelativeTime(sortAt)}</span>
+												</div>
+											</div>
+										</button>
+									</SessionHoverCard>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										className={cn(rowMoreActionsClass, controller.menu?.kind === "agent" && controller.menu.agentId === agent.id && "pointer-events-auto opacity-100")}
+										aria-label={t("sidebar.moreActions")}
+										title={t("sidebar.moreActions")}
+										onClick={(event) => {
+											event.stopPropagation();
+											const rect = event.currentTarget.getBoundingClientRect();
+											void controller.openMenu({ kind: "agent", agentId: agent.id, x: rect.right, y: rect.bottom });
+										}}
+									>
+										<Ellipsis size={14} aria-hidden="true" />
+									</Button>
+								</div>
+							);
+						})}
+						{detachedAttentionRows.map((row) => {
+							const selected = row.session.id === props.currentSessionId;
+							const summary = sessionRecordToSummary(row.session);
+							const title = summary?.name || row.session.title;
+							const project = controller.catalog.projects.find((item) => item.id === row.projectId);
+							return (
+								<div key={row.session.id} className="group/row relative mt-0.5 flex min-h-8 items-center">
+									<SessionHoverCard session={row.session} title={title} projectName={project?.name} status={row.agent?.status} disabled={Boolean(controller.menu)}>
+										<button
+											type="button"
+											className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
+											title={t("sidebar.activityOpenHint")}
+											onClick={() => {
+												if (row.attention.completionUnread) requestScrollToLatest({ sessionId: row.session.id, at: Date.now() });
+												void props.actions.sessions.open(row.projectId, row.session.id);
+											}}
+										>
+											<SessionActivityIndicator status={row.agent?.status} sessionId={row.session.id} />
+											<div className="conversation-body min-w-0 flex-1">
+												<div className="conversation-title flex min-w-0 items-center gap-1.5">
+													<TitleScrollText text={title} className="font-medium" />
+													<SessionAttentionLabel sessionId={row.session.id} attention={row.attention} status={row.agent?.status} />
+													<span className="shrink-0 text-caption tabular-nums text-muted-foreground">{formatRelativeTime(row.sortAt)}</span>
+												</div>
+											</div>
+										</button>
+									</SessionHoverCard>
+								</div>
+							);
+						})}
+					</div>
+					{/* 下半：最近会话常驻面板下半部分，自带滚动（与上半各自独立）。 */}
+					{hasRecent && (
+						<div className="recent-sessions-pane flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+							<RecentSessionsSection
+								controller={controller}
+								actions={props.actions}
+								currentSessionId={props.currentSessionId}
+								rows={recent.rows}
+								totalCount={recent.totalCount}
+								visibleCount={recentVisibleCount}
+								onLoadMore={() => setRecentVisibleCount((current) => growRecentVisible(current, recent.totalCount))}
+								onCollapse={() => setRecentVisibleCount(RECENT_SESSIONS_INITIAL_VISIBLE)}
+							/>
+						</div>
+					)}
+				</>
 			)}
 		</div>
 	);

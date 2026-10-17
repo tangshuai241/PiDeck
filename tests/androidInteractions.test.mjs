@@ -40,6 +40,7 @@ function harness(options = {}) {
 		runtime,
 		agents: { list: () => [{ id: "a", status: options.busy ? "running" : "idle" }], getDisplayMessages: () => [] },
 		projects: { get: () => ({ name: "p" }) },
+		attention: { summaryFor: () => ({ sessionId: "s", running: false, pendingQuestionCount: 0, completionUnread: false }), subscribe: () => () => undefined },
 		getDocuments: () => null,
 		sessionForkCommands: {
 			forkRuntimeSession: async (...args) => {

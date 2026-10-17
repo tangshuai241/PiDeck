@@ -1,6 +1,6 @@
 import { isRecord } from "./crypto.ts";
 import { parseCursor } from "./cursor.ts";
-import type { RemoteArtifact, RemoteMessage, RemoteQuestion, RemoteSession, RemoteSnapshot, RuntimeTarget } from "./types.ts";
+import type { RemoteArtifact, RemoteAttention, RemoteMessage, RemoteQuestion, RemoteSession, RemoteSnapshot, RuntimeTarget } from "./types.ts";
 
 /** Validate bounded host projections before they enter mobile state. */
 export function parseSessions(value: unknown): RemoteSession[] {
@@ -18,6 +18,7 @@ export function parseSessions(value: unknown): RemoteSession[] {
 			...(typeof item.projectPath === "string" ? { projectPath: item.projectPath } : {}),
 			...(typeof item.model === "string" ? { model: item.model } : {}),
 			...(typeof item.thinkingLevel === "string" ? { thinkingLevel: item.thinkingLevel } : {}),
+			...(item.attention ? { attention: parseRemoteAttention(item.attention) } : {}),
 		};
 	});
 }
@@ -60,9 +61,56 @@ export function parseSnapshot(value: unknown): RemoteSnapshot {
 	});
 	const questions = value.questions.map((item: unknown): RemoteQuestion => {
 		if (!isRecord(item) || typeof item.requestId !== "string" || typeof item.method !== "string" || typeof item.title !== "string" || (item.options !== undefined && (!Array.isArray(item.options) || !item.options.every((option) => typeof option === "string")))) throw new Error("INVALID_QUESTION");
-		return { ...parseTarget(item), requestId: item.requestId, method: item.method, title: item.title, ...(Array.isArray(item.options) ? { options: item.options.filter((option): option is string => typeof option === "string") } : {}) };
+		const batchQuestions = Array.isArray(item.batchQuestions) ? item.batchQuestions.map(parseBatchQuestion) : undefined;
+		return {
+			...parseTarget(item),
+			requestId: item.requestId,
+			method: item.method,
+			title: item.title,
+			...(Array.isArray(item.options) ? { options: item.options.filter((option): option is string => typeof option === "string") } : {}),
+			...(typeof item.placeholder === "string" ? { placeholder: item.placeholder } : {}),
+			...(typeof item.prefill === "string" ? { prefill: item.prefill } : {}),
+			...(item.allowOther === true ? { allowOther: true } : {}),
+			...(batchQuestions ? { batchQuestions } : {}),
+			...(item.batchReview === true ? { batchReview: true } : {}),
+		};
 	});
-	return { sessionId: value.sessionId, messages, questions, busy: value.busy, revision: value.revision, hasOlder: value.hasOlder, ...(value.target ? { target: parseTarget(value.target) } : {}), ...(value.cursor ? { cursor: parseCursor(value.cursor) } : {}) };
+	return { sessionId: value.sessionId, messages, questions, busy: value.busy, revision: value.revision, hasOlder: value.hasOlder, ...(value.target ? { target: parseTarget(value.target) } : {}), ...(value.cursor ? { cursor: parseCursor(value.cursor) } : {}), ...(value.attention ? { attention: parseRemoteAttention(value.attention) } : {}) };
+}
+
+function parseBatchQuestion(item: unknown): NonNullable<RemoteQuestion["batchQuestions"]>[number] {
+	if (!isRecord(item) || typeof item.id !== "string" || typeof item.question !== "string" || (item.type !== "select" && item.type !== "multi_select" && item.type !== "confirm" && item.type !== "input" && item.type !== "editor")) throw new Error("INVALID_QUESTION");
+	const options = Array.isArray(item.options)
+		? item.options
+				.map((option) => (typeof option === "string" ? option : isRecord(option) && typeof option.label === "string" ? { label: option.label, ...(typeof option.value === "string" ? { value: option.value } : {}), ...(typeof option.description === "string" ? { description: option.description } : {}) } : undefined))
+				.filter((option): option is NonNullable<typeof option> => option !== undefined)
+		: undefined;
+	return {
+		id: item.id,
+		type: item.type,
+		question: item.question,
+		...(options ? { options } : {}),
+		...(item.allowOther === true ? { allowOther: true } : {}),
+		...(typeof item.placeholder === "string" ? { placeholder: item.placeholder } : {}),
+		...(typeof item.prefill === "string" ? { prefill: item.prefill } : {}),
+	};
+}
+
+function isCompletionOutcome(value: unknown): value is "succeeded" | "failed" | "aborted" | "interrupted" {
+	return value === "succeeded" || value === "failed" || value === "aborted" || value === "interrupted";
+}
+
+export function parseRemoteAttention(value: unknown): RemoteAttention {
+	if (!isRecord(value) || typeof value.running !== "boolean" || typeof value.questionCount !== "number" || !Number.isSafeInteger(value.questionCount) || typeof value.completionUnread !== "boolean") throw new Error("INVALID_ATTENTION");
+	const raw = value.completion;
+	if (raw !== undefined && (!isRecord(raw) || typeof raw.id !== "string" || !isCompletionOutcome(raw.outcome) || typeof raw.finishedAt !== "number")) throw new Error("INVALID_ATTENTION");
+	return {
+		running: value.running,
+		questionCount: value.questionCount,
+		...(typeof value.question === "string" ? { question: value.question } : {}),
+		...(isRecord(raw) && typeof raw.id === "string" && isCompletionOutcome(raw.outcome) && typeof raw.finishedAt === "number" ? { completion: { id: raw.id, outcome: raw.outcome, finishedAt: raw.finishedAt } } : {}),
+		completionUnread: value.completionUnread,
+	};
 }
 
 export function parseArtifacts(value: unknown): RemoteArtifact[] {

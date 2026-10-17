@@ -61,6 +61,7 @@ import { useArchMismatchNotice } from "./hooks/useArchMismatchNotice";
 
 import { useModelsVerifyNotifier } from "./hooks/useModelsVerifyNotifier";
 import { useBackgroundAskPatrol } from "./hooks/useBackgroundAskPatrol";
+import { useSessionAttentionSync } from "./atoms/session-attention-atoms";
 
 import { appDisplayNameAtom, customLogoAtom, logoStyleAtom } from "./atoms/app-ui-atoms";
 import { LOGO_STYLE_STORAGE_KEY, resolveLogoStyle } from "./components/app/piTuiLogoData";
@@ -2177,6 +2178,8 @@ export function App() {
 
 	// M7：后台 Ask 巡检全应用单点挂载（原寄生在每栏 runtime 控制器，全局订阅拖垮分屏）
 	useBackgroundAskPatrol({ onFocusSession: jumpToAskSession });
+	// 会话状态摘要：启动拉取 + 订阅主进程推送（运行/待回答/未读，桌面与手机共用同一份）。
+	useSessionAttentionSync();
 
 	// 切会话过渡：会话区整体做一次 160ms 淡入+微位移（Web Animations API，
 	// 不卸载树/不动布局，避免整树重建的卡顿与瞬间替换的生硬）；

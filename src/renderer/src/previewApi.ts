@@ -624,6 +624,10 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		sessions: {
 			list: async () => getSessions(),
+			// 预览模式无主进程状态摘要：空列表 + 退订空实现满足接口契约
+			attentionList: async () => [],
+			markAttentionRead: async () => ({ sessionId: "", running: false, pendingQuestionCount: 0, completionUnread: false }),
+			onAttentionChanged: () => () => undefined,
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			// 预览模式无主进程配置可解析：无启动默认（底栏不预选，不影响其它功能）
 			resolveLaunchDefaults: async () => ({}),
